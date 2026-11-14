@@ -106,6 +106,11 @@ Research tab is that record.
   journaled, interrupted intents cancelled, half-run experiments marked interrupted (never resumed
   on mixed data), missed bars **not** replayed, order TTLs, and per-venue backoff when a data
   provider is down.
+* **Stock splits**: every bar refresh re-fetches recently stored bars. If the provider has re-adjusted
+  history, the stored history is replaced. When the change matches a standard split ratio, every
+  holding's share count, cost basis and stop reference are adjusted atomically (value unchanged),
+  open orders in that symbol are cancelled for re-sizing, and the integrity rebuild replays the split.
+  Dividend-sized changes only refresh history; unexplained jumps are flagged and leave positions alone.
 * **Stale data stops dependent actions**: missing or old bars mean no signal evaluation for that
   strategy, and stale quotes mean no fill. Both are journaled once per transition.
 * **Sandbox for model-written code**: AST allowlist (no imports, files, dunders or arbitrary numpy
@@ -136,9 +141,10 @@ Research tab is that record.
   so spreads can be wider or one-sided. The simulator then uses a fresh last trade plus a modeled
   spread and labels the fill accordingly. Historical spreads are modeled, not observed. Coinbase
   volume (one venue) is used for liquidity, which is conservative.
-* **Simplifications.** Daily NASDAQ bars only; stops are checked on bar closes; no corporate-action
-  adjustment of *live* positions (a split while holding would distort marks); dividends on live
-  positions are ignored; queue position and intraday auctions are not modeled.
+* **Simplifications.** Daily NASDAQ bars only; stops are checked on bar closes; dividends on live
+  positions are not credited; queue position and intraday auctions are not modeled. Splits are
+  *inferred* from re-adjusted price history rather than read from a corporate-actions feed, and only
+  standard ratios are applied automatically (anything else is flagged for you).
 * **Cost parameters are assumptions.** Verify the SEC Section 31 rate (it changes) and your fee tier.
 
 ## Setup
@@ -236,8 +242,9 @@ runs.
 ## What was verified while building this, and what wasn't
 
 **Verified**
-* **Automated tests: 69 pass**, covering:
-  * ledger math and integrity checks
+* **Automated tests: 73 pass**, covering:
+  * ledger math and integrity checks, including split replay
+  * split, dividend and unexplained re-adjustment of price history
   * every risk rule
   * execution timing: latency, fresh-quote requirement, NASDAQ off-hours queuing, TTL expiry, liquidity cap, wide-quote fallback, emergency cancel
   * duplicate-order prevention, restart recovery, worker-lock takeover
