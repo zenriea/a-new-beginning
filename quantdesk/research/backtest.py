@@ -1,0 +1,209 @@
+"""Event-driven backtester (long-only, cash account, next-bar execution).
+
+Timing: signals use data up to the CLOSE of bar t; orders execute at the OPEN of bar
+t+1+delay. Fills pay half-spread + square-root impact + venue fees. No position is ever
+opened with information from the bar it trades on.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from ..trading import costs as C
+from ..venues import VENUES
+from . import metrics
+from .strategy import PosState, Signals, entry_weight, step
+
+
+@dataclass
+class BTResult:
+    equity: np.ndarray
+    ts: np.ndarray
+    trades: list[dict]
+    metrics: dict
+    exposure: float
+    fees_paid: float
+    slippage_paid: float
+    open_positions: int
+    benchmark: dict = field(default_factory=dict)
+
+
+def liquidity_arrays(panel: dict, venue: str, lookback: int = 20):
+    """Causal ADV (USD/day) and daily sigma, using bars strictly BEFORE t."""
+    v = VENUES[venue]
+    bpd = 1.0 if v.timeframe == "1d" else 24.0
+    close, vol = panel["close"], panel["volume"]
+    dollar = close * vol
+    T, N = close.shape
+    adv = np.full((T, N), np.nan)
+    sig = np.full((T, N), np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lr = np.log(close[1:] / close[:-1])
+    lr = np.vstack([np.full((1, N), np.nan), lr])
+    for t in range(lookback + 1, T):
+        win_d = dollar[t - lookback:t]
+        win_r = lr[t - lookback:t]
+        adv[t] = np.nanmean(win_d, axis=0) * bpd
+        sig[t] = np.nanstd(win_r, axis=0, ddof=1) * math.sqrt(bpd)
+    return adv, sig
+
+
+def run(spec: dict, panel: dict, sig: Signals, costs_cfg: dict, start: int, end: int,
+        capital: float = 100_000.0, delay: int = 0, liquidity=None,
+        max_participation: float = 0.01) -> BTResult:
+    venue = spec["venue"]
+    v = VENUES[venue]
+    syms = panel["symbols"]
+    N = len(syms)
+    opn, cls = panel["open"], panel["close"]
+    adv, sigma = liquidity if liquidity is not None else liquidity_arrays(panel, venue)
+    half_spread = costs_cfg["backtest_half_spread_bps"]
+    whole = v.qty_decimals == 0
+    cols = [syms.index(s) for s in spec["universe"] if s in syms]
+
+    states = [PosState() for _ in range(N)]
+    cash = capital
+    qty = np.zeros(N)
+    cost_basis = np.zeros(N)       # total cash paid incl. fees, for trade PnL
+    entry_info: dict[int, dict] = {}
+    pending: dict[int, list] = {}  # bar index -> [(col, action, reason, weight)]
+    trades: list[dict] = []
+    equity = []
+    exposure = []
+    fees_paid = 0.0
+    slip_paid = 0.0
+    last_mark = np.zeros(N)
+
+    for t in range(start, end):
+        # 1) execute orders due at this bar's open
+        for col, action, reason, w in pending.pop(t, []):
+            px_ref = opn[t, col]
+            if not np.isfinite(px_ref):
+                pending.setdefault(t + 1, []).append((col, action, reason, w))
+                continue
+            if action == "buy" and qty[col] == 0:
+                eq_prev = equity[-1] if equity else capital
+                notional = min(w * eq_prev, cash * 0.995)
+                if np.isfinite(adv[t, col]):
+                    notional = min(notional, max_participation * adv[t, col])  # same cap as the live simulator
+                if notional <= 1.0:
+                    states[col].in_position = False
+                    continue
+                bps = half_spread + C.impact_bps(notional, adv[t, col], sigma[t, col], costs_cfg)
+                px = C.apply_slippage("buy", px_ref, bps)
+                q = notional / px
+                if whole:
+                    q = math.floor(q)
+                if q <= 0:
+                    states[col].in_position = False
+                    continue
+                fee = C.fees(venue, "buy", q, px, costs_cfg)
+                if q * px + fee > cash:
+                    q = math.floor((cash - fee) / px) if whole else (cash - fee) / px
+                    if q <= 0:
+                        states[col].in_position = False
+                        continue
+                cash -= q * px + fee
+                qty[col] = q
+                cost_basis[col] = q * px + fee
+                fees_paid += fee
+                slip_paid += q * (px - px_ref)
+                states[col].entry_price = px
+                entry_info[col] = {"symbol": syms[col], "entry_ts": int(panel["ts"][t]), "entry_px": px,
+                                   "qty": q, "entry_bar": t}
+            elif action == "sell" and qty[col] > 0:
+                q = qty[col]
+                notional = q * px_ref
+                bps = half_spread + C.impact_bps(notional, adv[t, col], sigma[t, col], costs_cfg)
+                px = C.apply_slippage("sell", px_ref, bps)
+                fee = C.fees(venue, "sell", q, px, costs_cfg)
+                proceeds = q * px - fee
+                cash += proceeds
+                fees_paid += fee
+                slip_paid += q * (px_ref - px)
+                info = entry_info.pop(col, {})
+                pnl = proceeds - cost_basis[col]
+                trades.append({**info, "exit_ts": int(panel["ts"][t]), "exit_px": px, "reason": reason,
+                               "pnl": float(pnl), "return": float(pnl / cost_basis[col]) if cost_basis[col] else 0.0,
+                               "bars": t - info.get("entry_bar", t)})
+                qty[col] = 0
+                cost_basis[col] = 0
+        # 2) mark to market at the close
+        # carry the last finite close for missing bars (past data only)
+        mark = np.where(np.isfinite(cls[t]), cls[t], last_mark)
+        last_mark = mark
+        pos_val = float(np.nansum(qty * np.nan_to_num(mark)))
+        eq = cash + pos_val
+        equity.append(eq)
+        exposure.append(pos_val / eq if eq > 0 else 0.0)
+        # 3) decide at the close; act at t+1+delay
+        if t >= end - 1:
+            break
+        sub = StepView(sig, cols)
+        sub_states = [states[c] for c in cols]
+        res = step(spec, sub_states, t, sub, cls[t, cols])
+        due = t + 1 + delay
+        if due >= end:
+            continue
+        for k, reason in res.exit:
+            col = cols[k]
+            pending.setdefault(due, []).append((col, "sell", reason, 0.0))
+        for k in res.enter:
+            col = cols[k]
+            w = entry_weight(spec, sig.vol[t, col])
+            if w <= 0:
+                states[col].in_position = False
+                continue
+            pending.setdefault(due, []).append((col, "buy", "entry", w))
+
+    eq_arr = np.array(equity)
+    m = metrics.perf(eq_arr, v.periods_per_year)
+    m.update(metrics.trade_stats(trades))
+    m["exposure"] = float(np.mean(exposure)) if exposure else 0.0
+    m["fees_paid"] = float(fees_paid)
+    m["slippage_paid"] = float(slip_paid)
+    m["cost_drag"] = float((fees_paid + slip_paid) / capital)
+    return BTResult(eq_arr, panel["ts"][start:start + len(equity)], trades, m, m["exposure"],
+                    fees_paid, slip_paid, int((qty > 0).sum()))
+
+
+class StepView:
+    """Column-subset view of Signals so the state machine sees only the strategy universe."""
+
+    def __init__(self, sig: Signals, cols: list[int]):
+        self.entry = sig.entry[:, cols]
+        self.exit = sig.exit[:, cols]
+        self.score = sig.score[:, cols] if sig.score is not None else None
+        self.vol = sig.vol[:, cols]
+
+
+def buy_and_hold(panel: dict, symbols: list[str], start: int, end: int, costs_cfg: dict,
+                 venue: str, capital: float = 100_000.0) -> dict:
+    """Equal-weight buy-and-hold benchmark over the same window (pays entry costs)."""
+    syms = panel["symbols"]
+    cols = [syms.index(s) for s in symbols if s in syms]
+    opn, cls = panel["open"], panel["close"]
+    if not cols or end - start < 2:
+        return {}
+    alloc = capital / len(cols)
+    qty = {}
+    for c in cols:
+        px = opn[start, c] if np.isfinite(opn[start, c]) else cls[start, c]
+        if not np.isfinite(px):
+            continue
+        px = px * (1 + (costs_cfg["backtest_half_spread_bps"] + costs_cfg["base_slippage_bps"]) / 1e4)
+        fee = C.fees(venue, "buy", alloc / px, px, costs_cfg)
+        qty[c] = (alloc - fee) / px
+    eq = []
+    last = {c: np.nan for c in cols}
+    for t in range(start, end):
+        val = capital - alloc * len(qty)
+        for c, q in qty.items():
+            if np.isfinite(cls[t, c]):
+                last[c] = cls[t, c]
+            val += q * (last[c] if np.isfinite(last[c]) else 0)
+        eq.append(val)
+    m = metrics.perf(np.array(eq), VENUES[venue].periods_per_year)
+    return m

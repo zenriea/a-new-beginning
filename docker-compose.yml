@@ -1,0 +1,74 @@
+# docker compose up -d --build            (UI on http://127.0.0.1:8000, reach it via SSH tunnel/VPN)
+# docker compose --profile tls up -d      (adds Caddy with automatic HTTPS for QD_DOMAIN)
+x-common: &common
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  volumes:
+    - qd-data:/data
+
+services:
+  api:
+    <<: *common
+    command: ["python", "-m", "quantdesk.api.app"]
+    environment:
+      QD_BIND_HOST: 0.0.0.0
+      QD_SANDBOX_MODE: spool
+      QD_SANDBOX_SPOOL: /spool
+      QD_TRUSTED_PROXIES: "*"
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    <<: *common
+    command: ["python", "-m", "quantdesk.worker"]
+    stop_grace_period: 60s
+    environment:
+      QD_SANDBOX_MODE: spool
+      QD_SANDBOX_SPOOL: /spool
+    volumes:
+      - qd-data:/data
+      - qd-spool:/spool
+
+  # Runs model-generated strategy code. No network, no secrets, read-only filesystem,
+  # CPU/memory/process limits. Talks to the worker only through the spool volume.
+  sandbox:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "quantdesk.research.sandbox_service", "--spool", "/spool"]
+    network_mode: none
+    read_only: true
+    environment:
+      QD_DATA_DIR: /tmp
+    tmpfs:
+      - /tmp:size=64m
+    volumes:
+      - qd-spool:/spool
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  caddy:
+    image: caddy:2.8
+    profiles: ["tls"]
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      QD_DOMAIN: ${QD_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [api]
+
+volumes:
+  qd-data:
+  qd-spool:
+  caddy-data:

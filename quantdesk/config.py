@@ -1,0 +1,250 @@
+"""Process configuration.
+
+Two layers:
+  * ``Config`` - static, read once from environment variables / ``.env``. Holds secrets,
+    paths and *hard ceilings* that no runtime setting can exceed.
+  * Operator settings (risk limits, schedules, budget, universe) live in the database
+    ``settings`` table and are edited only through the authenticated operator API.
+    Defaults for them are defined in ``DEFAULT_SETTINGS`` below. The agent code has no
+    write path to that table (see quantdesk/settings.py).
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal .env loader (KEY=VALUE lines). Existing env vars win."""
+    if not path.exists():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _env_float(name: str, default: float) -> float:
+    v = _env(name)
+    return float(v) if v else default
+
+
+def _env_int(name: str, default: int) -> int:
+    v = _env(name)
+    return int(v) if v else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    v = _env(name).lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+@dataclass(frozen=True)
+class Config:
+    data_dir: Path
+    db_path: Path
+    # --- AI ---
+    anthropic_api_key: str
+    llm_model: str
+    llm_effort: str
+    llm_fallbacks: bool
+    llm_knowledge_cutoff: str  # ISO date; used for leakage disclosure
+    # --- market data ---
+    alpaca_key_id: str
+    alpaca_secret_key: str
+    alpaca_feed: str  # realtime quote feed: iex (free) or sip (paid)
+    alpaca_hist_feed: str  # historical bars feed
+    market_data_mode: str  # "live" or "synthetic"
+    # --- web ---
+    admin_password: str
+    session_secret: str
+    bind_host: str
+    bind_port: int
+    cookie_secure: bool
+    # --- sandbox ---
+    sandbox_mode: str  # "local" or "spool"
+    sandbox_spool_dir: Path
+    # --- hard ceilings (cannot be exceeded by operator settings either) ---
+    ceiling_max_position_pct: float = 0.35
+    ceiling_max_gross_pct: float = 1.0  # spot, no leverage
+    ceiling_max_strategy_pct: float = 0.5
+    ceiling_max_order_usd: float = 50_000.0
+    ceiling_monthly_llm_usd: float = 500.0
+    initial_capital: float = 100_000.0
+    extra: dict = field(default_factory=dict)
+
+    @property
+    def demo_llm(self) -> bool:
+        """True when no API key is configured: a deterministic rules analyst stands in."""
+        return not self.anthropic_api_key
+
+    @property
+    def alpaca_configured(self) -> bool:
+        return bool(self.alpaca_key_id and self.alpaca_secret_key)
+
+
+_CONFIG: Config | None = None
+
+
+def load_config(reload: bool = False, **overrides) -> Config:
+    global _CONFIG
+    if _CONFIG is not None and not reload and not overrides:
+        return _CONFIG
+    root = Path(__file__).resolve().parent.parent
+    _load_dotenv(Path(_env("QD_ENV_FILE", str(root / ".env"))))
+    data_dir = Path(_env("QD_DATA_DIR", str(root / "data")))
+    cfg = dict(
+        data_dir=data_dir,
+        db_path=Path(_env("QD_DB_PATH", str(data_dir / "quantdesk.db"))),
+        anthropic_api_key=_env("ANTHROPIC_API_KEY"),
+        llm_model=_env("QD_LLM_MODEL", "claude-opus-5-5"),
+        llm_effort=_env("QD_LLM_EFFORT", "medium"),
+        llm_fallbacks=_env_bool("QD_LLM_FALLBACKS", True),
+        llm_knowledge_cutoff=_env("QD_LLM_KNOWLEDGE_CUTOFF", "2026-06-01"),
+        alpaca_key_id=_env("ALPACA_API_KEY_ID"),
+        alpaca_secret_key=_env("ALPACA_API_SECRET_KEY"),
+        alpaca_feed=_env("ALPACA_FEED", "iex"),
+        alpaca_hist_feed=_env("ALPACA_HIST_FEED", "sip"),
+        market_data_mode=_env("QD_MARKET_DATA", "live"),
+        admin_password=_env("QD_ADMIN_PASSWORD"),
+        session_secret=_env("QD_SESSION_SECRET"),
+        bind_host=_env("QD_BIND_HOST", "127.0.0.1"),
+        bind_port=_env_int("QD_PORT", 8000),
+        cookie_secure=_env_bool("QD_COOKIE_SECURE", False),
+        sandbox_mode=_env("QD_SANDBOX_MODE", "local"),
+        sandbox_spool_dir=Path(_env("QD_SANDBOX_SPOOL", str(data_dir / "sandbox-spool"))),
+        initial_capital=_env_float("QD_INITIAL_CAPITAL", 100_000.0),
+    )
+    cfg.update(overrides)
+    _CONFIG = Config(**cfg)
+    return _CONFIG
+
+
+# ---------------------------------------------------------------------------
+# Operator-adjustable settings and their defaults.
+# Every key here is editable only via the authenticated operator API, and each
+# numeric limit is clamped to the hard ceilings in Config.
+# ---------------------------------------------------------------------------
+DEFAULT_SETTINGS: dict = {
+    "universe": {
+        "NASDAQ": ["QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO",
+                   "TSLA", "COST", "NFLX", "AMD", "PEP", "ADBE", "CSCO"],
+        "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD"],
+    },
+    "benchmarks": {"NASDAQ": "QQQ", "CRYPTO": "BTC-USD", "account": "QQQ"},
+    "risk": {
+        "max_position_pct": 0.15,       # per symbol, of account equity
+        "max_gross_pct": 0.80,          # total long exposure / equity
+        "max_crypto_pct": 0.25,         # crypto exposure / equity
+        "max_strategy_pct": 0.25,       # capital allocated to one strategy / equity
+        "max_total_allocation_pct": 0.80,
+        "max_order_usd": 20_000.0,
+        "min_order_usd": 25.0,
+        "daily_loss_limit_pct": 0.025,  # vs. start-of-UTC-day equity; blocks new risk
+        "max_drawdown_pct": 0.10,       # vs. peak equity; halts new risk until operator resets
+        "max_orders_per_hour": 30,
+        "max_quote_age_sec": 120,
+        "max_participation": 0.01,      # of average daily volume per order
+        "max_spread_bps": 60.0,         # wider quotes are treated as unusable
+    },
+    "costs": {
+        "NASDAQ": {
+            "commission_per_share": 0.0,
+            "sec_fee_per_million": 27.80,   # on sells; SEC Section 31 rate changes - verify
+            "finra_taf_per_share": 0.000166,  # on sells
+            "finra_taf_max": 8.30,
+            "base_slippage_bps": 1.0,
+            "impact_coef": 0.6,             # square-root impact coefficient
+            "backtest_half_spread_bps": 2.0,
+        },
+        "CRYPTO": {
+            "taker_fee_bps": 25.0,
+            "base_slippage_bps": 2.0,
+            "impact_coef": 0.8,
+            "backtest_half_spread_bps": 1.5,
+        },
+    },
+    "execution": {
+        "latency_sec": 2.0,
+        "order_ttl_sec": 600,
+        "fractional_shares": False,
+        "nasdaq_trade_delay_min": 5,   # minutes after the open before daily-strategy orders go out
+    },
+    "schedule": {
+        "quote_poll_sec": 20,
+        "bar_refresh_min": 15,
+        "research_interval_hours": 6,
+        "review_hour_utc": 22,
+        "max_research_per_day": 6,
+        "nasdaq_signal_delay_min": 20,  # minutes after the close before evaluating daily signals
+    },
+    "budget": {
+        "monthly_usd": 40.0,
+        "daily_usd": 4.0,
+    },
+    "research": {
+        "train_frac": 0.60,
+        "val_frac": 0.15,
+        "max_param_combos": 12,
+        "incubation_fraction": 0.5,  # new strategies start with this share of approved allocation
+        "min_live_days_before_increase": 10,
+        "observation_blinding": True,  # hypothesis context excludes data the test window could use
+    },
+    "gates": {
+        "min_test_trades": 8,
+        "min_test_sharpe": 0.4,
+        "min_val_sharpe": 0.0,
+        "min_cost_stress_return": 0.0,
+        "min_delay_stress_sharpe": 0.0,
+        "min_neighbor_positive_frac": 0.5,
+        "min_subperiod_positive_frac": 0.5,
+        "max_top5_concentration": 0.75,
+        "min_deflated_psr": 0.60,
+    },
+    "agent": {"paused": False, "emergency_stop": False},
+}
+
+# Bounds used to validate operator edits. (key path) -> (min, max)
+SETTING_BOUNDS: dict = {
+    ("risk", "max_position_pct"): (0.0, "ceiling_max_position_pct"),
+    ("risk", "max_gross_pct"): (0.0, "ceiling_max_gross_pct"),
+    ("risk", "max_crypto_pct"): (0.0, "ceiling_max_gross_pct"),
+    ("risk", "max_strategy_pct"): (0.0, "ceiling_max_strategy_pct"),
+    ("risk", "max_total_allocation_pct"): (0.0, "ceiling_max_gross_pct"),
+    ("risk", "max_order_usd"): (0.0, "ceiling_max_order_usd"),
+    ("risk", "min_order_usd"): (1.0, 10_000.0),
+    ("risk", "daily_loss_limit_pct"): (0.001, 0.25),
+    ("risk", "max_drawdown_pct"): (0.01, 0.5),
+    ("risk", "max_orders_per_hour"): (1, 500),
+    ("risk", "max_quote_age_sec"): (5, 3600),
+    ("risk", "max_participation"): (0.0001, 0.1),
+    ("risk", "max_spread_bps"): (1.0, 500.0),
+    ("budget", "monthly_usd"): (0.0, "ceiling_monthly_llm_usd"),
+    ("budget", "daily_usd"): (0.0, "ceiling_monthly_llm_usd"),
+    ("schedule", "research_interval_hours"): (0.5, 168),
+    ("schedule", "max_research_per_day"): (0, 48),
+    ("schedule", "quote_poll_sec"): (5, 600),
+    ("schedule", "review_hour_utc"): (0, 23),
+}
+
+# Prices per 1M tokens (input, output, cache_write, cache_read). Editable here if pricing
+# changes; unknown models fall back to the most expensive row so budgets stay conservative.
+MODEL_PRICING = {
+    "claude-opus-5-5": (4.00, 20.00, 5.00, 0.20),
+    "claude-sonnet-5-5": (2.00, 10.00, 2.50, 0.10),
+    "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
+    "claude-fable-5-2": (8.00, 40.00, 10.00, 0.20),
+    "claude-opus-4-8": (5.00, 25.00, 6.25, 0.50),
+}
+FALLBACK_PRICING = (10.00, 50.00, 12.50, 1.00)

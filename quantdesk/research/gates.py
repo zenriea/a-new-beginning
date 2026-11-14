@@ -1,0 +1,42 @@
+"""Deterministic acceptance gates. Thresholds are operator settings; the agent cannot
+change them, and no allocation is possible unless every gate passes."""
+from __future__ import annotations
+
+
+def _g(name, value, op, threshold, why):
+    if value is None:
+        ok = False
+    elif op == ">=":
+        ok = value >= threshold
+    elif op == ">":
+        ok = value > threshold
+    else:
+        ok = value <= threshold
+    return {"name": name, "value": value, "op": op, "threshold": threshold, "pass": bool(ok), "why": why}
+
+
+def evaluate(result: dict, g: dict) -> dict:
+    t, v, c = result["test"], result["validation"], result["challenge"]
+    checks = [
+        _g("validation_sharpe", v.get("sharpe"), ">=", g["min_val_sharpe"],
+           "Confirms the train-selected parameters on data not used for selection."),
+        _g("test_sharpe", t.get("sharpe"), ">=", g["min_test_sharpe"],
+           "Net-of-cost risk-adjusted return on the sealed test window."),
+        _g("test_trades", t.get("n_trades"), ">=", g["min_test_trades"],
+           "Too few trades make any test statistic meaningless."),
+        _g("test_return_cost_x2", c["test_cost_x2"].get("total_return"), ">", g["min_cost_stress_return"],
+           "Must survive doubled fees, spread and impact."),
+        _g("test_sharpe_delay_1bar", c["test_delay_1bar"].get("sharpe"), ">", g["min_delay_stress_sharpe"],
+           "Must not depend on executing exactly at the next bar."),
+        _g("neighbor_positive_frac", c.get("neighbor_positive_frac"), ">=", g["min_neighbor_positive_frac"],
+           "Nearby parameter values should also work (not a lucky point)."),
+        _g("subperiod_positive_frac", c.get("subperiod_positive_frac"), ">=", g["min_subperiod_positive_frac"],
+           "Pre-test performance should not come from a single period."),
+        _g("top5_concentration", c.get("top5_concentration_pre_test"), "<=", g["max_top5_concentration"],
+           "Profits should not hinge on a handful of trades."),
+        _g("deflated_psr", t.get("deflated_psr"), ">=", g["min_deflated_psr"],
+           "Probability the test Sharpe beats the best of N zero-skill trials."),
+    ]
+    passed = all(x["pass"] for x in checks)
+    return {"passed": passed, "checks": checks,
+            "failed": [x["name"] for x in checks if not x["pass"]]}
