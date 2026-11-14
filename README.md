@@ -17,7 +17,7 @@ virtual money.
 
 | Panel | Shows |
 |---|---|
-| Top bar | PAPER badge, analyst mode (Claude model or **DEMO rules engine**), data mode, worker health, NASDAQ session and countdown, API spend vs. budget, Pause / Emergency stop |
+| Top bar | PAPER badge, analyst mode (AI model and provider, or **DEMO rules engine**), data mode, worker health, NASDAQ session and countdown, API spend vs. budget, Pause / Emergency stop |
 | KPIs | Equity, P&L **after costs**, excess return vs. QQQ buy-and-hold, drawdown vs. limit, exposure, costs paid |
 | Equity chart | Account vs. QQQ and BTC buy-and-hold of the same $100k |
 | What I'm doing | Current activity, latest experiment, scheduled next actions |
@@ -151,10 +151,14 @@ Research tab is that record.
 
 ### 1. Credentials
 
-* **Claude API key** (optional). Without one, a clearly labeled **demo rules engine** runs the same
-  pipeline from a small template library at $0. Set `ANTHROPIC_API_KEY`. The default model is
-  `claude-opus-5-5` at effort `medium`. Server-side refusal fallback (beta) is on by default; turn
-  it off with `QD_LLM_FALLBACKS=0`.
+* **AI provider** (optional). Without one, a clearly labeled **demo rules engine** runs the same
+  pipeline from a small template library at $0. Any **OpenAI-compatible** chat API works: OpenAI,
+  Google Gemini (free tier available), Groq, OpenRouter, Mistral, DeepSeek, or a free local model via
+  Ollama. Set `QD_LLM_PROVIDER`, `QD_LLM_BASE_URL`, `QD_LLM_API_KEY` and `QD_LLM_MODEL`; presets are in
+  `.env.example`. Also set `QD_LLM_PRICE_IN` / `QD_LLM_PRICE_OUT` (USD per 1M tokens) so the spending cap
+  matches your model. If the provider can't enforce a JSON schema, the app validates each reply itself and
+  asks once for a corrected one; it also adapts automatically to providers that reject strict-schema mode
+  or the `max_tokens` parameter. Claude is still supported (`ANTHROPIC_API_KEY`).
 * **Alpaca** (free account → API keys) for NASDAQ data: `ALPACA_API_KEY_ID`,
   `ALPACA_API_SECRET_KEY`. Only market data is used. Without keys, NASDAQ shows "not configured"
   and only crypto runs.
@@ -232,17 +236,17 @@ pip install -r requirements-dev.txt && python -m pytest -q
 |---|---|
 | Server | ~$5–25/month (any small VPS) |
 | Market data | $0 (Coinbase public; Alpaca free plan). Alpaca's paid plan gives full SIP quotes |
-| Claude API, defaults | About **$0.15–0.50 per research cycle** (two calls: hypothesis and decision; ~15–20k input and ~5–10k output tokens including adaptive thinking at $4 / $20 per MTok). At 4 cycles/day plus daily reviews and a few questions, that's **~$30–45/month**. A **hard budget** stops new LLM calls at `$40/month` or `$4/day` by default (changeable in Limits). The worst-case cost is checked *before* each call. |
-| Cheaper | `QD_LLM_MODEL=claude-sonnet-5-5` roughly halves the cost; research every 12 h halves it again; demo mode is $0 |
+| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider and model you choose: a few dollars a month for small, cheap models; ~$30–45/month for frontier models at the default schedule; $0 for a local Ollama model or a free tier (within its rate limits). A **hard budget** stops new AI calls at `$40/month` or `$4/day` by default (changeable in Limits), using the prices you configure. |
+| Cheaper | A smaller model; research every 12 h instead of 6 h; or demo mode ($0) |
 
-These LLM figures are estimates from prompt sizes and list prices. No live API call was made
-while building this (see below). The Limits tab shows the real per-call tokens and cost once it
+These AI cost figures are estimates from prompt sizes. No live AI call was made while building
+this (see below). The Limits tab shows the real per-call tokens and cost once it
 runs.
 
 ## What was verified while building this, and what wasn't
 
 **Verified**
-* **Automated tests: 73 pass**, covering:
+* **Automated tests: 79 pass**, covering:
   * ledger math and integrity checks, including split replay
   * split, dividend and unexplained re-adjustment of price history
   * every risk rule
@@ -252,7 +256,7 @@ runs.
   * DSL causality for every function (prefix test); next-bar execution
   * freezing before the test window; holdout-reuse deflation
   * sandbox policy, look-ahead detection, and no secrets or network inside it
-  * LLM budget pre-check, refusal and truncation handling, cost accounting
+  * AI provider handling: budget pre-check, refusal and truncation, cost accounting, OpenAI-compatible fallbacks and JSON repair
   * gate enforcement even when the model asks to allocate
   * API authentication, CSRF, rate limiting, settings ceilings
 * **Live crypto data**: backfilled 8,754 hourly Coinbase bars per pair and polled live quotes. A
@@ -276,10 +280,12 @@ runs.
 * **UI** in Chromium: light, dark, 390 px phone width (no horizontal scroll), no console errors.
 
 **Not verified**, so check these on first deployment:
-* **Real Claude API calls.** No Anthropic key was available. The LLM path was tested against a fake client
-  that mimics the SDK's response shape. The parameters used (`output_config` with effort and a JSON
-  schema, the beta `fallbacks`) match the installed SDK's signatures but have not been accepted by
-  the live API. After adding a key, open Limits → *Recent LLM calls* and confirm `status=ok`.
+* **Real AI calls.** No AI provider key was available. Both paths are tested against fakes: the
+  OpenAI-compatible path against a fake server (strict schema, fallbacks for unsupported options,
+  JSON repair, truncation, budget, a full research cycle), and the Claude path against a fake client
+  mimicking the SDK's responses. After configuring a provider, open Limits & system → *Recent LLM calls*
+  and confirm `status=ok`. Small local models may fail the schema more often; failures are logged, and
+  the deterministic rules engine takes over the decision step when the AI is unavailable.
 * **NASDAQ execution.** No live NASDAQ session was observed (it was a weekend, and there were no
   keys). Session logic is covered by calendar-based tests.
 * **Promotion to live trading with real research results.** No experiment passed every gate on

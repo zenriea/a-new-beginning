@@ -30,7 +30,7 @@ function until(ts) {
   if (s < 86400) return (s / 3600).toFixed(1) + "h";
   return (s / 86400).toFixed(1) + "d";
 }
-const authorLabel = (a) => ({ llm: "Claude", rules: "Rules engine", system: "System", operator: "You" }[a] || a);
+const authorLabel = (a) => ({ llm: "AI analyst", rules: "Rules engine", system: "System", operator: "You" }[a] || a);
 
 async function api(path, opts = {}) {
   const init = { credentials: "same-origin", headers: {} };
@@ -76,7 +76,7 @@ function renderBadges(s) {
   const b = [];
   b.push(`<span class="badge paper">PAPER · no real money</span>`);
   b.push(s.mode.llm === "demo"
-    ? `<span class="badge warn"><span class="dot"></span>DEMO analyst · no LLM key</span>`
+    ? `<span class="badge warn"><span class="dot"></span>DEMO analyst · no AI configured</span>`
     : `<span class="badge ok"><span class="dot"></span>Analyst: ${esc(s.mode.llm)}</span>`);
   if (s.mode.market_data === "synthetic") b.push(`<span class="badge warn"><span class="dot"></span>SYNTHETIC market data</span>`);
   b.push(`<span class="badge ${s.worker.alive ? "ok" : "bad"}"><span class="dot"></span>Worker ${s.worker.alive ? "running" : "offline"}</span>`);
@@ -100,7 +100,7 @@ function renderAlerts(s) {
   if (!s.worker.alive) a.push(["critical", "!", "The background worker is not running, so nothing is being researched or traded. Check the worker service."]);
   if (!s.mode.alpaca_configured && s.mode.market_data !== "synthetic") a.push(["warning", "!", "NASDAQ data is not configured (Alpaca keys missing). NASDAQ research and trading are stopped; crypto continues."]);
   if (s.data.problems.length) a.push(["warning", "!", `Data unavailable or stale: ${s.data.problems.slice(0, 6).map((d) => esc(d.key)).join(", ")}${s.data.problems.length > 6 ? "…" : ""}. Dependent actions are stopped.`]);
-  if (s.mode.llm === "demo") a.push(["info", "i", "Demo mode: a deterministic rules engine stands in for the AI analyst (no ANTHROPIC_API_KEY). Its entries are labelled “Rules engine”. Research, tests and trading are real computations."]);
+  if (s.mode.llm === "demo") a.push(["info", "i", "Demo mode: no AI provider is configured (QD_LLM_* or ANTHROPIC_API_KEY in .env), so a deterministic rules engine stands in for the AI analyst. Its entries are labelled “Rules engine”. Research, tests and trading are real computations."]);
   $("#alerts").innerHTML = a.map(([k, i, t]) => `<div class="alert ${k}"><span class="icon">${i}</span><div>${t}</div></div>`).join("");
 }
 $("#btn-pause").addEventListener("click", async () => {
