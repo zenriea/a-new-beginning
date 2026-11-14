@@ -14,6 +14,8 @@ from .freshness import bar_closed, bars_current
 log = logging.getLogger(__name__)
 
 BACKFILL_DAYS = {"CRYPTO": 365, "NASDAQ": 6 * 365}
+OVERLAP_SECONDS = {"CRYPTO": 3 * 3600, "NASDAQ": 10 * 86400}  # re-fetch recent stored bars to detect re-adjustment
+ADJUST_TOLERANCE = 0.003  # >0.3% change in an already-stored close = provider re-adjusted history
 _providers: dict[str, Provider] = {}
 _backoff: dict[str, tuple[float, float]] = {}  # key -> (retry_at, current_delay)
 
@@ -74,18 +76,20 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
                 events.append({"key": f"bars:{s}", "ok": False, "error": str(e), "symbol": s})
         return events
     starts = {}
+    fetch_from = {}
     for s in symbols:
         last = store.last_bar_ts(s, tf)
         starts[s] = (last + step) if last is not None else int(now - BACKFILL_DAYS[venue] * 86400)
+        fetch_from[s] = (last - OVERLAP_SECONDS[venue]) if last is not None else starts[s]
     groups: dict[int, list[str]] = {}
-    for s, st in starts.items():
+    for s, st in fetch_from.items():
         groups.setdefault(st, []).append(s)
     # One request per symbol for crypto; batched per start for NASDAQ
     batches = [[s] for s in symbols] if venue == "CRYPTO" else list(groups.values())
     if _blocked(f"bars:{venue}"):
         return events
     for batch in batches:
-        st = min(starts[s] for s in batch)
+        st = min(fetch_from[s] for s in batch)
         try:
             if st < now:
                 data = provider.fetch_bars(batch, tf, st, int(now))
@@ -99,14 +103,44 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
                     events.append({"key": f"bars:{s}", "ok": False, "error": str(e), "symbol": s})
             continue
         for s in batch:
-            closed = [b for b in data.get(s, []) if b.ts >= starts[s] and bar_closed(venue, b.ts, now)]
-            store.upsert_bars(s, tf, closed)
+            fresh = [b for b in data.get(s, []) if bar_closed(venue, b.ts, now)]
+            adj = _detect_readjustment(s, tf, fresh)
+            if adj is not None:
+                events += _handle_readjustment(provider, venue, s, tf, adj, now)
+            else:
+                store.upsert_bars(s, tf, [b for b in fresh if b.ts >= starts[s]])
             last = store.last_bar_ts(s, tf)
             ok = bars_current(venue, last, now, tolerance_bars=2)
             err = None if ok else f"latest stored {tf} bar for {s} is older than expected"
             if store.set_status(f"bars:{s}", ok, err):
                 events.append({"key": f"bars:{s}", "ok": ok, "error": err, "symbol": s})
     return events
+
+
+def _detect_readjustment(symbol: str, tf: str, fresh: list) -> float | None:
+    """Compare freshly fetched bars with the copies already stored. Returns the median
+    ratio stored/fresh if history was re-adjusted (split or dividend), else None."""
+    stored = store.stored_closes(symbol, tf, [b.ts for b in fresh])
+    ratios = [stored[b.ts] / b.close for b in fresh if b.ts in stored and b.close > 0]
+    if not ratios:
+        return None
+    ratios.sort()
+    r = ratios[len(ratios) // 2]
+    return r if abs(r - 1) > ADJUST_TOLERANCE else None
+
+
+def _handle_readjustment(provider, venue, symbol, tf, ratio, now) -> list[dict]:
+    """The provider changed already-stored history: replace it wholesale, and if the ratio
+    is a stock split, adjust live positions so share counts match the new price basis."""
+    try:
+        full = provider.fetch_bars([symbol], tf, int(now - BACKFILL_DAYS[venue] * 86400), int(now)).get(symbol, [])
+    except DataError as e:
+        return [{"key": f"bars:{symbol}", "ok": False, "symbol": symbol,
+                 "error": f"history was re-adjusted but the full re-download failed: {e}"}]
+    full = [b for b in full if bar_closed(venue, b.ts, now)]
+    store.replace_bars(symbol, tf, full)
+    from ..trading import corporate
+    return [corporate.on_history_readjusted(symbol, venue, ratio, len(full))]
 
 
 def ingest_quotes(venue: str, symbols: list[str]) -> list[dict]:

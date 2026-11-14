@@ -150,7 +150,17 @@ def rebuild_from_fills() -> dict:
     deposits = db.q1("SELECT COALESCE(SUM(delta),0) d FROM cash_ledger WHERE kind='deposit'")["d"]
     c = float(deposits)
     pos: dict[tuple, float] = {}
-    for f in db.q("SELECT f.*, o.strategy_id FROM fills f JOIN orders o ON o.id=f.order_id ORDER BY f.id"):
+    # replay fills in id order; each split right after the last fill that existed when it was applied
+    fills = [("fill", f["id"], 0, f) for f in
+             db.q("SELECT f.*, o.strategy_id FROM fills f JOIN orders o ON o.id=f.order_id ORDER BY f.id")]
+    splits = [("split", (db.loads(a["detail"], {}) or {}).get("after_fill_id", 0), 1, a)
+              for a in db.q("SELECT * FROM corporate_actions WHERE kind='split' ORDER BY id")]
+    for kind, _, _, f in sorted(fills + splits, key=lambda e: (e[1], e[2])):
+        if kind == "split":
+            for k in list(pos):
+                if k[1] == f["symbol"]:
+                    pos[k] *= f["ratio"]
+            continue
         sid = f["strategy_id"] if f["strategy_id"] is not None else OPERATOR_SLEEVE
         k = (sid, f["symbol"])
         if f["side"] == "buy":

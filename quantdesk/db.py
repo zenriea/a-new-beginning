@@ -138,6 +138,10 @@ CREATE TABLE IF NOT EXISTS questions (
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, question TEXT NOT NULL, answer TEXT,
   refs TEXT, author TEXT, llm_call_id INTEGER);
 
+CREATE TABLE IF NOT EXISTS corporate_actions (
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, symbol TEXT NOT NULL, kind TEXT NOT NULL,
+  ratio REAL NOT NULL, detail TEXT);
+
 CREATE TABLE IF NOT EXISTS agent_status (
   id INTEGER PRIMARY KEY CHECK (id = 1), activity TEXT, detail TEXT, updated_at REAL,
   next_actions TEXT);

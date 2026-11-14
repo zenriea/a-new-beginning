@@ -20,6 +20,24 @@ def upsert_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
     return len(bars)
 
 
+def replace_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
+    """Atomically replace a symbol's stored history (used when the provider re-adjusts it)."""
+    with db.tx() as conn:
+        conn.execute("DELETE FROM bars WHERE symbol=? AND timeframe=?", (symbol, timeframe))
+        conn.executemany(
+            "INSERT INTO bars(symbol, timeframe, ts, open, high, low, close, volume) VALUES(?,?,?,?,?,?,?,?)",
+            [(symbol, timeframe, b.ts, b.open, b.high, b.low, b.close, b.volume) for b in bars])
+    return len(bars)
+
+
+def stored_closes(symbol: str, timeframe: str, ts_list: list[int]) -> dict[int, float]:
+    if not ts_list:
+        return {}
+    rows = db.q(f"SELECT ts, close FROM bars WHERE symbol=? AND timeframe=? AND ts IN ({','.join('?' * len(ts_list))})",
+                [symbol, timeframe, *ts_list])
+    return {r["ts"]: r["close"] for r in rows}
+
+
 def last_bar_ts(symbol: str, timeframe: str) -> int | None:
     r = db.q1("SELECT MAX(ts) AS t FROM bars WHERE symbol=? AND timeframe=?", (symbol, timeframe))
     return r["t"] if r and r["t"] is not None else None
