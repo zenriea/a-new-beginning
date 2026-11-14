@@ -1,0 +1,21 @@
+# /etc/systemd/system/quantdesk-worker.service  (non-Docker alternative)
+[Unit]
+Description=QuantDesk worker (research, paper trading, risk)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=quantdesk
+WorkingDirectory=/opt/quantdesk
+EnvironmentFile=/opt/quantdesk/.env
+ExecStart=/opt/quantdesk/.venv/bin/python -m quantdesk.worker
+Restart=always
+RestartSec=10
+TimeoutStopSec=60
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/quantdesk/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,133 @@
+import numpy as np
+import pytest
+
+from conftest import put_bars
+
+
+def _panel(T=400, N=3, seed=1):
+    rng = np.random.default_rng(seed)
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, (T, N)), axis=0))
+    o = np.vstack([c[:1], c[:-1]])
+    return {"ts": np.arange(T) * 86400 + 1_600_000_000, "symbols": ["A", "B", "Q"], "benchmark": "Q",
+            "open": o, "high": np.maximum(o, c) * 1.01, "low": np.minimum(o, c) * 0.99, "close": c,
+            "volume": np.full((T, N), 1e6)}
+
+
+EXPRS = ["sma(close, 20)", "ema(close, 10)", "std(close, 15)", "ret(close, 5)", "lag(close, 3)", "highest(high, 20)",
+         "lowest(low, 20)", "rsi(close, 14)", "zscore(close, 20)", "rvol(20)", "atr(14)", "crossover(sma(close,5), sma(close,20))",
+         "rank(ret(close, 10))", "market(close) > market(sma(close, 50))", "log(close) - log(lag(close, 1))",
+         "max(close, sma(close, 10)) / min(open, close)"]
+
+
+@pytest.mark.parametrize("expr", EXPRS)
+def test_dsl_functions_are_causal(expr):
+    from quantdesk.research import dsl
+    p = _panel()
+    full = dsl.evaluate(expr, p, {}, 252, market_col=2)
+    for cut in (60, 150, 333):
+        sub = {k: (v[:cut] if isinstance(v, np.ndarray) else v) for k, v in p.items()}
+        part = dsl.evaluate(expr, sub, {}, 252, market_col=2)
+        np.testing.assert_allclose(part.astype(float), full[:cut].astype(float), equal_nan=True, rtol=1e-9, atol=1e-9,
+                                   err_msg=f"{expr} changed when future bars were removed")
+
+
+@pytest.mark.parametrize("bad", ["__import__('os')", "close.__class__", "open('x')", "lambda: 1", "close[0]",
+                                 "sma(close, 0.5)", "foo(close)", "close == 1", "'a' > 1", "sma(close, n=3)"])
+def test_dsl_rejects_unsafe_or_invalid(bad):
+    from quantdesk.research import dsl
+    with pytest.raises(dsl.DSLError):
+        dsl.evaluate(bad, _panel(), {}, 252)
+
+
+def test_backtest_executes_next_bar_open():
+    from quantdesk.config import DEFAULT_SETTINGS
+    from quantdesk.research import backtest as B
+    from quantdesk.research.strategy import compute_signals
+    p = _panel()
+    # a jump at bar 200: signal fires at its close; the fill must be at bar 201's open (after the jump)
+    p["close"][200:, 0] *= 1.5
+    p["open"][201:, 0] *= 1.5
+    spec = {"venue": "NASDAQ", "universe": ["A"], "kind": "dsl", "entry": "ret(close, 1) > 0.3", "exit": "close < 0",
+            "sizing": {"method": "fixed", "weight": 0.5}}
+    sig = compute_signals(spec, {}, p)
+    r = B.run(spec, p, sig, DEFAULT_SETTINGS["costs"]["NASDAQ"], 50, 400)
+    eq = r.equity  # eq[i] is the close of bar 50+i
+    assert eq[150] == pytest.approx(100000, rel=1e-9)        # flat through the signal bar
+    assert r.metrics["n_trades"] == 0 and r.open_positions == 1
+    intraday = max(0.0, p["close"][201, 0] / p["open"][201, 0] - 1)
+    # bought at bar 201's open (after the jump): at most the intraday move, never the +50% jump (= +$25k)
+    assert eq[151] <= 100000 * (1 + 0.5 * intraday) + 1
+
+
+def test_split_is_chronological_and_freeze_precedes_test(env, monkeypatch):
+    from quantdesk.config import DEFAULT_SETTINGS
+    from quantdesk.research import backtest as B
+    from quantdesk.research import experiment as E
+    rng = np.random.default_rng(0)
+    for s in ("AAPL", "MSFT", "QQQ"):
+        put_bars(s, list(100 * np.exp(np.cumsum(rng.normal(0, 0.015, 900)))), "1d")
+    calls = []
+    orig = B.run
+
+    def spy(spec, panel, sig, costs, start, end, **kw):
+        calls.append(("run", start, end))
+        return orig(spec, panel, sig, costs, start, end, **kw)
+    monkeypatch.setattr(E.B, "run", spy)
+    spec = {"name": "x", "venue": "NASDAQ", "universe": ["AAPL", "MSFT"], "kind": "dsl", "entry": "close > sma(close, n)",
+            "exit": "close < sma(close, n)", "sizing": {"method": "fixed", "weight": 0.3}, "params": {"n": [20, 50]}}
+    frozen = {}
+
+    def on_freeze(f):
+        calls.append(("freeze",))
+        frozen.update(f)
+    res = E.run_experiment(spec, DEFAULT_SETTINGS["costs"]["NASDAQ"], DEFAULT_SETTINGS["research"], "QQQ", [],
+                           "2026-06-01", on_freeze=on_freeze)
+    w = res["windows"]
+    assert w["train"]["end"] < w["validation"]["start"] <= w["validation"]["end"] < w["test"]["start"]
+    test_start_idx = next(c[1] for c in calls if c[0] == "run" and c[2] == 900 and c[1] > 600)
+    fi = calls.index(("freeze",))
+    # every backtest touching the test window happens after the freeze
+    for i, c in enumerate(calls):
+        if c[0] == "run" and c[2] > test_start_idx:
+            assert i > fi, "test window evaluated before the spec was frozen"
+    assert frozen["chosen_params"] == res["chosen_params"]
+    assert res["leakage"]["holdout_reuse_count"] == 0
+    res2 = E.run_experiment(spec, DEFAULT_SETTINGS["costs"]["NASDAQ"], DEFAULT_SETTINGS["research"], "QQQ",
+                            [(w["test"]["start"], w["test"]["end"])], "2026-06-01")
+    assert res2["leakage"]["holdout_reuse_count"] == 1
+    assert res2["test"]["deflated_psr"] <= res["test"]["deflated_psr"] + 1e-9
+
+
+def test_sandbox_blocks_and_detects_lookahead():
+    from quantdesk.research import sandbox
+    from quantdesk.research.sandbox_policy import PolicyError, check_source
+    p = _panel(T=200)
+    good = "def signals(o, h, l, c, v, p):\n    m = np.full_like(c, np.nan)\n    for i in range(9, len(c)):\n        m[i] = np.mean(c[i-9:i+1])\n    return c > m, c < m\n"
+    e, x = sandbox.run_code_signals(good, p, {})
+    assert e.shape == (200, 3)
+    peek = good.replace("c > m", "np.roll(c, -1) > c")
+    with pytest.raises(sandbox.SandboxError, match="look-ahead"):
+        sandbox.run_code_signals(peek, p, {})
+    for evil in ["import os", "def signals(o,h,l,c,v,p):\n    return open('/etc/passwd'), c",
+                 "def signals(o,h,l,c,v,p):\n    return c.__class__, c", "def signals(o,h,l,c,v,p):\n    return np.load('x'), c",
+                 "def signals(o,h,l,c,v,p):\n    return c.tofile('x'), c"]:
+        with pytest.raises(PolicyError):
+            check_source(evil)
+
+
+def test_sandbox_has_no_secrets_or_network(monkeypatch):
+    from quantdesk.research import sandbox
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret-should-not-leak")
+    # bypass the static policy to probe the process isolation itself
+    import json
+    import subprocess
+    import sys
+    probe = ("import os, socket\nr={'env': dict(os.environ)}\ntry:\n s=socket.create_connection(('1.1.1.1',443),2); r['net']=True\n"
+             "except Exception as e:\n r['net']=False\nprint(json.dumps(r))")
+    cmd = list(sandbox._netns_prefix()) + [sys.executable, "-I", "-c", "import json\n" + probe]
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env={"PATH": "/usr/bin:/bin"},
+                       preexec_fn=sandbox._limits)
+    out = json.loads(p.stdout)
+    assert "ANTHROPIC_API_KEY" not in out["env"]
+    if sandbox._netns_prefix():
+        assert out["net"] is False

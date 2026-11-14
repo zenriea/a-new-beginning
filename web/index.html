@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuantDesk</title>
+  <meta name="description" content="Autonomous AI quant research and paper-trading desk">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0b'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="login-view" class="hidden">
+    <div class="card login">
+      <h1>QuantDesk</h1>
+      <div class="secondary">Operator sign-in. Paper trading only.</div>
+      <form id="login-form">
+        <input type="password" id="login-pw" placeholder="Password" autocomplete="current-password" required>
+        <button class="btn" type="submit">Sign in</button>
+        <div id="login-err" class="down" style="margin-top:10px"></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <div class="brand"><span class="logo">Q</span>QuantDesk</div>
+      <div class="badges" id="badges"></div>
+      <div class="spacer"></div>
+      <button class="btn" id="btn-pause">Pause agent</button>
+      <button class="btn danger" id="btn-stop">Emergency stop</button>
+      <button class="btn ghost" id="btn-theme" title="Toggle light/dark theme">Theme</button>
+    </header>
+    <div class="alerts" id="alerts"></div>
+
+    <main class="layout">
+      <div class="col">
+        <section class="card kpis" id="kpis" aria-label="Performance summary"></section>
+
+        <section class="card">
+          <div class="card-h"><h2>Equity after costs vs. benchmarks</h2><div class="spacer"></div>
+            <span class="muted" id="equity-since"></span></div>
+          <div class="chart-tip" id="equity-tip"></div>
+          <div class="chart-wrap" id="equity-chart"></div>
+          <div class="chart-legend" id="equity-legend"></div>
+          <div class="card-b" style="padding-top:6px"><span class="muted" style="font-size:12px">Benchmarks are buy-and-hold of
+            the same $100k from the first mark. Account equity is net of simulated fees, spread and slippage.</span></div>
+        </section>
+
+        <section class="desk">
+          <div class="card">
+            <div class="card-h"><h2>What I'm doing</h2></div>
+            <div class="card-b" id="now"></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h2>What I currently believe</h2></div>
+            <div class="card-b" id="beliefs"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-h"><h2>Positions</h2><div class="spacer"></div><span class="muted" id="pos-summary"></span></div>
+          <div class="card-b tbl-scroll" id="positions"></div>
+        </section>
+
+        <section class="card">
+          <div class="tabs" role="tablist" id="tabs">
+            <button class="tab active" data-tab="research">Research</button>
+            <button class="tab" data-tab="strategies">Strategies</button>
+            <button class="tab" data-tab="orders">Orders &amp; fills</button>
+            <button class="tab" data-tab="market">Market</button>
+            <button class="tab" data-tab="system">Limits &amp; system</button>
+          </div>
+          <div class="card-b" id="tab-body"></div>
+        </section>
+      </div>
+
+      <aside class="journal-col">
+        <div class="card">
+          <div class="card-h"><h2>Analyst journal</h2><div class="spacer"></div><span class="badge" id="live-badge"><span class="dot"></span>live</span></div>
+          <div class="filters" id="filters"></div>
+          <div class="feed" id="feed" aria-live="polite"></div>
+          <div class="ask">
+            <form id="ask-form">
+              <input id="ask-input" placeholder="Ask: why did you buy this? what would make you sell?" maxlength="500">
+              <button class="btn" type="submit">Ask</button>
+            </form>
+            <div class="suggest" id="suggest"></div>
+            <div class="answer" id="answer"></div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="drawer-root"></div>
+  <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{$QD_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8000 {
+		flush_interval -1
+	}
+}

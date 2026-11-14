@@ -1,0 +1,19 @@
+# /etc/systemd/system/quantdesk-api.service  (non-Docker alternative)
+[Unit]
+Description=QuantDesk web UI/API
+After=network-online.target
+
+[Service]
+User=quantdesk
+WorkingDirectory=/opt/quantdesk
+EnvironmentFile=/opt/quantdesk/.env
+ExecStart=/opt/quantdesk/.venv/bin/python -m quantdesk.api.app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/quantdesk/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
