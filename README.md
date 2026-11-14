@@ -255,6 +255,11 @@ runs.
 * **Real-quote execution** (on a scratch copy of the DB with a harness strategy): the buy filled at
   the real Coinbase ask + 3.0 bp impact + 25 bp fee, after the latency wait. The sell filled at the
   real bid. The ledger rebuilt from fills matched.
+* **Alpaca NASDAQ data**: backfilled 1,506 split/dividend-adjusted daily SIP bars (6 years) for all 15
+  symbols and fetched live IEX snapshots. After hours IEX often shows one-sided quotes (ask missing),
+  which is the case the simulator's last-trade fallback handles. A full NASDAQ research cycle ran on
+  real data: the long-term trend filter returned +2.0 % net (Sharpe 0.18) on the sealed test window
+  vs. +20.1 % for QQQ buy-and-hold, and was rejected.
 * **Restarts**: graceful stop and restart; in Docker, SIGKILL of the worker. The container
   restarted automatically, recovery ran and integrity held.
 * **Docker Compose** stack built and ran (api, worker, no-network sandbox). The model-code spool
@@ -264,14 +269,10 @@ runs.
 * **UI** in Chromium: light, dark, 390 px phone width (no horizontal scroll), no console errors.
 
 **Not verified**, so check these on first deployment:
-* **Real Claude API calls.** No key was available. The LLM path was tested against a fake client
+* **Real Claude API calls.** No Anthropic key was available. The LLM path was tested against a fake client
   that mimics the SDK's response shape. The parameters used (`output_config` with effort and a JSON
   schema, the beta `fallbacks`) match the installed SDK's signatures but have not been accepted by
   the live API. After adding a key, open Limits → *Recent LLM calls* and confirm `status=ok`.
-* **Alpaca.** No keys were available, and Alpaca's docs site was unreachable from this build
-  environment, so the client follows the v2 data API (`/v2/stocks/bars`, `/v2/stocks/snapshots`,
-  `APCA-API-*` headers) from memory. The host answered 401 without keys, as expected. If NASDAQ data
-  shows unavailable after adding keys, the journal entry contains the HTTP error.
 * **NASDAQ execution.** No live NASDAQ session was observed (it was a weekend, and there were no
   keys). Session logic is covered by calendar-based tests.
 * **Promotion to live trading with real research results.** No experiment passed every gate on
