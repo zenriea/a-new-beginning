@@ -1,7 +1,7 @@
 """Analyst implementations.
 
-``LLMAnalyst`` - Claude via the Anthropic API.
-``RulesAnalyst`` - DEMO stand-in used when no API key is configured. It is deterministic,
+``LLMAnalyst`` - an AI model via any OpenAI-compatible API or Claude (see agent/llm.py).
+``RulesAnalyst`` - DEMO stand-in used when no AI provider is configured. It is deterministic,
 picks hypotheses from a small template library, and writes plain factual notes from the
 same records. Every entry it writes is labelled author='rules' and shown as "demo" in the UI.
 """

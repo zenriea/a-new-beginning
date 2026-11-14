@@ -189,7 +189,7 @@ def _state() -> dict:
         bad = [d for d in bad if d["key"].split(":", 1)[-1] not in nasdaq]
     return {
         "now": now,
-        "mode": {"paper": True, "llm": "demo" if cfg.demo_llm else cfg.llm_model,
+        "mode": {"paper": True, "llm": cfg.llm_label,
                  "market_data": cfg.market_data_mode, "alpaca_configured": cfg.alpaca_configured,
                  "alpaca_feed": cfg.alpaca_feed},
         "worker": {"alive": bool(hb and now - hb["heartbeat_at"] < 60),
@@ -364,8 +364,8 @@ async def system():
                 "audit": _rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 50", (), ("detail",)),
                 "risk_events": _rows("SELECT * FROM risk_events ORDER BY id DESC LIMIT 50", (), ("detail",)),
                 "integrity": ledger.integrity_check(), "sandbox": isolation_report(),
-                "llm": {"model": cfg.llm_model, "effort": cfg.llm_effort, "knowledge_cutoff": cfg.llm_knowledge_cutoff,
-                        "demo": cfg.demo_llm}}
+                "llm": {"model": cfg.llm_label, "provider": cfg.llm_provider, "effort": cfg.llm_effort,
+                        "knowledge_cutoff": cfg.llm_knowledge_cutoff, "demo": cfg.demo_llm}}
     return await run_in_threadpool(f)
 
 

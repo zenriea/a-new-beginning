@@ -292,7 +292,7 @@ def main() -> None:
             time.sleep(10)
     info = recover(prev)
     log.info("worker %s started; recovery: %s", holder, info)
-    journal.write("system", "Worker started", f"Mode: {'DEMO rules analyst (no LLM key)' if cfg.demo_llm else 'LLM ' + cfg.llm_model}; "
+    journal.write("system", "Worker started", f"Mode: {'DEMO rules analyst (no AI provider configured)' if cfg.demo_llm else 'AI analyst ' + cfg.llm_label}; "
                   f"market data: {cfg.market_data_mode}; NASDAQ data: {'Alpaca ' + cfg.alpaca_feed if cfg.alpaca_configured else 'NOT CONFIGURED'}.",
                   author="system")
     stop = threading.Event()

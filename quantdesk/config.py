@@ -56,6 +56,11 @@ class Config:
     db_path: Path
     # --- AI ---
     anthropic_api_key: str
+    llm_provider: str  # "anthropic" | "openai_compatible" | "none"
+    llm_base_url: str  # openai_compatible: e.g. https://api.openai.com/v1
+    llm_api_key: str   # openai_compatible key (may be empty for a local Ollama server)
+    llm_price_in: float   # USD per 1M input tokens (openai_compatible; used for the budget)
+    llm_price_out: float  # USD per 1M output tokens
     llm_model: str
     llm_effort: str
     llm_fallbacks: bool
@@ -86,8 +91,19 @@ class Config:
 
     @property
     def demo_llm(self) -> bool:
-        """True when no API key is configured: a deterministic rules analyst stands in."""
-        return not self.anthropic_api_key
+        """True when no AI provider is configured: a deterministic rules analyst stands in."""
+        if self.llm_provider == "anthropic":
+            return not self.anthropic_api_key
+        if self.llm_provider == "openai_compatible":
+            return not (self.llm_base_url and self.llm_model)
+        return True
+
+    @property
+    def llm_label(self) -> str:
+        if self.demo_llm:
+            return "demo"
+        host = self.llm_base_url.split("//")[-1].split("/")[0] if self.llm_provider == "openai_compatible" else "anthropic"
+        return f"{self.llm_model} ({host})"
 
     @property
     def alpaca_configured(self) -> bool:
@@ -95,6 +111,24 @@ class Config:
 
 
 _CONFIG: Config | None = None
+
+
+def _resolve_provider() -> str:
+    """QD_LLM_PROVIDER wins; otherwise infer: generic OpenAI-compatible settings, then an
+    Anthropic key, else none (demo rules analyst)."""
+    p = _env("QD_LLM_PROVIDER").lower()
+    if p in ("openai", "openai_compatible", "openai-compatible", "gemini", "groq", "openrouter", "ollama",
+             "mistral", "deepseek", "together"):
+        return "openai_compatible"
+    if p in ("anthropic", "claude"):
+        return "anthropic"
+    if p == "none":
+        return "none"
+    if _env("QD_LLM_API_KEY") or _env("QD_LLM_BASE_URL"):
+        return "openai_compatible"
+    if _env("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    return "none"
 
 
 def load_config(reload: bool = False, **overrides) -> Config:
@@ -108,7 +142,12 @@ def load_config(reload: bool = False, **overrides) -> Config:
         data_dir=data_dir,
         db_path=Path(_env("QD_DB_PATH", str(data_dir / "quantdesk.db"))),
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
-        llm_model=_env("QD_LLM_MODEL", "claude-opus-5-5"),
+        llm_provider=_resolve_provider(),
+        llm_base_url=_env("QD_LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+        llm_api_key=_env("QD_LLM_API_KEY"),
+        llm_price_in=_env_float("QD_LLM_PRICE_IN", 5.0),
+        llm_price_out=_env_float("QD_LLM_PRICE_OUT", 20.0),
+        llm_model=_env("QD_LLM_MODEL", "claude-opus-5-5" if _resolve_provider() == "anthropic" else ""),
         llm_effort=_env("QD_LLM_EFFORT", "medium"),
         llm_fallbacks=_env_bool("QD_LLM_FALLBACKS", True),
         llm_knowledge_cutoff=_env("QD_LLM_KNOWLEDGE_CUTOFF", "2026-06-01"),

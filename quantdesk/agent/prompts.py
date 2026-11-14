@@ -80,7 +80,7 @@ HYPOTHESIS_SCHEMA = {
         "prediction": {"type": "string"},
         "falsification": {"type": "string"},
         "parent_experiment_id": NULL_INT,
-        "spec": SPEC_SCHEMA,
+        "spec": {"anyOf": [SPEC_SCHEMA, {"type": "null"}]},
     },
 }
 
@@ -137,7 +137,7 @@ def hypothesis_prompt(ctx: dict) -> str:
         "TASK: Propose at most ONE hypothesis worth testing now on the venue below, or decide there is none.\n"
         "Build on the research memory: do not repeat a rejected idea unless you change something specific "
         "and say why; revisions should cite the parent experiment id. If nothing is promising, answer "
-        "decision='no_idea' and explain why in 'why' (fill other fields with empty strings / minimal spec).\n"
+        "decision='no_idea', explain why in 'why', use empty strings for the text fields and null for spec.\n"
         "The market context below is BLINDED: it ends before the earliest possible test window, so whatever "
         "you see cannot leak into the sealed test. The universe must be a subset of the approved symbols.\n"
         "'rationale' = the economic/behavioural reason the edge might exist; 'prediction' = what the test "
