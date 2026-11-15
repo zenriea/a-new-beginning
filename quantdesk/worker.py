@@ -94,6 +94,7 @@ def recover(prev_heartbeat: float | None) -> dict:
                       "It was not completed and will not be resumed half-way (that could mix data snapshots). "
                       "The idea can be re-tested as a new experiment.", refs={"experiment_id": e["id"]}, author="system",
                       dedupe_key=f"interrupted:{e['id']}")
+    db.ex("DELETE FROM jobs WHERE name='research'")  # pre-0.2 shared research clock, replaced by research:<venue>
     chk = ledger.integrity_check()
     info["integrity"] = chk
     if not chk["ok"]:
@@ -199,7 +200,6 @@ class AnalystThread(threading.Thread):
             self.stop.wait(15)
 
     def tick(self):
-        from .agent.research_loop import research_cycle
         from .agent.review import review_all
         sch = settings.get("schedule")
         now = clock.now()
@@ -212,43 +212,91 @@ class AnalystThread(threading.Thread):
                 run_job("review", review_all)
                 self.busy = False
             db.set_meta("last_review_day", str(today))
-        # research
-        requested = db.get_meta("research_requested")
-        day0 = now - now % 86400
-        n_today = db.q1("SELECT COUNT(*) n FROM experiments WHERE created_at>=?", (day0,))["n"]
+        # research: each venue on its own clock
+        requested = db.get_meta("research_requested") or ""
         if settings.get("agent").get("paused") and not requested:
             journal.set_status("paused", "Operator paused the agent: no new research or positions")
             return
-        due = job_due("research", sch["research_interval_hours"] * 3600)
-        if due and not requested and now < float(db.get_meta("research_retry_after") or 0):
-            due = False  # AI provider failed recently: wait before retrying the cycle
-        if (due and n_today < sch["max_research_per_day"]) or requested:
-            venue = requested if requested in settings.get("universe") else self.next_venue()
+        venue = requested if requested in settings.get("universe") else pick_research_venue(now)
+        if requested:
             db.set_meta("research_requested", "")
-            if venue is None:
-                journal.set_status("waiting", "No venue has enough market data to research yet", next_actions=next_actions())
-                return
-            prev = db.q1("SELECT last_started_at FROM jobs WHERE name='research'")
+        if venue is not None:
             self.busy = True
-            res = run_job("research", research_cycle, venue)
-            self.busy = False
-            db.set_meta("last_research_venue", venue)
-            if res and res.get("status") == "llm_error":
-                db.set_meta("research_retry_after", str(clock.now() + 600))
-            if res and res.get("status") in ("no_data", "budget", "llm_error"):
-                # a cycle that could not run does not use up the research slot
-                db.ex("UPDATE jobs SET last_started_at=? WHERE name='research'", (prev["last_started_at"] if prev else None,))
-        journal.set_status("waiting", "Monitoring positions and markets; nothing scheduled right now",
-                           next_actions=next_actions())
+            try:
+                run_research(venue)
+            finally:
+                self.busy = False
+        live_n = db.q1("SELECT COUNT(*) n FROM strategies WHERE status='active'")["n"]
+        detail = (f"Monitoring {live_n} live strateg{'y' if live_n == 1 else 'ies'} and the markets between research cycles"
+                  if live_n else "No strategy has passed every test yet, so nothing is trading. Monitoring the markets "
+                                 "until the next research cycle")
+        journal.set_status("waiting", detail, next_actions=next_actions())
 
-    @staticmethod
-    def next_venue() -> str | None:
-        """Alternate between venues that have enough stored history to research."""
-        order = [v for v in ("NASDAQ", "CRYPTO") if venue_ready(v)]
-        if not order:
-            return None
-        last = db.get_meta("last_research_venue")
-        return order[(order.index(last) + 1) % len(order)] if last in order else order[0]
+
+RESEARCH_VENUES = ("CRYPTO", "NASDAQ")
+NOT_RUN = ("no_data", "budget", "llm_error")  # cycles that could not run keep their slot
+LLM_RETRY_SEC = 600
+
+
+def research_job(venue: str) -> str:
+    return f"research:{venue}"
+
+
+def _interval(venue: str) -> float:
+    sch = settings.get("schedule")
+    return sch["crypto_research_hours" if venue == "CRYPTO" else "nasdaq_research_hours"] * 3600
+
+
+def _latest_bench_bar(venue: str) -> int:
+    return store.last_bar_ts(settings.get("benchmarks")[venue], venues.VENUES[venue].timeframe) or 0
+
+
+def research_due_at(venue: str, now: float) -> float:
+    r = db.q1("SELECT last_started_at FROM jobs WHERE name=?", (research_job(venue),))
+    at = r["last_started_at"] + _interval(venue) if r and r["last_started_at"] else now
+    return max(at, float(db.get_meta(f"research_retry_after:{venue}") or 0))
+
+
+def research_blocker(venue: str, now: float) -> str | None:
+    """Why a venue cannot be researched right now regardless of its clock (None = it can)."""
+    if not venue_ready(venue):
+        return "waiting for market data"
+    day0 = now - now % 86400
+    n = db.q1("SELECT COUNT(*) n FROM experiments WHERE venue=? AND created_at>=?", (venue, day0))["n"]
+    if n >= settings.get("schedule")["max_research_per_day"]:
+        return "daily experiment limit reached"
+    if _latest_bench_bar(venue) <= int(db.get_meta(f"research_bar:{venue}") or 0):
+        return "waiting for a new bar"  # nothing new to look at since the last cycle
+    return None
+
+
+def pick_research_venue(now: float) -> str | None:
+    due = [(research_due_at(v, now), v) for v in RESEARCH_VENUES
+           if research_blocker(v, now) is None and research_due_at(v, now) <= now]
+    return min(due)[1] if due else None
+
+
+def run_research(venue: str) -> dict | None:
+    from .agent import research_loop
+    job = research_job(venue)
+    prev = db.q1("SELECT last_started_at FROM jobs WHERE name=?", (job,))
+    bar = _latest_bench_bar(venue)
+
+    def cycle():
+        try:
+            return research_loop.research_cycle(venue)
+        except Exception as e:
+            research_loop.record_unexpected_failure(venue, e)
+            raise
+    res = run_job(job, cycle)
+    status = res.get("status") if res else "exception"
+    if status in NOT_RUN:
+        db.ex("UPDATE jobs SET last_started_at=? WHERE name=?", (prev["last_started_at"] if prev else None, job))
+        if status == "llm_error":
+            db.set_meta(f"research_retry_after:{venue}", str(clock.now() + LLM_RETRY_SEC))
+    else:
+        db.set_meta(f"research_bar:{venue}", str(bar))
+    return res
 
 
 def venue_ready(venue: str, min_bars: int = 300) -> bool:
@@ -258,14 +306,27 @@ def venue_ready(venue: str, min_bars: int = 300) -> bool:
     return r["n"] >= min_bars
 
 
+def _next_research_at(venue: str, now: float) -> tuple[str, float]:
+    block = research_blocker(venue, now)
+    at = max(research_due_at(venue, now), now)
+    if block == "waiting for market data":
+        return f"{venue} research (waiting for market data)", now
+    if block == "daily experiment limit reached":
+        return f"Research cycle ({venue}, daily limit reached)", max(at, now - now % 86400 + 86400)
+    if block == "waiting for a new bar":
+        nxt = (int(now // 3600) + 1) * 3600 + 60 if venue == "CRYPTO" else \
+            venues.next_close(now) + freshness.SIP_DELAY + 120
+        at = max(at, nxt)
+    return f"Research cycle ({venue})", at
+
+
 def next_actions() -> list[dict]:
     sch = settings.get("schedule")
     now = clock.now()
     out = []
-    r = db.q1("SELECT last_started_at FROM jobs WHERE name='research'")
-    nxt = (r["last_started_at"] + sch["research_interval_hours"] * 3600) if r and r["last_started_at"] else now
-    nv = AnalystThread.next_venue()
-    out.append({"what": f"Research cycle ({nv})" if nv else "Research (waiting for market data)", "at": max(nxt, now)})
+    for v in RESEARCH_VENUES:
+        what, at = _next_research_at(v, now)
+        out.append({"what": what, "at": at})
     out.append({"what": "Next crypto hourly bar close", "at": (int(now // 3600) + 1) * 3600 + 60})
     try:
         if venues.is_open("NASDAQ", now):

@@ -347,7 +347,8 @@ const LIMIT_FIELDS = [
   ["risk", "max_orders_per_hour", "Max orders / hour"], ["risk", "max_quote_age_sec", "Max quote age (s)"],
   ["risk", "max_participation", "Max % of ADV per order"], ["risk", "max_spread_bps", "Max usable spread (bp)"],
   ["budget", "monthly_usd", "LLM budget / month ($)"], ["budget", "daily_usd", "LLM budget / day ($)"],
-  ["schedule", "research_interval_hours", "Research every (hours)"], ["schedule", "max_research_per_day", "Max experiments / day"],
+  ["schedule", "crypto_research_hours", "Crypto research every (hours)"], ["schedule", "nasdaq_research_hours", "NASDAQ research every (hours, needs a new daily bar)"],
+  ["schedule", "max_research_per_day", "Max experiments / day per venue"],
   ["schedule", "review_hour_utc", "Daily review hour (UTC)"],
 ];
 async function renderSystem(body) {

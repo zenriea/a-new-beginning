@@ -79,6 +79,11 @@ def next_open(epoch: float) -> float:
     return cal.next_open(ts).timestamp()
 
 
+def next_close(epoch: float) -> float:
+    """Epoch of the next NASDAQ regular-session close after ``epoch``."""
+    return _xnas().next_close(_to_ts(epoch)).timestamp()
+
+
 def last_close_before(epoch: float) -> float:
     cal = _xnas()
     return cal.previous_close(_to_ts(epoch)).timestamp()

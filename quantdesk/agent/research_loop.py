@@ -64,6 +64,20 @@ def _prior_test_windows(venue: str) -> list[tuple[int, int]]:
     return out
 
 
+def record_unexpected_failure(venue: str, exc: BaseException) -> None:
+    """A research cycle crashed (a bug, not a provider outage): make it visible in the journal
+    and close out any experiment it left half-done, so nothing fails silently."""
+    now = clock.now()
+    for e in db.q("SELECT id, hypothesis_id FROM experiments WHERE status='running' AND venue=?", (venue,)):
+        db.ex("UPDATE experiments SET status='error', error=?, completed_at=? WHERE id=?",
+              (f"{type(exc).__name__}: {exc}"[:1000], now, e["id"]))
+        db.ex("UPDATE hypotheses SET status='abandoned', updated_at=? WHERE id=? AND status='testing'", (now, e["hypothesis_id"]))
+    journal.write("system", f"{venue} research cycle failed unexpectedly",
+                  f"{type(exc).__name__}: {exc}"[:1500] + "\n\nThis is a software error, not a market or AI-provider "
+                  "problem. The cycle was abandoned and the next one runs on schedule. Details are in the worker log "
+                  "and Limits & system > Jobs.", author="system")
+
+
 def research_cycle(venue: str, analyst=None) -> dict:
     cfg = load_config()
     analyst = analyst or get_analyst()

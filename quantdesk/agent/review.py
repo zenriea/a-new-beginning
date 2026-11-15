@@ -5,7 +5,9 @@ explains and may choose continue / reduce / retire / increase within bounds.
 """
 from __future__ import annotations
 
+import logging
 import math
+import traceback
 
 import numpy as np
 
@@ -18,6 +20,8 @@ from ..venues import VENUES
 from . import journal
 from .analyst import RulesAnalyst, get_analyst
 from .llm import BudgetExceeded, LLMError
+
+log = logging.getLogger(__name__)
 
 
 def live_stats(strat: dict) -> dict:
@@ -141,7 +145,16 @@ def review_strategy(strat: dict, analyst=None) -> dict:
 
 
 def review_all(analyst=None) -> list[dict]:
+    """Review every live strategy; one failing review never blocks the others or fails silently."""
     out = []
     for s in db.q("SELECT * FROM strategies WHERE status IN ('active','incubating')"):
-        out.append(review_strategy(dict(s), analyst))
+        s = dict(s)
+        try:
+            out.append(review_strategy(s, analyst))
+        except Exception as e:
+            log.error("review of strategy %s failed: %s", s["id"], traceback.format_exc())
+            journal.write("system", f"Review of {s['name']} v{s['version']} failed",
+                          f"{type(e).__name__}: {e}"[:1500] + "\n\nThe strategy keeps trading under its frozen rules and "
+                          "the risk engine; the review is retried tomorrow.", refs={"strategy_id": s["id"]},
+                          author="system")
     return out
