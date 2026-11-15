@@ -75,6 +75,7 @@ def run(spec: dict, panel: dict, sig: Signals, costs_cfg: dict, start: int, end:
     fees_paid = 0.0
     slip_paid = 0.0
     last_mark = np.zeros(N)
+    sub = StepView(sig, cols)  # built once: slicing per bar made long histories quadratic
 
     for t in range(start, end):
         # 1) execute orders due at this bar's open
@@ -132,16 +133,15 @@ def run(spec: dict, panel: dict, sig: Signals, costs_cfg: dict, start: int, end:
                 cost_basis[col] = 0
         # 2) mark to market at the close
         # carry the last finite close for missing bars (past data only)
-        mark = np.where(np.isfinite(cls[t]), cls[t], last_mark)
+        mark = np.where(np.isfinite(cls[t]), cls[t], last_mark)  # always finite (last_mark starts at 0)
         last_mark = mark
-        pos_val = float(np.nansum(qty * np.nan_to_num(mark)))
+        pos_val = float(np.sum(qty * mark))
         eq = cash + pos_val
         equity.append(eq)
         exposure.append(pos_val / eq if eq > 0 else 0.0)
         # 3) decide at the close; act at t+1+delay
         if t >= end - 1:
             break
-        sub = StepView(sig, cols)
         sub_states = [states[c] for c in cols]
         res = step(spec, sub_states, t, sub, cls[t, cols])
         due = t + 1 + delay

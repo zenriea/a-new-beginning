@@ -80,7 +80,8 @@ Research tab is that record.
 
 | | NASDAQ (Alpaca data) | Crypto (Coinbase public data) |
 |---|---|---|
-| Research bars | Daily, split- and dividend-adjusted, 6 years | Hourly, 1 year |
+| Research bars | Daily, split- and dividend-adjusted, 6 years | Hourly, 3 years |
+| Research schedule | At most once per new daily bar (every 20 h) | Every 4 h |
 | Decisions | After the close (+20 min, after the free plan's SIP delay) | Each hourly close |
 | Execution | Next regular session (+5 min), XNAS calendar with holidays and early closes | 24/7 |
 | Costs | $0 commission (configurable), SEC fee + FINRA TAF on sells, quoted spread, impact | 25 bp taker fee, quoted spread, impact |
@@ -268,8 +269,8 @@ pip install -r requirements-dev.txt && python -m pytest -q
 |---|---|
 | Server | ~$5–25/month (any small VPS) |
 | Market data | $0 (Coinbase public; Alpaca free plan). Alpaca's paid plan gives full SIP quotes |
-| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider and model you choose: a few dollars a month for small, cheap models; ~$30–45/month for frontier models at the default schedule; $0 for a local Ollama model or a free tier (within its rate limits). A **hard budget** stops new AI calls at `$40/month` or `$4/day` by default (changeable in Limits), using the prices you configure. |
-| Cheaper | A smaller model; research every 12 h instead of 6 h; or demo mode ($0) |
+| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider and model you choose: a few dollars a month for small, cheap models; ~$30–45/month for frontier models at the default schedule; $0 for a local Ollama model or a free tier (within its rate limits). At the default schedule that is about 7 research cycles a day (6 crypto, 1 NASDAQ). A **hard budget** stops new AI calls at `$40/month` or `$4/day` by default (changeable in Limits), using the prices you configure. |
+| Cheaper | A smaller model; research less often (Limits: crypto every 8 h instead of 4 h); or demo mode ($0) |
 
 These AI cost figures are estimates from prompt sizes. No live AI call was made while building
 this (see below). The Limits tab shows the real per-call tokens and cost once it
@@ -278,7 +279,7 @@ runs.
 ## What was verified while building this, and what wasn't
 
 **Verified**
-* **Automated tests: 80 pass**, covering:
+* **Automated tests: 103 pass**, covering:
   * ledger math and integrity checks, including split replay
   * split, dividend and unexplained re-adjustment of price history
   * every risk rule
@@ -291,6 +292,8 @@ runs.
   * AI provider handling: budget pre-check, refusal and truncation, cost accounting, OpenAI-compatible fallbacks and JSON repair
   * gate enforcement even when the model asks to allocate
   * API authentication, CSRF, rate limiting, settings ceilings
+  * per-venue research scheduling, retries and caps; unexpected research/review errors are journaled
+  * crypto history extension; strategies waiting for allocation room; backtest speed (linear in history)
 * **Live crypto data**: backfilled 8,754 hourly Coinbase bars per pair and polled live quotes. A
   full research cycle ran on real data (demo analyst). It rejected a crypto trend idea whose test
   window looked great (+12.6 %, Sharpe 2.1) but which lost money in train and validation and had
@@ -310,6 +313,11 @@ runs.
   returned valid JSON in strict-schema mode (two calls, ~12k tokens). Some Gemini models were overloaded
   (503) or need billing; transient errors are retried with backoff, and a failed cycle pauses research
   for 10 minutes.
+* **Upgrade of an existing install** (Nov 15, 2026, real Coinbase/Alpaca data, live Gemini calls): the
+  1-year crypto history was extended to 3 years (26,269 hourly bars per pair, one pair per minute) before
+  crypto research resumed; NASDAQ and crypto then ran on their own clocks. The crypto sealed test window
+  grew from 2,141 to 6,478 bars. A 12-combination crypto experiment on 3 years runs in ~3 s (it took ~40 s
+  before the backtester fix), with byte-identical results.
 * **Restarts**: graceful stop and restart; in Docker, SIGKILL of the worker. The container
   restarted automatically, recovery ran and integrity held.
 * **Docker Compose** stack built and ran (api, worker, no-network sandbox). The model-code spool

@@ -171,13 +171,15 @@ async function loadEquity() {
 function renderNow(s) {
   const a = s.agent || {};
   const exp = s.latest_experiment;
-  const nexts = (a.next_actions || []).slice(0, 4);
+  const nexts = (a.next_actions || []).slice(0, 5);
+  const live = s.strategies.filter((x) => x.status === "active").length;
+  const waiting = s.strategies.length - live;
   $("#now").innerHTML = `
     <div class="now-activity">${esc(cap(a.activity || "starting"))}</div>
     <div class="now-detail">${esc(a.detail || "")} <span class="muted">· ${ago(a.updated_at)}</span></div>
     ${exp ? `<div style="margin-top:10px;font-size:13px">Latest experiment: <a href="#" data-exp="${exp.id}">#${exp.id} ${esc(exp.title)}</a>
       <span class="status ${esc(exp.status)}">${esc(exp.status)}</span></div>` : `<div class="muted" style="margin-top:10px">No experiments yet.</div>`}
-    <div style="margin-top:6px;font-size:13px" class="secondary">${s.strategies.length} live strateg${s.strategies.length === 1 ? "y" : "ies"} ·
+    <div style="margin-top:6px;font-size:13px" class="secondary">${live} live strateg${live === 1 ? "y" : "ies"}${waiting ? ` (+${waiting} waiting for room)` : ""} ·
       ${s.counts.experiments} experiments run · ${s.open_orders.length} open order${s.open_orders.length === 1 ? "" : "s"}</div>
     <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span><span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span></li>`).join("")}</ul>`;
 }
@@ -347,7 +349,8 @@ const LIMIT_FIELDS = [
   ["risk", "max_orders_per_hour", "Max orders / hour"], ["risk", "max_quote_age_sec", "Max quote age (s)"],
   ["risk", "max_participation", "Max % of ADV per order"], ["risk", "max_spread_bps", "Max usable spread (bp)"],
   ["budget", "monthly_usd", "LLM budget / month ($)"], ["budget", "daily_usd", "LLM budget / day ($)"],
-  ["schedule", "research_interval_hours", "Research every (hours)"], ["schedule", "max_research_per_day", "Max experiments / day"],
+  ["schedule", "crypto_research_hours", "Crypto research every (hours)"], ["schedule", "nasdaq_research_hours", "NASDAQ research every (hours, needs a new daily bar)"],
+  ["schedule", "max_research_per_day", "Max experiments / day per venue"],
   ["schedule", "review_hour_utc", "Daily review hour (UTC)"],
 ];
 async function renderSystem(body) {
@@ -511,16 +514,27 @@ document.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------- journal
-const KINDS = [["hypothesis", "Hypotheses"], ["test", "Tests"], ["decision", "Decisions"], ["intent", "Intents"], ["fill", "Fills"],
-  ["review", "Reviews"], ["risk", "Risk"], ["observation", "Observations"], ["data", "Data"], ["system", "System"], ["research", "Research"]];
+// Each chip covers a group of entry kinds: "Research" is every step of the research loop.
+const KINDS = [["research", "Research", ["observation", "research", "hypothesis", "test", "decision"]],
+  ["trades", "Trades", ["intent", "order", "fill"]], ["review", "Reviews", ["review"]], ["risk", "Risk", ["risk"]],
+  ["data", "Data", ["data"]], ["system", "System", ["system"]]];
+const activeKinds = () => new Set(KINDS.filter(([k]) => state.filter.has(k)).flatMap(([, , ks]) => ks));
 function renderFilters() {
   $("#filters").innerHTML = `<button class="fchip ${state.filter.size ? "" : "on"}" data-k="">All</button>` +
     KINDS.map(([k, l]) => `<button class="fchip ${state.filter.has(k) ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
 }
-$("#filters").addEventListener("click", (e) => {
+$("#filters").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-k]"); if (!b) return;
   if (!b.dataset.k) state.filter.clear(); else state.filter.has(b.dataset.k) ? state.filter.delete(b.dataset.k) : state.filter.add(b.dataset.k);
   renderFilters(); renderFeed();
+  if (state.filter.size) {  // older matching entries may be beyond the 200 most recent ones loaded at start
+    try {
+      const rows = await api(`/api/journal?limit=200&kind=${[...activeKinds()].join(",")}`);
+      const have = new Set(state.journal.map((j) => j.id));
+      state.journal = state.journal.concat(rows.filter((r) => !have.has(r.id))).sort((x, y) => y.id - x.id);
+      renderFeed();
+    } catch (err) { console.error(err); }
+  }
 });
 function entryHTML(j, fresh) {
   const refs = j.refs || {};
@@ -536,7 +550,8 @@ function entryHTML(j, fresh) {
     <div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div></div>`;
 }
 function renderFeed(freshIds = new Set()) {
-  const items = state.journal.filter((j) => !state.filter.size || state.filter.has(j.kind));
+  const kinds = activeKinds();
+  const items = state.journal.filter((j) => !state.filter.size || kinds.has(j.kind));
   $("#feed").innerHTML = items.length ? items.slice(0, 300).map((j) => entryHTML(j, freshIds.has(j.id))).join("") : `<div class="empty">No journal entries${state.filter.size ? " for this filter" : ""} yet.</div>`;
 }
 $("#feed").addEventListener("click", (e) => {

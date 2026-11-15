@@ -174,6 +174,33 @@ def evaluate_strategy(strat: dict) -> dict:
             "entries": [spec["universe"][k] for k in res.enter], "exits": [spec["universe"][k] for k, _ in res.exit]}
 
 
+def allocation_room(equity: float | None = None) -> float:
+    """Capital still allocatable under the operator's total-allocation limit."""
+    eq = ledger.equity_breakdown()["equity"] if equity is None else equity
+    used = db.q1("SELECT COALESCE(SUM(allocation),0) a FROM strategies WHERE status IN ('active','incubating')")["a"]
+    return max(0.0, settings.get("risk")["max_total_allocation_pct"] * eq - used)
+
+
+def activate_waiting() -> list[int]:
+    """Start strategies that were approved while the total-allocation limit was full."""
+    lim = settings.get("risk")
+    frac = settings.get("research")["incubation_fraction"]
+    out = []
+    for s in db.q("SELECT * FROM strategies WHERE status='incubating' AND allocation <= 0 ORDER BY id"):
+        start = min(s["approved_allocation"] * frac, allocation_room())
+        if start < lim["min_order_usd"]:
+            continue
+        now = clock.now()
+        db.ex("UPDATE strategies SET status='active', allocation=?, activated_at=?, last_signal_bar=? WHERE id=?",
+              (start, now, freshness.expected_last_bar(s["venue"], now), s["id"]))
+        journal.write("decision", f"Activated {s['name']} v{s['version']}",
+                      f"Capital freed up under the total-allocation limit, so this approved strategy now trades with "
+                      f"${start:,.0f} (approved ${s['approved_allocation']:,.0f}), starting on the next bar close.",
+                      refs={"strategy_id": s["id"]}, author="rules")
+        out.append(s["id"])
+    return out
+
+
 def reconcile_sleeve(strat: dict, bar: int) -> None:
     """Keep state machine and holdings consistent (e.g. after rejected/expired orders)."""
     sid = strat["id"]

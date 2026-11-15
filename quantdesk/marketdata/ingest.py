@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from .. import clock
+from .. import clock, db
 from ..config import load_config
 from ..venues import VENUES
 from . import store
@@ -13,7 +13,10 @@ from .freshness import bar_closed, bars_current
 
 log = logging.getLogger(__name__)
 
-BACKFILL_DAYS = {"CRYPTO": 365, "NASDAQ": 6 * 365}
+# Crypto needs several years of hourly bars: with one year the sealed test window is only
+# ~3 months, which makes every significance gate far stricter than for NASDAQ.
+BACKFILL_DAYS = {"CRYPTO": 3 * 365, "NASDAQ": 6 * 365}
+EXTEND_TOLERANCE = 7 * 86400  # history starting within a week of the target counts as complete
 OVERLAP_SECONDS = {"CRYPTO": 3 * 3600, "NASDAQ": 10 * 86400}  # re-fetch recent stored bars to detect re-adjustment
 ADJUST_TOLERANCE = 0.003  # >0.3% change in an already-stored close = provider re-adjusted history
 _providers: dict[str, Provider] = {}
@@ -114,7 +117,43 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
             err = None if ok else f"latest stored {tf} bar for {s} is older than expected"
             if store.set_status(f"bars:{s}", ok, err):
                 events.append({"key": f"bars:{s}", "ok": ok, "error": err, "symbol": s})
+    _extend_history(provider, venue, symbols, tf, now)
     return events
+
+
+def history_pending(venue: str, symbols: list[str]) -> bool:
+    """True while stored history for some symbol has not yet been checked/extended to BACKFILL_DAYS."""
+    tf = VENUES[venue].timeframe
+    days = str(BACKFILL_DAYS[venue])
+    return any(db.get_meta(f"history_extended:{s}:{tf}") != days and store.last_bar_ts(s, tf) is not None
+               for s in symbols)
+
+
+def _extend_history(provider: Provider, venue: str, symbols: list[str], tf: str, now: float) -> None:
+    """Fetch older bars when stored history is shorter than BACKFILL_DAYS (e.g. an install made
+    when the backfill was shorter). At most one symbol per call, and each symbol only once per
+    target length, so the market loop stays responsive and young listings are not re-fetched."""
+    days = BACKFILL_DAYS[venue]
+    target = int(now - days * 86400)
+    for s in symbols:
+        key = f"history_extended:{s}:{tf}"
+        if db.get_meta(key) == str(days):
+            continue
+        r = db.q1("SELECT MIN(ts) t FROM bars WHERE symbol=? AND timeframe=?", (s, tf))
+        first = r["t"] if r else None
+        if first is None:
+            continue  # nothing stored yet: the regular backfill handles it
+        if first > target + EXTEND_TOLERANCE:
+            try:
+                data = provider.fetch_bars([s], tf, target, int(first))
+            except DataError as e:
+                log.warning("history extension for %s failed: %s", s, e)
+                return  # try again on a later tick
+            store.upsert_bars(s, tf, [b for b in data.get(s, []) if b.ts < first and bar_closed(venue, b.ts, now)])
+            db.set_meta(key, str(days))
+            log.info("extended %s %s history back to %s days", s, tf, days)
+            return
+        db.set_meta(key, str(days))
 
 
 def _detect_readjustment(symbol: str, tf: str, fresh: list) -> float | None:

@@ -223,9 +223,12 @@ DEFAULT_SETTINGS: dict = {
     "schedule": {
         "quote_poll_sec": 20,
         "bar_refresh_min": 15,
-        "research_interval_hours": 6,
+        # Each venue has its own research clock. Crypto bars close every hour, 24/7; NASDAQ
+        # gets one new daily bar per session, so it is researched once per new bar at most.
+        "crypto_research_hours": 4,
+        "nasdaq_research_hours": 20,
         "review_hour_utc": 22,
-        "max_research_per_day": 6,
+        "max_research_per_day": 6,      # per venue
         "nasdaq_signal_delay_min": 20,  # minutes after the close before evaluating daily signals
     },
     "budget": {
@@ -271,7 +274,8 @@ SETTING_BOUNDS: dict = {
     ("risk", "max_spread_bps"): (1.0, 500.0),
     ("budget", "monthly_usd"): (0.0, "ceiling_monthly_llm_usd"),
     ("budget", "daily_usd"): (0.0, "ceiling_monthly_llm_usd"),
-    ("schedule", "research_interval_hours"): (0.5, 168),
+    ("schedule", "crypto_research_hours"): (0.5, 168),
+    ("schedule", "nasdaq_research_hours"): (0.5, 168),
     ("schedule", "max_research_per_day"): (0, 48),
     ("schedule", "quote_poll_sec"): (5, 600),
     ("schedule", "review_hour_utc"): (0, 23),
