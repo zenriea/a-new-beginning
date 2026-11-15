@@ -156,7 +156,7 @@ def bars_tick() -> None:
     for venue, syms in uni.items():
         tf = venues.VENUES[venue].timeframe
         exp = freshness.expected_last_bar(venue, now)
-        behind = [s for s in syms if (store.last_bar_ts(s, tf) or 0) < exp]
+        behind = [s for s in syms if (store.last_bar_ts(s, tf) or 0) < exp] or ingest.history_pending(venue, syms)
         key = f"bars:{venue}"
         if (behind and job_due(key + ":behind", 60)) or job_due(key, sch["bar_refresh_min"] * 60):
             run_job(key, lambda: None)
@@ -260,8 +260,8 @@ def research_due_at(venue: str, now: float) -> float:
 
 def research_blocker(venue: str, now: float) -> str | None:
     """Why a venue cannot be researched right now regardless of its clock (None = it can)."""
-    if not venue_ready(venue):
-        return "waiting for market data"
+    if not venue_ready(venue) or ingest.history_pending(venue, settings.get("universe")[venue]):
+        return "waiting for market data"  # incl. a one-time history extension still downloading
     day0 = now - now % 86400
     n = db.q1("SELECT COUNT(*) n FROM experiments WHERE venue=? AND created_at>=?", (venue, day0))["n"]
     if n >= settings.get("schedule")["max_research_per_day"]:

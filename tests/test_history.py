@@ -64,3 +64,22 @@ def test_symbol_with_shorter_history_is_not_refetched_forever(env):
     n = len(p.calls)
     ingest.ingest_bars("CRYPTO", ["SOL-USD"])
     assert all(c[1] >= _first("SOL-USD") - 3 * 3600 for c in p.calls[n:])
+
+
+def test_research_waits_until_history_extension_finishes(env):
+    from quantdesk import worker
+    from quantdesk.marketdata import ingest
+    ingest.set_provider("CRYPTO", Counting())
+    ingest.BACKFILL_DAYS["CRYPTO"], real = 365, ingest.BACKFILL_DAYS["CRYPTO"]
+    try:
+        ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD", "SOL-USD"])
+    finally:
+        ingest.BACKFILL_DAYS["CRYPTO"] = real
+    from quantdesk import clock
+    assert ingest.history_pending("CRYPTO", ["BTC-USD", "ETH-USD", "SOL-USD"])
+    assert worker.research_blocker("CRYPTO", clock.now()) == "waiting for market data"
+    for _ in range(3):
+        clock.advance(61)
+        worker.bars_tick()           # pending extension makes the bar job run every minute, not every 15 min
+    assert not ingest.history_pending("CRYPTO", ["BTC-USD", "ETH-USD", "SOL-USD"])
+    assert worker.research_blocker("CRYPTO", clock.now()) is None

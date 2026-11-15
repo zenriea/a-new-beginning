@@ -121,6 +121,14 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
     return events
 
 
+def history_pending(venue: str, symbols: list[str]) -> bool:
+    """True while stored history for some symbol has not yet been checked/extended to BACKFILL_DAYS."""
+    tf = VENUES[venue].timeframe
+    days = str(BACKFILL_DAYS[venue])
+    return any(db.get_meta(f"history_extended:{s}:{tf}") != days and store.last_bar_ts(s, tf) is not None
+               for s in symbols)
+
+
 def _extend_history(provider: Provider, venue: str, symbols: list[str], tf: str, now: float) -> None:
     """Fetch older bars when stored history is shorter than BACKFILL_DAYS (e.g. an install made
     when the backfill was shorter). At most one symbol per call, and each symbol only once per

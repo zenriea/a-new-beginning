@@ -80,7 +80,8 @@ Research tab is that record.
 
 | | NASDAQ (Alpaca data) | Crypto (Coinbase public data) |
 |---|---|---|
-| Research bars | Daily, split- and dividend-adjusted, 6 years | Hourly, 1 year |
+| Research bars | Daily, split- and dividend-adjusted, 6 years | Hourly, 3 years |
+| Research schedule | At most once per new daily bar (every 20 h) | Every 4 h |
 | Decisions | After the close (+20 min, after the free plan's SIP delay) | Each hourly close |
 | Execution | Next regular session (+5 min), XNAS calendar with holidays and early closes | 24/7 |
 | Costs | $0 commission (configurable), SEC fee + FINRA TAF on sells, quoted spread, impact | 25 bp taker fee, quoted spread, impact |
@@ -268,8 +269,8 @@ pip install -r requirements-dev.txt && python -m pytest -q
 |---|---|
 | Server | ~$5–25/month (any small VPS) |
 | Market data | $0 (Coinbase public; Alpaca free plan). Alpaca's paid plan gives full SIP quotes |
-| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider and model you choose: a few dollars a month for small, cheap models; ~$30–45/month for frontier models at the default schedule; $0 for a local Ollama model or a free tier (within its rate limits). A **hard budget** stops new AI calls at `$40/month` or `$4/day` by default (changeable in Limits), using the prices you configure. |
-| Cheaper | A smaller model; research every 12 h instead of 6 h; or demo mode ($0) |
+| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider and model you choose: a few dollars a month for small, cheap models; ~$30–45/month for frontier models at the default schedule; $0 for a local Ollama model or a free tier (within its rate limits). At the default schedule that is about 7 research cycles a day (6 crypto, 1 NASDAQ). A **hard budget** stops new AI calls at `$40/month` or `$4/day` by default (changeable in Limits), using the prices you configure. |
+| Cheaper | A smaller model; research less often (Limits: crypto every 8 h instead of 4 h); or demo mode ($0) |
 
 These AI cost figures are estimates from prompt sizes. No live AI call was made while building
 this (see below). The Limits tab shows the real per-call tokens and cost once it

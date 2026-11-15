@@ -15,6 +15,10 @@ def desk(env, monkeypatch):
     now = clock.now()
     put_bars("BTC-USD", list(100 + np.arange(400.0)), "1h", start=int(now // 3600) * 3600 - 400 * 3600)
     put_bars("QQQ", list(100 + np.arange(400.0)), "1d", start=int(now // 86400) * 86400 - 400 * 86400)
+    from quantdesk import db
+    from quantdesk.marketdata import ingest
+    for sym, venue, tf in (("BTC-USD", "CRYPTO", "1h"), ("QQQ", "NASDAQ", "1d")):
+        db.set_meta(f"history_extended:{sym}:{tf}", str(ingest.BACKFILL_DAYS[venue]))  # as ingest records it
     calls = []
     outcome = {"status": "done"}
 
