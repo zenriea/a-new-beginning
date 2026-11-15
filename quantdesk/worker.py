@@ -220,6 +220,8 @@ class AnalystThread(threading.Thread):
             journal.set_status("paused", "Operator paused the agent: no new research or positions")
             return
         due = job_due("research", sch["research_interval_hours"] * 3600)
+        if due and not requested and now < float(db.get_meta("research_retry_after") or 0):
+            due = False  # AI provider failed recently: wait before retrying the cycle
         if (due and n_today < sch["max_research_per_day"]) or requested:
             venue = requested if requested in settings.get("universe") else self.next_venue()
             db.set_meta("research_requested", "")
@@ -231,6 +233,8 @@ class AnalystThread(threading.Thread):
             res = run_job("research", research_cycle, venue)
             self.busy = False
             db.set_meta("last_research_venue", venue)
+            if res and res.get("status") == "llm_error":
+                db.set_meta("research_retry_after", str(clock.now() + 600))
             if res and res.get("status") in ("no_data", "budget", "llm_error"):
                 # a cycle that could not run does not use up the research slot
                 db.ex("UPDATE jobs SET last_started_at=? WHERE name='research'", (prev["last_started_at"] if prev else None,))

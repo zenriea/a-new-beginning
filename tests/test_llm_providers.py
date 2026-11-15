@@ -132,3 +132,15 @@ def test_research_cycle_via_openai_compatible_provider(compat):
     assert res["status"] == "done" and res["decision"] == "reject"
     assert db.q1("SELECT author FROM hypotheses")["author"] == "llm"
     assert db.q1("SELECT COUNT(*) n FROM llm_calls WHERE status='ok'")["n"] == 2
+
+
+def test_transient_errors_back_off_and_retry(compat, monkeypatch):
+    from quantdesk.agent.llm import LLM, LLMError
+    sleeps = []
+    monkeypatch.setattr(LLM, "_sleep", staticmethod(lambda s: sleeps.append(s)))
+    srv = FakeServer([Resp(503, text="high demand"), Resp(429, text="quota"), ok('{"answer": "x", "n": 1}')])
+    assert LLM(http_post=srv).call("q", "s", "u", SCHEMA)[0]["n"] == 1
+    assert sleeps == [4, 8]
+    srv = FakeServer([Resp(503, text="high demand")] * 3)
+    with pytest.raises(LLMError, match="503"):
+        LLM(http_post=srv).call("q", "s", "u", SCHEMA)

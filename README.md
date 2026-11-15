@@ -246,7 +246,7 @@ runs.
 ## What was verified while building this, and what wasn't
 
 **Verified**
-* **Automated tests: 79 pass**, covering:
+* **Automated tests: 80 pass**, covering:
   * ledger math and integrity checks, including split replay
   * split, dividend and unexplained re-adjustment of price history
   * every risk rule
@@ -271,6 +271,13 @@ runs.
   which is the case the simulator's last-trade fallback handles. A full NASDAQ research cycle ran on
   real data: the long-term trend filter returned +2.0 % net (Sharpe 0.18) on the sealed test window
   vs. +20.1 % for QQQ buy-and-hold, and was rejected.
+* **Real AI analyst (Google Gemini, `gemini-3.5-flash`)**: a full NASDAQ research cycle ran with live
+  Gemini calls. Gemini proposed a momentum-rotation hypothesis with a quantitative prediction, the sealed
+  test failed (−10.5 % vs. QQQ +20.1 %, 302 trades), and Gemini diagnosed the churn, recorded lessons and
+  proposed a specific revision. A question was answered from records with a correct citation. Both calls
+  returned valid JSON in strict-schema mode (two calls, ~12k tokens). Some Gemini models were overloaded
+  (503) or need billing; transient errors are retried with backoff, and a failed cycle pauses research
+  for 10 minutes.
 * **Restarts**: graceful stop and restart; in Docker, SIGKILL of the worker. The container
   restarted automatically, recovery ran and integrity held.
 * **Docker Compose** stack built and ran (api, worker, no-network sandbox). The model-code spool
@@ -280,12 +287,8 @@ runs.
 * **UI** in Chromium: light, dark, 390 px phone width (no horizontal scroll), no console errors.
 
 **Not verified**, so check these on first deployment:
-* **Real AI calls.** No AI provider key was available. Both paths are tested against fakes: the
-  OpenAI-compatible path against a fake server (strict schema, fallbacks for unsupported options,
-  JSON repair, truncation, budget, a full research cycle), and the Claude path against a fake client
-  mimicking the SDK's responses. After configuring a provider, open Limits & system → *Recent LLM calls*
-  and confirm `status=ok`. Small local models may fail the schema more often; failures are logged, and
-  the deterministic rules engine takes over the decision step when the AI is unavailable.
+* **Claude.** No Anthropic key was available, so the Claude path is tested only against a fake client
+  mimicking the SDK's responses.
 * **NASDAQ execution.** No live NASDAQ session was observed (it was a weekend, and there were no
   keys). Session logic is covered by calendar-based tests.
 * **Promotion to live trading with real research results.** No experiment passed every gate on

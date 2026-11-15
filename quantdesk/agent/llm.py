@@ -147,6 +147,8 @@ _compat_quirks: dict = {}  # learned per base_url: which request options the pro
 
 
 class LLM:
+    _sleep = staticmethod(time.sleep)
+
     def __init__(self, client=None, http_post=None):
         """``client``: injected Anthropic client (tests). ``http_post``: injected
         requests.post-compatible callable for the OpenAI-compatible path (tests)."""
@@ -207,7 +209,8 @@ class LLM:
         if self.cfg.llm_api_key:
             headers["Authorization"] = f"Bearer {self.cfg.llm_api_key}"
         repaired = False
-        for _attempt in range(6):
+        transient = 0
+        for _attempt in range(8):
             self._precheck(purpose, system, json.dumps(messages), max_tokens)
             body = {"model": self.model, "messages": messages, quirks["tok"]: max_tokens}
             if quirks["format"] == "json_schema":
@@ -224,6 +227,13 @@ class LLM:
             except Exception as e:
                 self._record_end(cid, "error", f"{type(e).__name__}: {e}"[:1000], None, {"input_tokens": 0, "output_tokens": 0}, "")
                 raise LLMError(f"{purpose}: request failed: {type(e).__name__}: {e}") from e
+            if r.status_code in (429, 500, 502, 503, 504) and transient < 2:
+                # overloaded / rate-limited / gateway timeout: brief backoff, then retry
+                transient += 1
+                self._record_end(cid, "retry", f"HTTP {r.status_code}, retrying: {r.text[:200]}", None,
+                                 {"input_tokens": 0, "output_tokens": 0}, r.text)
+                self._sleep(4 * transient)
+                continue
             if r.status_code == 400 and self._adapt(quirks, r.text):
                 self._record_end(cid, "retry", f"400, adapting request: {r.text[:300]}", None,
                                  {"input_tokens": 0, "output_tokens": 0}, r.text)
