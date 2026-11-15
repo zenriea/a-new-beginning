@@ -168,7 +168,7 @@ Research tab is that record.
 ### 2. Local run
 
 ```bash
-git clone https://github.com/zenriea/a-new-beginning && cd a-new-beginning
+git clone https://github.com/zenriea/quant-desk && cd quant-desk
 ```
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
@@ -190,7 +190,7 @@ For a $0 demo with fake data that is labeled as fake everywhere, set `QD_MARKET_
 On any Linux VPS with Docker (2 vCPU / 2–4 GB is enough):
 
 ```bash
-git clone https://github.com/zenriea/a-new-beginning && cd a-new-beginning && cp .env.example .env
+git clone https://github.com/zenriea/quant-desk && cd quant-desk && cp .env.example .env
 ```
 Edit `.env`: set `QD_ADMIN_PASSWORD`, `QD_SESSION_SECRET`, `ANTHROPIC_API_KEY` and the Alpaca keys. Then:
 ```bash
@@ -233,7 +233,7 @@ about 200 MB of memory, so the 1 GB trial or Hobby plan is plenty. In this mode 
 AI-written code runs as a restricted subprocess (cleared environment, allowlist, resource limits,
 unprivileged user) but without its own network namespace.
 
-1. **New Project → Deploy from GitHub repo**, authorize GitHub, pick `zenriea/a-new-beginning` (`main`).
+1. **New Project → Deploy from GitHub repo**, authorize GitHub, pick `zenriea/quant-desk` (`main`).
 2. Open the service → **Variables** and add:
    ```
    QD_ADMIN_PASSWORD=<long password for the dashboard>
