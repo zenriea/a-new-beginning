@@ -9,4 +9,4 @@ COPY web ./web
 RUN useradd --system --uid 10001 --home /app app && mkdir -p /data /spool && chown app /data /spool
 USER app
 EXPOSE 8000
-CMD ["python", "-m", "quantdesk.api.app"]
+CMD ["python", "-m", "quantdesk.run_all"]
