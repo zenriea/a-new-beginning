@@ -155,7 +155,9 @@ def hypothesis_prompt(ctx: dict) -> str:
         "Avoid whipsaw: when entry and exit flip on the same line (e.g. close vs one moving average), every wiggle "
         "around it is a costly round trip. Use a buffer between entry and exit and/or require confirmation, e.g. "
         f"entry `{ANTI_WHIPSAW_EXAMPLES[0]}`, exit `{ANTI_WHIPSAW_EXAMPLES[1]}`, or entry `{ANTI_WHIPSAW_EXAMPLES[2]}`. "
-        "Estimate trades per year before proposing.\n"
+        "Estimate trades per year before proposing. Slow rules on one symbol make too few trades to pass "
+        "acceptance_gates.min_test_trades (counted across the whole universe) and the top-5 concentration gate; "
+        "apply them to several symbols of the approved universe instead.\n"
         "'rationale' = the economic/behavioural reason the edge might exist; 'prediction' = what the test "
         "should show if you are right (be quantitative); 'falsification' = what result would make you drop it.\n\n"
         f"CONTEXT (JSON):\n{json.dumps(ctx, default=str)}")
