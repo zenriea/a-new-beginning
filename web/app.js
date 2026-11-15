@@ -352,6 +352,12 @@ const LIMIT_FIELDS = [
   ["schedule", "crypto_research_hours", "Crypto research every (hours)"], ["schedule", "nasdaq_research_hours", "NASDAQ research every (hours, needs a new daily bar)"],
   ["schedule", "max_research_per_day", "Max experiments / day per venue"],
   ["schedule", "review_hour_utc", "Daily review hour (UTC)"],
+  ["gates", "min_test_sharpe", "Gate: min test Sharpe"], ["gates", "min_val_sharpe", "Gate: min validation Sharpe"],
+  ["gates", "min_test_trades", "Gate: min test trades"], ["gates", "min_deflated_psr", "Gate: min deflated PSR (0-1)"],
+  ["gates", "min_cost_stress_return", "Gate: min return at 2x costs"], ["gates", "min_delay_stress_sharpe", "Gate: min Sharpe with 1-bar delay"],
+  ["gates", "min_neighbor_positive_frac", "Gate: min share of positive neighbours"],
+  ["gates", "min_subperiod_positive_frac", "Gate: min share of positive sub-periods"],
+  ["gates", "max_top5_concentration", "Gate: max top-5 trade concentration"],
 ];
 async function renderSystem(body) {
   const sys = await api("/api/system");

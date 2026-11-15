@@ -244,15 +244,16 @@ DEFAULT_SETTINGS: dict = {
         "observation_blinding": True,  # hypothesis context excludes data the test window could use
     },
     "gates": {
+        # Looser than a real-money desk would use (paper trading: favour getting live evidence sooner).
         "min_test_trades": 8,
-        "min_test_sharpe": 0.4,
+        "min_test_sharpe": 0.2,
         "min_val_sharpe": 0.0,
         "min_cost_stress_return": 0.0,
         "min_delay_stress_sharpe": 0.0,
         "min_neighbor_positive_frac": 0.5,
         "min_subperiod_positive_frac": 0.5,
-        "max_top5_concentration": 0.75,
-        "min_deflated_psr": 0.60,
+        "max_top5_concentration": 1.0,
+        "min_deflated_psr": 0.50,
     },
     "agent": {"paused": False, "emergency_stop": False},
 }
@@ -279,6 +280,15 @@ SETTING_BOUNDS: dict = {
     ("schedule", "max_research_per_day"): (0, 48),
     ("schedule", "quote_poll_sec"): (5, 600),
     ("schedule", "review_hour_utc"): (0, 23),
+    ("gates", "min_test_trades"): (1, 1000),
+    ("gates", "min_test_sharpe"): (-5.0, 5.0),
+    ("gates", "min_val_sharpe"): (-5.0, 5.0),
+    ("gates", "min_cost_stress_return"): (-1.0, 1.0),
+    ("gates", "min_delay_stress_sharpe"): (-5.0, 5.0),
+    ("gates", "min_neighbor_positive_frac"): (0.0, 1.0),
+    ("gates", "min_subperiod_positive_frac"): (0.0, 1.0),
+    ("gates", "max_top5_concentration"): (0.0, 100.0),
+    ("gates", "min_deflated_psr"): (0.0, 1.0),
 }
 
 # Prices per 1M tokens (input, output, cache_write, cache_read). Editable here if pricing
