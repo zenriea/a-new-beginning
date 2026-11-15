@@ -92,7 +92,13 @@ def research_cycle(venue: str, analyst=None) -> dict:
                       author="rules", dedupe_key=f"noresearch:{venue}:{int(clock.now() // 3600)}")
         return {"status": "no_data"}
     blinded = observe(venue, allowed[venue], bench, blind_frac=0.75) if rs.get("observation_blinding", True) else obs
+    costs = settings.get("costs")[venue]
+    round_trip = 2 * (costs.get("taker_fee_bps", 0) + costs["backtest_half_spread_bps"] + costs["base_slippage_bps"])
     ctx = {
+        # without these the model proposes high-turnover ideas that lose to fees and can never pass the gates
+        "trading_costs": dict(costs, approx_round_trip_bps=round_trip,
+                              note="Every buy+sell pays about approx_round_trip_bps plus market impact."),
+        "acceptance_gates": settings.get("gates"),
         "venue": venue, "approved_universe": allowed[venue], "benchmark": bench,
         "timeframe": obs["timeframe"], "market_context": blinded,
         "context_note": ("Blinded: statistics end at the earliest possible test-window start." if blinded is not obs
