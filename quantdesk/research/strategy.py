@@ -70,12 +70,12 @@ def validate_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos:
     combos = math.prod(len(v) for v in params.values()) if params else 1
     if combos > max_combos:
         raise SpecError(f"parameter grid has {combos} combinations; limit is {max_combos}")
-    probe = {k: v[0] for k, v in params.items()}
+    grid = param_grid({"params": params})  # every combination, so a bad later value is caught here too
     if kind == "dsl":
         for key in ("entry", "exit"):
             if not spec.get(key):
                 raise SpecError(f"dsl strategy needs '{key}'")
-            dsl.validate(spec[key], probe)
+            _check_expr(spec[key], grid)
     else:
         if not isinstance(spec.get("code"), str) or len(spec["code"]) > 6000:
             raise SpecError("code strategy needs 'code' (<= 6000 chars)")
@@ -85,7 +85,7 @@ def validate_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos:
         except PolicyError as e:
             raise SpecError(f"code rejected by sandbox policy: {e}") from None
     if spec.get("rank_by"):
-        dsl.validate(spec["rank_by"], probe)
+        _check_expr(spec["rank_by"], grid)
         tk = spec.get("top_k")
         if not isinstance(tk, int) or not (1 <= tk <= len(uni)):
             raise SpecError("top_k must be an integer between 1 and len(universe)")
@@ -104,6 +104,15 @@ def validate_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos:
     if mh is not None and (not isinstance(mh, int) or mh < 1):
         raise SpecError("max_hold_bars must be a positive integer or null")
     return spec
+
+
+def _check_expr(expr: str, grid: list[dict]) -> None:
+    """DSL problems are spec errors, so the analyst gets a repair round instead of a crashed experiment."""
+    try:
+        for combo in grid:
+            dsl.validate(expr, combo)
+    except dsl.DSLError as e:
+        raise SpecError(f"{e} (in `{expr}`)") from None
 
 
 def param_grid(spec: dict) -> list[dict]:

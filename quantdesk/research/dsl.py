@@ -25,7 +25,7 @@ FUNCS = {
     "min": 2, "max": 2, "rank": 1, "market": 1,
 }
 WINDOW_FUNCS = {"sma", "ema", "std", "ret", "lag", "highest", "lowest", "rsi", "zscore"}
-MAX_WINDOW = 1000
+MAX_WINDOW = 4000  # ~5.5 months of hourly crypto bars; slow trend filters need more than 1000
 
 
 class DSLError(ValueError):
@@ -92,6 +92,8 @@ def validate(expr: str, params: dict | None = None) -> set[str]:
             want = FUNCS[name]
             if len(node.args) != want:
                 raise DSLError(f"{name}() takes {want} argument(s)")
+            if name in WINDOW_FUNCS or name in ("rvol", "atr"):  # same window check the evaluator applies
+                _int_arg(node.args[1 if name in WINDOW_FUNCS else 0], Context({}, params, 0, None), name)
             for a in node.args:
                 visit(a, depth + 1)
             return

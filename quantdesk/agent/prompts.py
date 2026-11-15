@@ -32,7 +32,7 @@ Functions: sma(x,n) ema(x,n) std(x,n) ret(x,n)=x/lag(x,n)-1 lag(x,n) highest(x,n
 rsi(x,n) zscore(x,n) rvol(n)=annualised realised vol of close atr(n) crossover(a,b) crossunder(a,b) \
 abs(x) log(x) min(a,b) max(a,b) rank(x)=cross-sectional percentile 0..1 across the universe \
 market(x)=x evaluated on the venue benchmark (QQQ for NASDAQ, BTC-USD for crypto).
-Operators: + - * / < <= > >= and or not. Window arguments must be integers or parameters.
+Operators: + - * / < <= > >= and or not. Window arguments must be integers or parameters, between 1 and 4000 bars.
 Entry is evaluated when flat, exit when long. Optional rank_by + top_k keeps only the top_k candidates \
 (rotation). Optional stop_loss_pct / take_profit_pct / max_hold_bars (checked on bar closes). Long-only. \
 Sizing: fixed weight or inverse_vol (target_vol / realised vol, capped at max_weight), as a fraction of \
@@ -136,8 +136,10 @@ def hypothesis_prompt(ctx: dict) -> str:
     return (
         "TASK: Propose at most ONE hypothesis worth testing now on the venue below, or decide there is none.\n"
         "Build on the research memory: do not repeat a rejected idea unless you change something specific "
-        "and say why; revisions should cite the parent experiment id. If nothing is promising, answer "
-        "decision='no_idea', explain why in 'why', use empty strings for the text fields and null for spec.\n"
+        "and say why; revisions should cite the parent experiment id. Testing is cheap and the gates decide, so "
+        "propose the most promising idea you have, including one that stays flat (in cash) through downtrends. "
+        "Answer decision='no_idea' only if every idea you can think of would repeat a recorded failure; then "
+        "explain why in 'why', use empty strings for the text fields and null for spec.\n"
         "The market context below is BLINDED: it ends before the earliest possible test window, so whatever "
         "you see cannot leak into the sealed test. The universe must be a subset of the approved symbols.\n"
         "Each round trip costs about trading_costs.approx_round_trip_bps, so an idea must earn more than that per "

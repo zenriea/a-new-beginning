@@ -131,3 +131,27 @@ def test_sandbox_has_no_secrets_or_network(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in out["env"]
     if sandbox._netns_prefix():
         assert out["net"] is False
+
+
+def _spec(**kw):
+    s = {"name": "x", "venue": "CRYPTO", "universe": ["BTC-USD"], "kind": "dsl", "entry": "close > sma(close, n)",
+         "exit": "close < sma(close, n)", "sizing": {"method": "fixed", "weight": 0.2}, "params": {"n": [24, 1440]}}
+    s.update(kw)
+    return s
+
+
+def test_long_hourly_windows_are_allowed():
+    from quantdesk.research.strategy import validate_spec
+    validate_spec(_spec(), {"CRYPTO": ["BTC-USD"]})          # 60 days of hourly bars
+
+
+def test_every_grid_value_is_checked_and_dsl_errors_are_spec_errors():
+    import pytest
+    from quantdesk.research.strategy import SpecError, validate_spec
+    allowed = {"CRYPTO": ["BTC-USD"]}
+    with pytest.raises(SpecError, match="window"):
+        validate_spec(_spec(params={"n": [24, 9000]}), allowed)   # bad value is not the first one
+    with pytest.raises(SpecError, match="window"):
+        validate_spec(_spec(entry="close > sma(close, 9000)"), allowed)
+    with pytest.raises(SpecError):
+        validate_spec(_spec(entry="close >"), allowed)            # syntax error -> repairable, not a crash
