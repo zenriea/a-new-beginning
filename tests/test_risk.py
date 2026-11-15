@@ -113,3 +113,15 @@ def test_check_uses_live_state(env):
     make_strategy()
     d = risk.check(req(qty=10, price=100))
     assert d.approved
+
+
+def test_gate_thresholds_are_operator_editable_within_bounds(env):
+    import pytest
+    from quantdesk import settings
+    g = settings.get("gates")
+    assert (g["min_test_sharpe"], g["min_deflated_psr"], g["max_top5_concentration"]) == (0.2, 0.5, 1.0)
+    assert settings.operator_update("gates", {"min_test_sharpe": 0.4})["min_test_sharpe"] == 0.4
+    with pytest.raises(settings.SettingsError):
+        settings.operator_update("gates", {"min_test_sharpe": 50})
+    with pytest.raises(settings.SettingsError):
+        settings.operator_update("gates", {"min_deflated_psr": 1.5})
