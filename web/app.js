@@ -144,8 +144,10 @@ function ensureEquityChart() {
   const el = $("#equity-chart");
   const chart = LightweightCharts.createChart(el, { ...themedChartOptions(), autoSize: true });
   const mk = (v) => chart.addLineSeries({ color: cssVar(v), lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
-  const c = { chart, acct: mk("--series-1"), bench: mk("--series-2"), btc: mk("--series-3") };
-  c.theme = () => { chart.applyOptions(themedChartOptions()); c.acct.applyOptions({ color: cssVar("--series-1") }); c.bench.applyOptions({ color: cssVar("--series-2") }); c.btc.applyOptions({ color: cssVar("--series-3") }); };
+  const area = () => ({ lineColor: cssVar("--series-1"), topColor: cssVar("--accent-soft"), bottomColor: "rgba(0,0,0,0)" });
+  const acct = chart.addAreaSeries({ ...area(), lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+  const c = { chart, acct, bench: mk("--series-2"), btc: mk("--series-3") };
+  c.theme = () => { chart.applyOptions(themedChartOptions()); c.acct.applyOptions(area()); c.bench.applyOptions({ color: cssVar("--series-2") }); c.btc.applyOptions({ color: cssVar("--series-3") }); };
   chart.subscribeCrosshairMove((p) => {
     if (!p || !p.time) { $("#equity-tip").textContent = ""; return; }
     const g = (ser) => { const d = p.seriesData.get(ser); return d ? money(d.value) : "–"; };
@@ -175,7 +177,7 @@ function renderNow(s) {
   const live = s.strategies.filter((x) => x.status === "active").length;
   const waiting = s.strategies.length - live;
   $("#now").innerHTML = `
-    <div class="now-activity">${esc(cap(a.activity || "starting"))}</div>
+    <div class="now-activity act-${esc(a.activity || "starting")}">${esc(cap(a.activity || "starting"))}</div>
     <div class="now-detail">${esc(a.detail || "")} <span class="muted">· ${ago(a.updated_at)}</span></div>
     ${exp ? `<div style="margin-top:10px;font-size:13px">Latest experiment: <a href="#" data-exp="${exp.id}">#${exp.id} ${esc(exp.title)}</a>
       <span class="status ${esc(exp.status)}">${esc(exp.status)}</span></div>` : `<div class="muted" style="margin-top:10px">No experiments yet.</div>`}
@@ -561,7 +563,7 @@ function entryHTML(j, fresh) {
   if (refs.order_id) links.push(`<a href="#" data-order="${refs.order_id}">order #${refs.order_id}</a>`);
   if (j.llm_call_id) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
   const long = (j.body || "").length > 420;
-  return `<div class="entry ${fresh ? "fresh" : ""}" data-jid="${j.id}"><div class="entry-meta"><span class="kind ${esc(j.kind)}">${esc(j.kind === "intent" ? "intent · not a fill" : j.kind)}</span>
+  return `<div class="entry k-${esc(j.kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}"><div class="entry-meta"><span class="kind ${esc(j.kind)}">${esc(j.kind === "intent" ? "intent · not a fill" : j.kind)}</span>
     <span class="author">${authorLabel(j.author)}</span><span title="${esc(new Date(j.ts * 1000).toISOString())}">${dt(j.ts)}</span></div>
     <div class="entry-title">${rich(j.title)}</div><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
     <div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div></div>`;
