@@ -62,7 +62,7 @@ function applyTheme(t) {
   if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
   Object.values(state.charts).forEach((c) => c && c.theme && c.theme());
 }
-try { applyTheme(localStorage.getItem("qd-theme")); } catch {}
+try { applyTheme(localStorage.getItem("qd-theme") || "dark"); } catch { applyTheme("dark"); }  // black is the house theme
 $("#btn-theme").addEventListener("click", () => {
   const dark = document.documentElement.getAttribute("data-theme") === "dark" ||
     (!document.documentElement.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
