@@ -145,5 +145,6 @@ def test_anti_whipsaw_examples_are_valid_rules():
     from quantdesk.agent import prompts
     from quantdesk.research import dsl
     assert "whipsaw" in prompts.hypothesis_prompt({})
+    assert "several symbols" in prompts.hypothesis_prompt({})
     for expr in prompts.ANTI_WHIPSAW_EXAMPLES:
         dsl.validate(expr, {"n": 336})
