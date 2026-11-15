@@ -77,7 +77,7 @@ function renderBadges(s) {
   b.push(`<span class="badge paper">PAPER · no real money</span>`);
   b.push(s.mode.llm === "demo"
     ? `<span class="badge warn"><span class="dot"></span>DEMO analyst · no AI configured</span>`
-    : `<span class="badge ok"><span class="dot"></span>Analyst: ${esc(s.mode.llm)}</span>`);
+    : `<span class="badge ok" title="AI analyst: ${esc(s.mode.llm)}"><span class="dot"></span>AI: ${esc(s.mode.llm.split(" (")[0])}</span>`);
   if (s.mode.market_data === "synthetic") b.push(`<span class="badge warn"><span class="dot"></span>SYNTHETIC market data</span>`);
   b.push(`<span class="badge ${s.worker.alive ? "ok" : "bad"}"><span class="dot"></span>Worker ${s.worker.alive ? "running" : "offline"}</span>`);
   const n = s.sessions.NASDAQ;
