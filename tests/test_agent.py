@@ -123,3 +123,19 @@ def test_no_idea_is_recorded_as_a_decision(env):
     research_cycle("NASDAQ", analyst=LLMAnalyst(LLM(FakeClient([noidea]))))
     assert db.q1("SELECT kind FROM decisions")["kind"] == "no_trade"
     assert db.q1("SELECT COUNT(*) n FROM experiments")["n"] == 0
+
+
+def test_hypothesis_prompt_shows_costs_and_gates(env):
+    from quantdesk.agent.analyst import LLMAnalyst
+    from quantdesk.agent.llm import LLM
+    from quantdesk.agent.research_loop import research_cycle
+    _seed_nasdaq()
+    noidea = {"decision": "no_idea", "why": "w", "title": "", "rationale": "", "prediction": "", "falsification": "",
+              "parent_experiment_id": None, "spec": None}
+    fc = FakeClient([noidea])
+    research_cycle("NASDAQ", analyst=LLMAnalyst(LLM(fc)))
+    prompt = fc.calls[0]["messages"][0]["content"]
+    ctx = json.loads(prompt.split("CONTEXT (JSON):\n", 1)[1])
+    assert ctx["trading_costs"]["approx_round_trip_bps"] == pytest.approx(6.0)  # 2 x (2 spread + 1 slippage)
+    assert ctx["acceptance_gates"]["min_test_trades"] == 8
+    assert "round trip" in prompt

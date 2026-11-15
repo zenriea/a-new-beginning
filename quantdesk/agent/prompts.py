@@ -140,6 +140,9 @@ def hypothesis_prompt(ctx: dict) -> str:
         "decision='no_idea', explain why in 'why', use empty strings for the text fields and null for spec.\n"
         "The market context below is BLINDED: it ends before the earliest possible test window, so whatever "
         "you see cannot leak into the sealed test. The universe must be a subset of the approved symbols.\n"
+        "Each round trip costs about trading_costs.approx_round_trip_bps, so an idea must earn more than that per "
+        "trade on average; prefer fewer, larger moves over frequent small ones. Capital is allocated only if every "
+        "threshold in acceptance_gates passes (they include doubled costs and a one-bar delay), so design for them.\n"
         "'rationale' = the economic/behavioural reason the edge might exist; 'prediction' = what the test "
         "should show if you are right (be quantitative); 'falsification' = what result would make you drop it.\n\n"
         f"CONTEXT (JSON):\n{json.dumps(ctx, default=str)}")
