@@ -224,6 +224,38 @@ git pull && docker compose up -d --build
 Without Docker, use the systemd units in `deploy/` (`Restart=always`). In that setup the sandbox
 runs in `local` mode: subprocess isolation with a network namespace.
 
+### 3b. Railway (no server to manage)
+
+The repo includes `railway.json`, which builds the Dockerfile and starts `python -m quantdesk.run_all`:
+web UI and worker in **one** container, with the worker restarted automatically if it crashes. It uses
+about 200 MB of memory, so the 1 GB trial or Hobby plan is plenty. In this mode the sandbox for
+AI-written code runs as a restricted subprocess (cleared environment, allowlist, resource limits,
+unprivileged user) but without its own network namespace.
+
+1. **New Project → Deploy from GitHub repo**, authorize GitHub, pick `zenriea/a-new-beginning` (`main`).
+2. Open the service → **Variables** and add:
+   ```
+   QD_ADMIN_PASSWORD=<long password for the dashboard>
+   QD_SESSION_SECRET=<random string; e.g. from python3 -c "import secrets;print(secrets.token_hex(32))">
+   QD_COOKIE_SECURE=1
+   QD_TRUSTED_PROXIES=*
+   RAILWAY_RUN_UID=0
+   ALPACA_API_KEY_ID=<your Alpaca key ID>
+   ALPACA_API_SECRET_KEY=<your Alpaca secret>
+   QD_LLM_PROVIDER=gemini
+   QD_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+   QD_LLM_API_KEY=<your Gemini key>
+   QD_LLM_MODEL=gemini-3.5-flash
+   QD_LLM_PRICE_IN=0.5
+   QD_LLM_PRICE_OUT=3
+   ```
+   `RAILWAY_RUN_UID=0` lets the app write to the volume.
+3. **Add a volume** to the service (right-click the service, or the command palette → *Add Volume*)
+   with mount path **`/data`**. Without it, all history is lost on every redeploy.
+4. Service → **Settings → Networking → Generate Domain**. Open the link and sign in with your password.
+5. Check **Deployments → Logs** for `worker ... started`. Redeploys happen automatically when `main`
+   changes; state survives because it lives on the volume.
+
 ### 4. Tests
 
 ```bash
@@ -295,3 +327,5 @@ runs.
   real data during the build, so the allocate → live-trade path was exercised by tests and the
   execution harness only.
 * Multi-day unattended operation, the Caddy TLS profile and the systemd units were not run.
+* Railway itself was not used; the single-container mode was tested locally in Docker as Railway runs it
+  (root user, volume at `/data`, `PORT`, `run_all`): health, sandbox, worker crash-restart and graceful stop.
