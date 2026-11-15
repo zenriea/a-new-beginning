@@ -262,6 +262,17 @@ async function renderTab() {
   } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
 }
 
+const GATE_LABEL = { validation_sharpe: "Validation", test_sharpe: "Test Sharpe", test_trades: "Too few trades",
+  test_return_cost_x2: "2× costs", test_sharpe_delay_1bar: "1-bar delay", neighbor_positive_frac: "Nearby params",
+  subperiod_positive_frac: "Sub-periods", top5_concentration: "Top-5 trades", deflated_psr: "Deflated PSR" };
+const gateLabel = (n) => GATE_LABEL[n] || n.replaceAll("_", " ");
+function gatesCell(e) {
+  if (e.error && !e.gates) return `<span class="muted">could not run</span>`;
+  const failed = e.gates?.failed || [], total = e.gates?.checks?.length || 9;
+  if (!failed.length) return `<span class="up">all ${total} passed</span>`;
+  return `<b>${failed.length}/${total} failed</b><div class="chips">${failed.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}</div>`;
+}
+
 async function renderResearch(body) {
   const ex = await api("/api/experiments");
   if (!ex.length) { body.innerHTML = `<div class="empty">No experiments yet. The first research cycle runs shortly after the worker has market data.</div>`; return; }
@@ -269,11 +280,11 @@ async function renderResearch(body) {
   body.innerHTML = `<div class="secondary" style="margin-bottom:10px;font-size:13px">${ex.length} experiments · ${passed} passed every gate ·
     ${ex.filter((e) => e.status === "failed").length} failed. Learning here means this record: each idea, its frozen test, and what was concluded.</div>
     <div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>Hypothesis</th><th>Venue</th><th>Status</th><th class="r">Test return</th>
-    <th class="r">Test Sharpe</th><th class="r">Trades</th><th>Failed gates</th><th>When</th></tr></thead><tbody>
-    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num">${e.id}</td><td>${esc(e.title)}<div class="muted" style="font-size:11.5px">${authorLabel(e.author)}</div></td>
+    <th class="r">Test Sharpe</th><th class="r">Trades</th><th>Gates</th><th>When</th></tr></thead><tbody>
+    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num">${e.id}</td><td class="hyp">${esc(e.title)}<div class="muted" style="font-size:11.5px">${authorLabel(e.author)}</div></td>
       <td>${esc(e.venue)}</td><td><span class="status ${esc(e.status)}">${esc(e.status)}</span></td>
       <td class="r num ${signCls(e.test?.total_return)}">${pct(e.test?.total_return)}</td><td class="r num">${num(e.test?.sharpe)}</td>
-      <td class="r num">${e.test?.n_trades ?? "–"}</td><td style="font-size:12px" class="secondary">${esc((e.gates?.failed || []).join(", ") || (e.error ? "error" : "–"))}</td>
+      <td class="r num">${e.test?.n_trades ?? "–"}</td><td class="gates" style="font-size:12px">${gatesCell(e)}</td>
       <td class="muted" style="white-space:nowrap">${ago(e.created_at)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -454,7 +465,7 @@ async function openExperiment(id) {
     <div class="section"><h4>Test window: strategy vs. benchmark (growth of $1)</h4><div class="chart-tip" id="exp-tip" style="padding-left:0"></div><div class="chart-wrap" id="exp-chart" style="height:220px"></div>
       <div class="chart-legend" style="padding:0"><span><span class="sw" style="background:var(--series-1)"></span>Strategy (net)</span><span><span class="sw" style="background:var(--series-2)"></span>${esc(t.benchmark_symbol)} buy & hold</span></div></div>
     <div class="section"><h4>Acceptance gates (deterministic, operator-set)</h4>${(g?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? "✓" : "✗"}</span>
-      <div><b>${esc(c.name.replaceAll("_", " "))}</b> <span class="num">${c.value == null ? "n/a" : num(c.value, 3)} ${esc(c.op)} ${num(c.threshold, 3)}</span><div class="muted" style="font-size:12px">${esc(c.why)}</div></div></div>`).join("")}</div>
+      <div><b>${esc(gateLabel(c.name))}</b> <span class="num">${c.value == null ? "n/a" : num(c.value, 3)} ${esc(c.op)} ${num(c.threshold, 3)}</span><div class="muted" style="font-size:12px">${esc(c.why)}</div></div></div>`).join("")}</div>
     <div class="section"><h4>Challenge</h4><div class="secondary" style="font-size:13px">Neighbouring parameters positive: ${pct(ch.neighbor_positive_frac, 0, false)} (median Sharpe ${num(ch.neighbor_median_sharpe)}) ·
       pre-test sub-periods positive: ${pct(ch.subperiod_positive_frac, 0, false)} · top-5 trades share of pre-test profit: ${ch.top5_concentration_pre_test == null ? "n/a (no profit)" : pct(ch.top5_concentration_pre_test, 0, false)}</div>
       <div class="tbl-scroll" style="margin-top:6px"><table class="tbl"><thead><tr><th>Sub-period</th><th class="r">Return</th><th class="r">Sharpe</th><th class="r">Trades</th></tr></thead><tbody>
