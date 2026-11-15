@@ -209,6 +209,9 @@ def research_cycle(venue: str, analyst=None) -> dict:
     if decision == "allocate" and not gres["passed"]:
         decision = "reject"
         dec["journal"] += "\n\n[Risk/gate engine] Allocation refused: gates failed (" + ", ".join(gres["failed"]) + ")."
+    elif decision == "allocate" and not float(dec.get("allocation_pct") or 0) > 0:
+        decision = "reject"
+        dec["journal"] += "\n\n[Risk/gate engine] Recorded as a rejection: the allocation requested was 0%."
     did = db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
                 "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), decision, "experiment", eid, dec["journal"],
                                             db.dumps({"lessons": dec.get("lessons", []), "revision_idea": dec.get("revision_idea"),
@@ -259,10 +262,11 @@ def create_strategy(hid, eid, prop, spec, res, dec, author, call_id) -> int:
     eq = ledger.equity_breakdown()["equity"]
     req_pct = max(0.0, float(dec.get("allocation_pct") or 0))
     approved_pct = min(req_pct, lim["max_strategy_pct"])
-    current = db.q1("SELECT COALESCE(SUM(allocation),0) a FROM strategies WHERE status IN ('active','incubating')")["a"]
-    room = max(0.0, lim["max_total_allocation_pct"] * eq - current)
-    approved = min(approved_pct * eq, room)  # cannot exceed total-allocation room
-    start_alloc = approved * rs["incubation_fraction"]
+    approved = approved_pct * eq
+    from ..trading.live import allocation_room
+    start_alloc = min(approved * rs["incubation_fraction"], allocation_room(eq))  # never beyond total-allocation room
+    if start_alloc < lim["min_order_usd"]:
+        start_alloc = 0.0  # waits as 'incubating' until room frees up (live.activate_waiting)
     t = res["test"]
     v = 1 + db.q1("SELECT COUNT(*) n FROM strategies WHERE name=?", (spec["name"],))["n"]
     fixed = dict(spec, fixed_params=res["chosen_params"])
@@ -281,9 +285,18 @@ def create_strategy(hid, eid, prop, spec, res, dec, author, call_id) -> int:
     note = ""
     if approved < req_pct * eq - 1:
         note = f" Requested {req_pct:.1%} of equity; operator limits capped approval at ${approved:,.0f}."
-    journal.write("decision", f"New strategy live: {spec['name']} v{v}",
-                  f"Approved ${approved:,.0f}; trading starts at the incubation size ${start_alloc:,.0f} "
-                  f"({rs['incubation_fraction']:.0%}) on the next bar close.{note}\nThesis: {dec.get('thesis')}\n"
+    full = approved * rs["incubation_fraction"]
+    if start_alloc <= 0:
+        title = f"Strategy approved, waiting for room: {spec['name']} v{v}"
+        start = (f"No room under the total-allocation limit ({lim['max_total_allocation_pct']:.0%} of equity), so it "
+                 "starts trading automatically when other strategies free up capital.")
+    else:
+        title = f"New strategy live: {spec['name']} v{v}"
+        start = (f"Trading starts at the incubation size ${start_alloc:,.0f} on the next bar close"
+                 + (f" (reduced from ${full:,.0f} by the total-allocation limit)." if start_alloc < full - 1 else
+                    f" ({rs['incubation_fraction']:.0%})."))
+    journal.write("decision", title,
+                  f"Approved ${approved:,.0f}. {start}{note}\nThesis: {dec.get('thesis')}\n"
                   f"Exit plan: {dec.get('exit_plan')}\nInvalidation: {inval}",
                   refs={"strategy_id": sid, "experiment_id": eid}, author=author, llm_call_id=call_id)
     return sid

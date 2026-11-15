@@ -167,6 +167,7 @@ def bars_tick() -> None:
 def signals_tick() -> None:
     sch = settings.get("schedule")
     now = clock.now()
+    live.activate_waiting()
     for s in db.q("SELECT * FROM strategies WHERE status='active'"):
         s = dict(s)
         if s["venue"] == "NASDAQ":

@@ -117,7 +117,9 @@ def review_strategy(strat: dict, analyst=None) -> dict:
         new_alloc = min(strat["allocation"] * 0.5, req * eq) if req else strat["allocation"] * 0.5
     elif action == "increase":
         req = rev.get("new_allocation_pct") or strat["approved_allocation"] / eq
-        new_alloc = min(req * eq, strat["approved_allocation"], settings.get("risk")["max_strategy_pct"] * eq)
+        new_alloc = min(req * eq, strat["approved_allocation"], settings.get("risk")["max_strategy_pct"] * eq,
+                        strat["allocation"] + live.allocation_room(eq))  # never beyond the total-allocation limit
+        new_alloc = max(new_alloc, strat["allocation"])
     did = db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
                 "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), f"review_{action}", "strategy", strat["id"], rev["journal"],
                                             db.dumps({"live": st, "shadow": shadow, "flags": flags, "band": band,
