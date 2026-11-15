@@ -131,6 +131,13 @@ ANSWER_SCHEMA = {
 }
 
 
+ANTI_WHIPSAW_EXAMPLES = (
+    "close > sma(close, n) * 1.03",           # entry: clearly above the trend line (buffer)
+    "close < sma(close, n) * 0.97",           # exit: clearly below it, not on the first wiggle
+    "lowest(close, 24) > sma(close, n)",      # confirmation: above the line for a whole day of hourly bars
+)
+
+
 def hypothesis_prompt(ctx: dict) -> str:
     import json
     return (
@@ -145,6 +152,10 @@ def hypothesis_prompt(ctx: dict) -> str:
         "Each round trip costs about trading_costs.approx_round_trip_bps, so an idea must earn more than that per "
         "trade on average; prefer fewer, larger moves over frequent small ones. Capital is allocated only if every "
         "threshold in acceptance_gates passes (they include doubled costs and a one-bar delay), so design for them.\n"
+        "Avoid whipsaw: when entry and exit flip on the same line (e.g. close vs one moving average), every wiggle "
+        "around it is a costly round trip. Use a buffer between entry and exit and/or require confirmation, e.g. "
+        f"entry `{ANTI_WHIPSAW_EXAMPLES[0]}`, exit `{ANTI_WHIPSAW_EXAMPLES[1]}`, or entry `{ANTI_WHIPSAW_EXAMPLES[2]}`. "
+        "Estimate trades per year before proposing.\n"
         "'rationale' = the economic/behavioural reason the edge might exist; 'prediction' = what the test "
         "should show if you are right (be quantitative); 'falsification' = what result would make you drop it.\n\n"
         f"CONTEXT (JSON):\n{json.dumps(ctx, default=str)}")

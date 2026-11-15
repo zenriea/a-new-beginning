@@ -139,3 +139,11 @@ def test_hypothesis_prompt_shows_costs_and_gates(env):
     assert ctx["trading_costs"]["approx_round_trip_bps"] == pytest.approx(6.0)  # 2 x (2 spread + 1 slippage)
     assert ctx["acceptance_gates"]["min_test_trades"] == 8
     assert "round trip" in prompt
+
+
+def test_anti_whipsaw_examples_are_valid_rules():
+    from quantdesk.agent import prompts
+    from quantdesk.research import dsl
+    assert "whipsaw" in prompts.hypothesis_prompt({})
+    for expr in prompts.ANTI_WHIPSAW_EXAMPLES:
+        dsl.validate(expr, {"n": 336})
