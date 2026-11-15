@@ -282,6 +282,8 @@ def run_research(venue: str) -> dict | None:
     job = research_job(venue)
     prev = db.q1("SELECT last_started_at FROM jobs WHERE name=?", (job,))
     bar = _latest_bench_bar(venue)
+    journal.set_status("researching", f"{venue}: starting a research cycle",
+                       next_actions=[a for a in next_actions() if venue not in a["what"]])
 
     def cycle():
         try:
@@ -315,8 +317,11 @@ def _next_research_at(venue: str, now: float) -> tuple[str, float]:
     if block == "daily experiment limit reached":
         return f"Research cycle ({venue}, daily limit reached)", max(at, now - now % 86400 + 86400)
     if block == "waiting for a new bar":
-        nxt = (int(now // 3600) + 1) * 3600 + 60 if venue == "CRYPTO" else \
-            venues.next_close(now) + freshness.SIP_DELAY + 120
+        try:
+            nxt = (int(now // 3600) + 1) * 3600 + 60 if venue == "CRYPTO" else \
+                venues.next_close(now) + freshness.SIP_DELAY + 120
+        except Exception:  # calendar out of range: show the clock-based time only
+            nxt = at
         at = max(at, nxt)
     return f"Research cycle ({venue})", at
 

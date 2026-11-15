@@ -279,7 +279,7 @@ runs.
 ## What was verified while building this, and what wasn't
 
 **Verified**
-* **Automated tests: 80 pass**, covering:
+* **Automated tests: 103 pass**, covering:
   * ledger math and integrity checks, including split replay
   * split, dividend and unexplained re-adjustment of price history
   * every risk rule
@@ -292,6 +292,8 @@ runs.
   * AI provider handling: budget pre-check, refusal and truncation, cost accounting, OpenAI-compatible fallbacks and JSON repair
   * gate enforcement even when the model asks to allocate
   * API authentication, CSRF, rate limiting, settings ceilings
+  * per-venue research scheduling, retries and caps; unexpected research/review errors are journaled
+  * crypto history extension; strategies waiting for allocation room; backtest speed (linear in history)
 * **Live crypto data**: backfilled 8,754 hourly Coinbase bars per pair and polled live quotes. A
   full research cycle ran on real data (demo analyst). It rejected a crypto trend idea whose test
   window looked great (+12.6 %, Sharpe 2.1) but which lost money in train and validation and had
@@ -311,6 +313,11 @@ runs.
   returned valid JSON in strict-schema mode (two calls, ~12k tokens). Some Gemini models were overloaded
   (503) or need billing; transient errors are retried with backoff, and a failed cycle pauses research
   for 10 minutes.
+* **Upgrade of an existing install** (Nov 15, 2026, real Coinbase/Alpaca data, live Gemini calls): the
+  1-year crypto history was extended to 3 years (26,269 hourly bars per pair, one pair per minute) before
+  crypto research resumed; NASDAQ and crypto then ran on their own clocks. The crypto sealed test window
+  grew from 2,141 to 6,478 bars. A 12-combination crypto experiment on 3 years runs in ~3 s (it took ~40 s
+  before the backtester fix), with byte-identical results.
 * **Restarts**: graceful stop and restart; in Docker, SIGKILL of the worker. The container
   restarted automatically, recovery ran and integrity held.
 * **Docker Compose** stack built and ran (api, worker, no-network sandbox). The model-code spool

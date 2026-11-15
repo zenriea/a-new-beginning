@@ -169,3 +169,21 @@ def test_review_failure_is_journaled_and_other_strategies_still_reviewed(env, mo
     out = review.review_all()
     assert seen == [a, b] and len(out) == 1
     assert db.q1("SELECT 1 FROM journal WHERE kind='system' AND title LIKE 'Review of%failed%'")
+
+
+def test_status_during_a_cycle_does_not_show_stale_plan_for_that_venue(desk, monkeypatch):
+    from quantdesk import db
+    from quantdesk.agent import research_loop
+    thread, calls, _ = desk
+    seen = []
+
+    def watching(venue, analyst=None):
+        st = db.q1("SELECT next_actions FROM agent_status WHERE id=1")
+        seen.append((venue, st["next_actions"] if st else ""))
+        return {"status": "done"}
+    db.ex("INSERT INTO agent_status(id, activity, detail, updated_at, next_actions) VALUES(1,'waiting','',0,?)",
+          ('[{"at":0,"what":"CRYPTO research (waiting for market data)"}]',))
+    monkeypatch.setattr(research_loop, "research_cycle", watching)
+    thread.tick()
+    venue, plan = seen[0]
+    assert venue == "CRYPTO" and "CRYPTO" not in plan
