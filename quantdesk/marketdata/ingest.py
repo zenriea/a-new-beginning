@@ -3,6 +3,7 @@ reports "data went stale"/"data recovered" once, not every poll."""
 from __future__ import annotations
 
 import logging
+import time
 
 from .. import clock, db
 from ..config import load_config
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 BACKFILL_DAYS = {"CRYPTO": 365, "NASDAQ": 2 * 365}
 EXTEND_TOLERANCE = 7 * 86400  # history starting within a week of the target counts as complete
 OVERLAP_SECONDS = {"CRYPTO": 3 * 3600, "NASDAQ": 4 * 86400}  # re-fetch recent stored bars to detect re-adjustment
+BACKFILL_BUDGET_SEC = 120  # first downloads per call; the rest resume next tick so quotes/fills keep flowing
 ADJUST_TOLERANCE = 0.003  # >0.3% change in an already-stored close = provider re-adjusted history
 _providers: dict[str, Provider] = {}
 _backoff: dict[str, tuple[float, float]] = {}  # key -> (retry_at, current_delay)
@@ -89,18 +91,27 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
         return events
     starts = {}
     fetch_from = {}
+    new = set()
     for s in symbols:
         last = store.last_bar_ts(s, tf)
+        if last is None:
+            new.add(s)
         starts[s] = (last + step) if last is not None else int(now - BACKFILL_DAYS[venue] * 86400)
         fetch_from[s] = (last - OVERLAP_SECONDS[venue]) if last is not None else starts[s]
     groups: dict[int, list[str]] = {}
     for s, st in fetch_from.items():
-        groups.setdefault(st, []).append(s)
-    # One request per symbol for crypto; batched per start for NASDAQ
-    batches = [[s] for s in symbols] if venue == "CRYPTO" else list(groups.values())
+        if s not in new:
+            groups.setdefault(st, []).append(s)
+    # One request per symbol for crypto and for every first download; batched per start for
+    # NASDAQ updates (a multi-symbol full backfill runs to thousands of pages)
+    batches = [[s] for s in symbols if venue == "CRYPTO" or s in new] + \
+        ([] if venue == "CRYPTO" else list(groups.values()))
     if _blocked(f"bars:{venue}"):
         return events
+    began = time.monotonic()
     for batch in batches:
+        if batch[0] in new and time.monotonic() - began > BACKFILL_BUDGET_SEC:
+            continue
         st = min(fetch_from[s] for s in batch)
         try:
             if st < now:
@@ -131,11 +142,19 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
 
 
 def history_pending(venue: str, symbols: list[str]) -> bool:
-    """True while stored history for some symbol has not yet been checked/extended to BACKFILL_DAYS."""
+    """True while some symbol's history is still downloading: never fetched yet (unless its
+    download already failed - a dead symbol must not block forever), or not yet extended to
+    BACKFILL_DAYS."""
     tf = VENUES[venue].timeframe
     days = str(BACKFILL_DAYS[venue])
-    return any(db.get_meta(f"history_extended:{s}:{tf}") != days and store.last_bar_ts(s, tf) is not None
-               for s in symbols)
+    for s in symbols:
+        if store.last_bar_ts(s, tf) is None:
+            st = db.q1("SELECT ok FROM data_status WHERE key=?", (f"bars:{s}",))
+            if st is None or st["ok"]:
+                return True
+        elif db.get_meta(f"history_extended:{s}:{tf}") != days:
+            return True
+    return False
 
 
 def _extend_history(provider: Provider, venue: str, symbols: list[str], tf: str, now: float) -> None:

@@ -41,3 +41,46 @@ def test_bar_size_change_retires_old_strategies_once(env):
     new = make_strategy()
     assert worker.retire_on_timeframe_change() == []       # recorded: later strategies are left alone
     assert db.q1("SELECT status FROM strategies WHERE id=?", (new,))["status"] == "active"
+
+
+def test_alpaca_never_returns_a_silently_truncated_history(monkeypatch):
+    import pytest
+    from quantdesk.marketdata import alpaca
+    from quantdesk.marketdata.base import DataError
+    page = {"bars": {"AAL": [{"t": "2026-11-11T15:00:00Z", "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]},
+            "next_page_token": "more"}
+    monkeypatch.setattr(alpaca, "get_json", lambda *a, **k: page)   # a history that never ends
+    monkeypatch.setattr(alpaca, "MAX_PAGES", 3)
+    monkeypatch.setattr(alpaca.time, "sleep", lambda s: None)
+    with pytest.raises(DataError):
+        alpaca.AlpacaProvider("k", "s").fetch_bars(["AAL", "AMC"], "15m", 0, 2_000_000_000)
+
+
+def test_first_downloads_go_one_symbol_at_a_time_within_a_time_budget(env, monkeypatch):
+    from quantdesk.marketdata import ingest
+    from quantdesk.marketdata.synthetic import SyntheticProvider
+
+    class Slow(SyntheticProvider):
+        calls = []
+
+        def fetch_bars(self, symbols, timeframe, start, end):
+            Slow.calls.append(tuple(symbols))
+            ticks["t"] += 100                                  # each full download "takes" 100 s
+            return super().fetch_bars(symbols, timeframe, start, end)
+    ticks = {"t": 0.0}
+    monkeypatch.setattr(ingest.time, "monotonic", lambda: ticks["t"])
+    ingest.set_provider("NASDAQ", Slow("NASDAQ"))
+    syms = ["AAPL", "MSFT", "NVDA", "AMD"]
+    ingest.ingest_bars("NASDAQ", syms)
+    assert Slow.calls == [("AAPL",), ("MSFT",)]                # one per request; stops once over budget
+    assert ingest.history_pending("NASDAQ", syms)              # research waits for NVDA and AMD
+    ingest.ingest_bars("NASDAQ", syms)
+    assert ("NVDA",) in Slow.calls and ("AMD",) in Slow.calls
+    assert not ingest.history_pending("NASDAQ", syms)
+
+
+def test_a_symbol_whose_download_failed_does_not_block_research_forever(env):
+    from quantdesk.marketdata import ingest, store
+    store.set_status("bars:DEAD", False, "no bars returned")
+    assert not ingest.history_pending("NASDAQ", ["DEAD"])
+    assert ingest.history_pending("NASDAQ", ["NEVERTRIED"])

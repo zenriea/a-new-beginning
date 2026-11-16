@@ -19,6 +19,7 @@ def desk(env, monkeypatch):
     put_bars("QQQ", list(100 + np.arange(400.0)), start=start)
     # distinct clocks per venue (the defaults happen to be equal)
     settings.operator_update("schedule", {"crypto_research_hours": 4, "nasdaq_research_hours": 20})
+    settings.operator_update("universe", {"CRYPTO": ["BTC-USD"], "NASDAQ": ["QQQ"]})  # only these have bars
     from quantdesk import db
     from quantdesk.marketdata import ingest
     for sym, venue in (("BTC-USD", "CRYPTO"), ("QQQ", "NASDAQ")):

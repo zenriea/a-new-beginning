@@ -15,6 +15,7 @@ from .http import get_json
 
 BASE = "https://data.alpaca.markets"
 TF = {"1d": "1Day", "1h": "1Hour", "15m": "15Min"}
+MAX_PAGES = 1000  # loop guard only; pages hold ~1,000 bars whatever `limit` says
 
 
 def _iso(epoch: int) -> str:
@@ -48,7 +49,7 @@ class AlpacaProvider(Provider):
         params = {"symbols": ",".join(symbols), "timeframe": TF[timeframe], "start": _iso(start),
                   "end": _iso(end), "limit": 10000, "adjustment": "all", "feed": self.hist_feed}
         page = None
-        for _ in range(200):
+        for _ in range(MAX_PAGES):
             if page:
                 params["page_token"] = page
             d = get_json(f"{BASE}/v2/stocks/bars", params=params, headers=self.headers)
@@ -64,6 +65,8 @@ class AlpacaProvider(Provider):
             if not page:
                 break
             time.sleep(0.35)  # free plan: 200 requests/minute
+        if page:  # never return a silently truncated history: later symbols would just look stale
+            raise DataError(f"bar history for {len(symbols)} symbols exceeded {MAX_PAGES} pages; request fewer at once")
         return {s: [v[k] for k in sorted(v)] for s, v in out.items()}
 
     def fetch_quotes(self, symbols):
