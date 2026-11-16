@@ -6,21 +6,30 @@ import logging
 
 from .. import clock, db
 from ..config import load_config
-from ..venues import VENUES
+from ..venues import VENUES, in_regular_session
 from . import store
 from .base import DataError, Provider
 from .freshness import bar_closed, bars_current
 
 log = logging.getLogger(__name__)
 
-# Crypto needs several years of hourly bars: with one year the sealed test window is only
-# ~3 months, which makes every significance gate far stricter than for NASDAQ.
-BACKFILL_DAYS = {"CRYPTO": 3 * 365, "NASDAQ": 6 * 365}
+# 15-minute bars: one year of crypto is ~35k bars (a ~3-month sealed test window still holds ~8.7k
+# bars); two years of regular-session equity bars is ~13k. Longer would bloat the database.
+BACKFILL_DAYS = {"CRYPTO": 365, "NASDAQ": 2 * 365}
 EXTEND_TOLERANCE = 7 * 86400  # history starting within a week of the target counts as complete
-OVERLAP_SECONDS = {"CRYPTO": 3 * 3600, "NASDAQ": 10 * 86400}  # re-fetch recent stored bars to detect re-adjustment
+OVERLAP_SECONDS = {"CRYPTO": 3 * 3600, "NASDAQ": 4 * 86400}  # re-fetch recent stored bars to detect re-adjustment
 ADJUST_TOLERANCE = 0.003  # >0.3% change in an already-stored close = provider re-adjusted history
 _providers: dict[str, Provider] = {}
 _backoff: dict[str, tuple[float, float]] = {}  # key -> (retry_at, current_delay)
+
+
+def _usable(venue: str, bars: list, now: float) -> list:
+    """Closed bars only; for equities also only regular-session bars (Alpaca returns pre/post-market)."""
+    bars = [b for b in bars if bar_closed(venue, b.ts, now)]
+    if venue == "NASDAQ" and bars:
+        keep = in_regular_session([b.ts for b in bars], VENUES[venue].bar_seconds)
+        bars = [b for b, k in zip(bars, keep) if k]
+    return bars
 
 
 def _blocked(key: str) -> bool:
@@ -106,7 +115,7 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
                     events.append({"key": f"bars:{s}", "ok": False, "error": str(e), "symbol": s})
             continue
         for s in batch:
-            fresh = [b for b in data.get(s, []) if bar_closed(venue, b.ts, now)]
+            fresh = _usable(venue, data.get(s, []), now)
             adj = _detect_readjustment(s, tf, fresh)
             if adj is not None:
                 events += _handle_readjustment(provider, venue, s, tf, adj, now)
@@ -149,7 +158,7 @@ def _extend_history(provider: Provider, venue: str, symbols: list[str], tf: str,
             except DataError as e:
                 log.warning("history extension for %s failed: %s", s, e)
                 return  # try again on a later tick
-            store.upsert_bars(s, tf, [b for b in data.get(s, []) if b.ts < first and bar_closed(venue, b.ts, now)])
+            store.upsert_bars(s, tf, [b for b in _usable(venue, data.get(s, []), now) if b.ts < first])
             db.set_meta(key, str(days))
             log.info("extended %s %s history back to %s days", s, tf, days)
             return
@@ -176,7 +185,7 @@ def _handle_readjustment(provider, venue, symbol, tf, ratio, now) -> list[dict]:
     except DataError as e:
         return [{"key": f"bars:{symbol}", "ok": False, "symbol": symbol,
                  "error": f"history was re-adjusted but the full re-download failed: {e}"}]
-    full = [b for b in full if bar_closed(venue, b.ts, now)]
+    full = _usable(venue, full, now)
     store.replace_bars(symbol, tf, full)
     from ..trading import corporate
     return [corporate.on_history_readjusted(symbol, venue, ratio, len(full))]

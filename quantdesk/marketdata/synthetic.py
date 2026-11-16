@@ -12,7 +12,10 @@ from functools import lru_cache
 import numpy as np
 
 from .. import clock
+from ..venues import VENUES
 from .base import Bar, Provider, Quote
+
+STEPS = {"15m": 900, "1h": 3600, "1d": 86400}
 
 
 def _seed(sym: str) -> int:
@@ -27,7 +30,7 @@ class SyntheticProvider(Provider):
         self.venue = venue
 
     def _series(self, sym: str, step: int, start: int, end: int) -> list[Bar]:
-        anchor = 1_500_000_000 - (1_500_000_000 % step)
+        anchor = 1_700_000_000 - (1_700_000_000 % step)  # late 2023: covers every backfill window
         n_total = (end - anchor) // step + 1
         o, h, l, c, v = _path(sym, step, int(n_total))
         first = max(0, (start - anchor + step - 1) // step)
@@ -35,14 +38,14 @@ class SyntheticProvider(Provider):
                 for i in range(int(first), int(n_total))]
 
     def fetch_bars(self, symbols, timeframe, start, end):
-        step = 3600 if timeframe == "1h" else 86400
+        step = STEPS[timeframe]
         return {s: [b for b in self._series(s, step, start, end) if b.ts + step <= end] for s in symbols}
 
     def fetch_quotes(self, symbols):
         out = {}
         now = clock.now()
         for s in symbols:
-            step = 3600 if self.venue == "CRYPTO" else 86400
+            step = VENUES[self.venue].bar_seconds
             bars = self._series(s, step, int(now) - 3 * step, int(now))
             last = bars[-1].close if bars else 100.0
             # small deterministic wiggle within the bar
@@ -56,7 +59,7 @@ class SyntheticProvider(Provider):
 @lru_cache(maxsize=64)
 def _path(sym: str, step: int, n: int):
     rng = np.random.default_rng(_seed(sym) + step)
-    vol = 0.6 / math.sqrt(24 * 365) if step == 3600 else 0.30 / math.sqrt(252)
+    vol = 0.5 / math.sqrt(365 * 86400 / step)
     lengths = rng.integers(50, 400, size=n // 50 + 2)
     drifts = rng.normal(0.0, vol * 0.03, size=lengths.size)
     drift = np.repeat(drifts, lengths)[:n]
@@ -66,6 +69,6 @@ def _path(sym: str, step: int, n: int):
     o = np.concatenate([[c[0] / math.exp(r[0])], c[:-1]])
     h = np.maximum(o, c) * np.exp(np.abs(rng.normal(0, vol * 0.4, size=n)))
     l = np.minimum(o, c) * np.exp(-np.abs(rng.normal(0, vol * 0.4, size=n)))
-    dollar = (5e9 if step == 86400 else 2e7) * rng.lognormal(0.0, 0.4, size=n)
+    dollar = 5e9 * step / 86400 * rng.lognormal(0.0, 0.4, size=n)
     v = dollar / c
     return o, h, l, c, v

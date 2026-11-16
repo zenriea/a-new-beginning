@@ -1,11 +1,9 @@
 """Which bar is 'the latest closed bar' right now, and is our data current?
 
-A bar is only ever used after it has closed. For NASDAQ daily bars we additionally wait
-for the free-plan SIP delay (16 minutes) after the session close.
+A bar is only ever used after it has closed. For NASDAQ bars we additionally wait
+for the free-plan SIP delay (16 minutes) after the bar ends.
 """
 from __future__ import annotations
-
-import pandas as pd
 
 from .. import venues
 from ..venues import VENUES
@@ -13,42 +11,32 @@ from ..venues import VENUES
 SIP_DELAY = 16 * 60
 
 
-def daily_bar_ts(session: pd.Timestamp) -> int:
-    """Alpaca daily bars are stamped at 00:00 America/New_York of the session date."""
-    return int(pd.Timestamp(session.date()).tz_localize("America/New_York").timestamp())
-
-
 def bar_closed(venue: str, ts: int, now: float) -> bool:
-    if venue == "CRYPTO":
-        return ts + VENUES[venue].bar_seconds <= now
-    session = pd.Timestamp(pd.Timestamp(ts, unit="s", tz="UTC").tz_convert("America/New_York").date())
-    try:
-        _, close = venues.session_bounds(session)
-    except Exception:
-        return False
-    return close + SIP_DELAY <= now
+    """Bar has ended (and, for NASDAQ, passed the free-plan SIP delay). Session membership of
+    NASDAQ bars is enforced at ingest (venues.in_regular_session)."""
+    end = ts + VENUES[venue].bar_seconds
+    return end + (SIP_DELAY if venue == "NASDAQ" else 0) <= now
 
 
 def expected_last_bar(venue: str, now: float) -> int:
     """Open-time of the most recent bar that should be closed (and published) by ``now``."""
+    step = VENUES[venue].bar_seconds
     if venue == "CRYPTO":
-        step = VENUES[venue].bar_seconds
         return int(now // step) * step - step
-    close = venues.last_close_before(now - SIP_DELAY)
-    session = pd.Timestamp(pd.Timestamp(close, unit="s", tz="UTC").tz_convert("America/New_York").date())
-    return daily_bar_ts(session)
+    t = now - SIP_DELAY
+    sess = venues.session_for(t)
+    if sess is not None:
+        o, c = venues.session_bounds(sess)
+        if t >= o + step:
+            return int(o + (min(t, c) - o) // step * step - step)
+    return int(venues.last_close_before(t) - step)  # last bar of the previous session
 
 
 def bars_current(venue: str, last_ts: int | None, now: float, tolerance_bars: int = 0) -> bool:
     if last_ts is None:
         return False
-    exp = expected_last_bar(venue, now)
-    if venue == "CRYPTO":
-        return last_ts >= exp - tolerance_bars * VENUES[venue].bar_seconds
-    if tolerance_bars == 0:
-        return last_ts >= exp
-    # NASDAQ tolerance counted in sessions (weekends/holidays skipped)
-    return last_ts >= exp - (tolerance_bars + 3) * 86400
+    # tolerance in bars of trading time: what was expected that many bars ago (skips nights/weekends)
+    return last_ts >= expected_last_bar(venue, now - tolerance_bars * VENUES[venue].bar_seconds)
 
 
 def quote_age(quote: dict | None, now: float) -> float | None:

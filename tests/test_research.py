@@ -65,7 +65,7 @@ def test_split_is_chronological_and_freeze_precedes_test(env, monkeypatch):
     from quantdesk.research import experiment as E
     rng = np.random.default_rng(0)
     for s in ("AAPL", "MSFT", "QQQ"):
-        put_bars(s, list(100 * np.exp(np.cumsum(rng.normal(0, 0.015, 900)))), "1d")
+        put_bars(s, list(100 * np.exp(np.cumsum(rng.normal(0, 0.015, 900)))))
     calls = []
     orig = B.run
 

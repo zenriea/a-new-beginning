@@ -34,13 +34,14 @@ def observe(venue: str, symbols: list[str], benchmark: str, end_ts: int | None =
         T = cut
     c = panel["close"]
     ppy = v.periods_per_year
-    short, mid, long_ = (5, 20, 60) if venue == "NASDAQ" else (24, 168, 720)
+    # one day, one week, one month of bars
+    short, mid, long_ = (26, 130, 520) if venue == "NASDAQ" else (96, 672, 2880)
     with np.errstate(divide="ignore", invalid="ignore"):
         lr = np.log(c / dsl.lag(c, 1))
     vol_s = dsl.std(lr, mid) * math.sqrt(ppy)
     vol_l = dsl.std(lr, long_ * 2 if T > long_ * 2 + 5 else long_) * math.sqrt(ppy)
-    sma_l = dsl.sma(c, min(200 if venue == "NASDAQ" else 720, T - 1))
-    hi = dsl.highest(c, min(252 if venue == "NASDAQ" else 2160, T))
+    sma_l = dsl.sma(c, min(long_, T - 1))
+    hi = dsl.highest(c, min(long_ * 3, T))
     out = {}
     notable = []
     bcol = syms.index(benchmark)
@@ -71,7 +72,7 @@ def observe(venue: str, symbols: list[str], benchmark: str, end_ts: int | None =
             notable.append({"symbol": s, "kind": "volatility_down",
                             "text": f"{s} realised vol compressed to {row['vol_recent']:.0%} from {row['vol_longer']:.0%}"})
         if row["from_high"] is not None and row["from_high"] >= -0.001:
-            notable.append({"symbol": s, "kind": "new_high", "text": f"{s} closed at a 1-year high ({row['last']})"})
+            notable.append({"symbol": s, "kind": "new_high", "text": f"{s} closed at a 3-month high ({row['last']})"})
         sd = vol_s[last_i, j] / math.sqrt(ppy) if np.isfinite(vol_s[last_i, j]) else None
         last_ret = lr[last_i, j]
         if sd and np.isfinite(last_ret) and abs(last_ret) > 3 * sd:

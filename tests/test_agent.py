@@ -57,7 +57,7 @@ def _seed_nasdaq():
     rng = np.random.default_rng(3)
     from quantdesk import settings
     for s in settings.get("universe")["NASDAQ"]:
-        put_bars(s, list(100 * np.exp(np.cumsum(rng.normal(0.0004, 0.015, 900)))), "1d")
+        put_bars(s, list(100 * np.exp(np.cumsum(rng.normal(0.0004, 0.015, 900)))))
 
 
 def test_research_cycle_records_in_order_and_enforces_gates(env):
@@ -137,7 +137,7 @@ def test_hypothesis_prompt_shows_costs_and_gates(env):
     prompt = fc.calls[0]["messages"][0]["content"]
     ctx = json.loads(prompt.split("CONTEXT (JSON):\n", 1)[1])
     assert ctx["trading_costs"]["approx_round_trip_bps"] == pytest.approx(6.0)  # 2 x (2 spread + 1 slippage)
-    assert ctx["acceptance_gates"]["min_test_trades"] == 20
+    assert ctx["acceptance_gates"]["min_test_trades"] == 8
     assert "round trip" in prompt
 
 

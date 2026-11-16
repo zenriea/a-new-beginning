@@ -33,9 +33,11 @@ def replace_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
 def stored_closes(symbol: str, timeframe: str, ts_list: list[int]) -> dict[int, float]:
     if not ts_list:
         return {}
-    rows = db.q(f"SELECT ts, close FROM bars WHERE symbol=? AND timeframe=? AND ts IN ({','.join('?' * len(ts_list))})",
-                [symbol, timeframe, *ts_list])
-    return {r["ts"]: r["close"] for r in rows}
+    # a range query: an IN list of every timestamp exceeds SQLite's parameter limit on a full backfill
+    want = set(ts_list)
+    rows = db.q("SELECT ts, close FROM bars WHERE symbol=? AND timeframe=? AND ts BETWEEN ? AND ?",
+                (symbol, timeframe, min(want), max(want)))
+    return {r["ts"]: r["close"] for r in rows if r["ts"] in want}
 
 
 def last_bar_ts(symbol: str, timeframe: str) -> int | None:

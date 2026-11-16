@@ -76,14 +76,17 @@ Observe ─► Investigate ─► Test ─► Challenge ─► Decide ─► Tra
 which gates failed and the recorded lessons, and revisions link to their parent experiment. The
 Research tab is that record.
 
-### NASDAQ vs. crypto
+### US stocks vs. crypto
 
-| | NASDAQ (Alpaca data) | Crypto (Coinbase public data) |
+The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-listed US stock or ETF
+(NYSE listings, leveraged and inverse ETFs included); all of them trade in the same regular session.
+
+| | Stocks and ETFs (Alpaca data) | Crypto incl. memecoins (Coinbase public data) |
 |---|---|---|
-| Research bars | Daily, split- and dividend-adjusted, 6 years | Hourly, 3 years |
-| Research schedule | At most once per new daily bar (every 20 h) | Every 4 h |
-| Decisions | After the close (+20 min, after the free plan's SIP delay) | Each hourly close |
-| Execution | Next regular session (+5 min), XNAS calendar with holidays and early closes | 24/7 |
+| Research bars | 15-minute, regular session only, split- and dividend-adjusted, 2 years | 15-minute, 24/7, 1 year |
+| Research schedule | Every 2 h while new bars arrive | Every 2 h |
+| Decisions | Each 15-minute bar, ~16 min after it ends (free plan's SIP delay) | Each 15-minute bar |
+| Execution | Same session; orders decided outside it wait for the next open (+5 min), XNAS calendar with holidays and early closes | 24/7 |
 | Costs | $0 commission (configurable), SEC fee + FINRA TAF on sells, quoted spread, impact | 25 bp taker fee, quoted spread, impact |
 | Benchmark | QQQ | BTC-USD |
 

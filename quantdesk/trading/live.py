@@ -20,7 +20,7 @@ from . import ledger, oms
 
 def _bar_label(venue: str, ts: int) -> str:
     d = dt.datetime.fromtimestamp(ts, dt.timezone.utc)
-    return d.strftime("%Y-%m-%d") + " session" if venue == "NASDAQ" else d.strftime("%Y-%m-%d %H:00 UTC") + " hourly bar"
+    return d.strftime("%Y-%m-%d %H:%M UTC") + " 15-minute bar"
 
 
 def explain(expr: str, panel: dict, params: dict, t: int, j: int, ppy: float, market_col) -> list[str]:

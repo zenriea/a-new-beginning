@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 SYSTEM = """You are the research analyst of a small, autonomous PAPER-trading desk (virtual money only). \
-You research NASDAQ equities (daily bars, regular session only) and liquid crypto spot (hourly bars, 24/7). \
+You research US stocks and ETFs (venue "NASDAQ"; 15-minute bars, regular session only) and crypto spot \
+including memecoins (15-minute bars, 24/7). \
 You form specific, testable hypotheses, interpret deterministic backtest results, decide what deserves \
 limited virtual capital, review live paper results, and explain your reasoning to the operator.
 
@@ -37,8 +38,9 @@ Entry is evaluated when flat, exit when long. Optional rank_by + top_k keeps onl
 (rotation). Optional stop_loss_pct / take_profit_pct / max_hold_bars (checked on bar closes). Long-only. \
 Sizing: fixed weight or inverse_vol (target_vol / realised vol, capped at max_weight), as a fraction of \
 the strategy's own capital. Signals at the close of bar t execute at the next bar's open (backtest) or \
-the next live quote (paper). Daily NASDAQ windows: 20 ~ 1 month, 252 ~ 1 year. Hourly crypto: 24 = 1 day, \
-168 = 1 week. Parameter grids are searched on the TRAIN window only (max 12 combinations); keep grids small.
+the next live quote (paper). All bars are 15 minutes. Stocks: 26 = 1 session, 130 = 1 week, 520 ~ 1 month \
+(windows span nights and weekends). Crypto: 4 = 1 hour, 96 = 1 day, 672 = 1 week. Stock bars arrive ~16 minutes \
+late (free data plan), so stock signals act about one bar after the close they are computed on. Parameter grids are searched on the TRAIN window only (max 12 combinations); keep grids small.
 kind "code" is available for logic the language cannot express: a Python function \
 signals(o, h, l, c, v, p) -> (entry_bool_array, exit_bool_array) for one symbol using only an allowlisted \
 subset of numpy as `np`; it runs in a sandbox and is rejected if it looks ahead. Prefer kind "dsl".
@@ -134,7 +136,7 @@ ANSWER_SCHEMA = {
 ANTI_WHIPSAW_EXAMPLES = (
     "close > sma(close, n) * 1.03",           # entry: clearly above the trend line (buffer)
     "close < sma(close, n) * 0.97",           # exit: clearly below it, not on the first wiggle
-    "lowest(close, 24) > sma(close, n)",      # confirmation: above the line for a whole day of hourly bars
+    "lowest(close, 8) > sma(close, n)",       # confirmation: above the line for two hours of 15-minute bars
 )
 
 
@@ -150,7 +152,7 @@ def hypothesis_prompt(ctx: dict) -> str:
         "The market context below is BLINDED: it ends before the earliest possible test window, so whatever "
         "you see cannot leak into the sealed test. The universe must be a subset of the approved symbols.\n"
         "Each round trip costs about trading_costs.approx_round_trip_bps, so an idea must earn more than that per "
-        "trade on average. The operator wants an active book: favour ideas that trade often (several round trips a week across the universe, e.g. short-horizon mean reversion or breakouts with max_hold_bars) as long as each trade still clears costs. Capital is allocated only if every "
+        "trade on average. The operator wants an active book: favour ideas that trade often (several round trips a day across the universe, e.g. intraday mean reversion or breakouts with max_hold_bars) as long as each trade still clears costs. Capital is allocated only if every "
         "threshold in acceptance_gates passes (they include doubled costs and a one-bar delay), so design for them.\n"
         "Avoid whipsaw: when entry and exit flip on the same line (e.g. close vs one moving average), every wiggle "
         "around it is a costly round trip. Use a buffer between entry and exit and/or require confirmation, e.g. "
