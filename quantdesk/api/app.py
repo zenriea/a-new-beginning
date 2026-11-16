@@ -183,9 +183,11 @@ def _state() -> dict:
                         "h.id=e.hypothesis_id ORDER BY e.id DESC LIMIT 1")
     bench = snap["benchmark_equity"] if snap else None
     data_status = store.status_all()
-    bad = [d for d in data_status if not d["ok"]]
+    uni = settings.get("universe")
+    tracked = {s for syms in uni.values() for s in syms}  # symbols dropped from the universe stop alerting
+    bad = [d for d in data_status if not d["ok"] and d["key"].split(":", 1)[-1] in tracked]
     if cfg.market_data_mode != "synthetic" and not cfg.alpaca_configured:
-        nasdaq = set(settings.get("universe")["NASDAQ"])   # already covered by the "not configured" alert
+        nasdaq = set(uni["NASDAQ"])   # already covered by the "not configured" alert
         bad = [d for d in bad if d["key"].split(":", 1)[-1] not in nasdaq]
     return {
         "now": now,

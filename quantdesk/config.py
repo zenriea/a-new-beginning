@@ -181,7 +181,7 @@ DEFAULT_SETTINGS: dict = {
                    "TSLA", "COST", "NFLX", "AMD", "PEP", "ADBE", "CSCO",
                    # liquid, higher-volatility mid/large caps: more signals per month
                    "PLTR", "COIN", "MSTR", "HOOD", "SOFI", "MARA", "RIOT", "SMCI", "ARM", "MU",
-                   "INTC", "PYPL", "ABNB", "CRWD", "DDOG", "ZS", "AFRM", "ROKU", "DKNG", "RIVN"],
+                   "INTC", "PYPL", "ABNB", "CRWD", "DDOG", "ZS", "AFRM", "DKNG", "RIVN"],
         "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD",
                    "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD", "UNI-USD", "AAVE-USD", "NEAR-USD"],
     },
