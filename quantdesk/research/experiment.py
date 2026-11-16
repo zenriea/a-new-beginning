@@ -209,6 +209,7 @@ def run_experiment(spec: dict, costs_cfg: dict, research_cfg: dict, benchmark: s
         "notes": _leak_notes(venue, llm_authored, before_cutoff, reuse),
     }
     out = {
+        "strategy_kind": spec.get("kind", "dsl"),
         "venue": venue, "spec_hash": frozen["spec_hash"], "windows": windows, "chosen_params": chosen,
         "grid_results": grid_results,
         "train": _slim(train.metrics),

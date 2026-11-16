@@ -7,35 +7,31 @@ Fill rules
     feed) use a fresh last trade +/- the modelled half-spread and label the fill,
   * plus square-root market impact, plus venue fees,
   * per-order size capped at ``max_participation`` x ADV; remainder cancelled,
-  * kill switches re-checked at fill time; buys also re-checked against cash.
+  * all exposure/cash/loss limits re-checked at the fee-inclusive fill price;
+    the current order is excluded from its own pending reservation.
 """
 from __future__ import annotations
 
 import math
-
-import numpy as np
 
 from .. import clock, db, settings, venues
 from ..agent import journal
 from ..marketdata import store
 from ..venues import VENUES
 from . import costs as C
-from . import ledger, oms
+from . import ledger, oms, risk
+from .liquidity import estimates, lookback_bars
 
 
 def liquidity(symbol: str, venue: str) -> tuple[float | None, float | None]:
     """(ADV in USD, daily sigma) from the last 20 days of stored bars."""
     v = VENUES[venue]
-    n = int(20 * v.bars_per_day)
-    b = store.load_bars(symbol, v.timeframe, limit=n + 1)
-    if len(b["close"]) < 10:
-        return None, None
-    dollar = b["close"] * b["volume"]
-    bpd = v.bars_per_day
-    adv = float(np.mean(dollar)) * bpd
-    lr = np.diff(np.log(b["close"]))
-    sigma = float(np.std(lr, ddof=1) * math.sqrt(bpd)) if lr.size > 2 else None
-    return adv, sigma
+    # Only completed bars available at this fill can contribute.
+    b = store.load_bars(symbol, v.timeframe, end=int(clock.now() - v.bar_seconds),
+                        limit=lookback_bars(v.bars_per_day) + 1)
+    adv, sigma = estimates(b["close"], b["volume"], v.bars_per_day)
+    a, s = float(adv[-1]), float(sigma[-1])
+    return a if math.isfinite(a) else None, s if math.isfinite(s) else None
 
 
 def _price_basis(order: dict, q: dict | None, now: float, lim: dict, cost_cfg: dict):
@@ -114,13 +110,22 @@ def process_orders() -> list[dict]:
         px = C.apply_slippage(o["side"], ref_px, imp)
         fee = C.fees(venue, o["side"], remaining, px, cost_cfg)
         if o["side"] == "buy":
-            avail = ledger.cash()
-            if remaining * px + fee > avail:
-                dec = VENUES[venue].qty_decimals
-                remaining = math.floor((avail * 0.995 / px) * 10 ** dec) / 10 ** dec
-                if remaining <= 0:
-                    oms.close_order(o, "cancelled", "Insufficient cash at fill time.")
-                    continue
+            # The initial impact price is retained if resized: this is conservative,
+            # and avoids a sizing/impact feedback loop. Include fees in every cap.
+            req = risk.OrderRequest(o["symbol"], "buy", remaining, px + fee / remaining,
+                                    o["strategy_id"], o["origin"])
+            snap = risk.snapshot_for(req, exclude_order_id=o["id"])
+            # _price_basis already validated this exact quote/last-trade fallback.
+            snap.quote_ok, snap.quote_age = True, now - ref["ts"]
+            decision = risk.evaluate(req, snap, lim, check_order_rate=False)
+            db.ex("INSERT INTO risk_events(ts, kind, detail, order_id) VALUES(?,?,?,?)",
+                  (now, "fill_risk_check", db.dumps(decision.as_dict()), o["id"]))
+            if not decision.approved:
+                oms.close_order(o, "cancelled", f"Fill-time risk check: {decision.reason}")
+                continue
+            if decision.resized:
+                cap_note = ((cap_note + " ") if cap_note else "") + f"Fill-time risk check: {decision.reason}; remainder cancelled."
+                remaining = decision.qty
                 fee = C.fees(venue, "buy", remaining, px, cost_cfg)
         ref["slippage_bps"] = round(imp, 3)
         if cap_note:

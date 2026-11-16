@@ -49,3 +49,26 @@ def test_static_ui_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "QuantDesk" in r.text
     assert "Content-Security-Policy" in r.headers
+
+
+def test_gate_presets_require_auth_csrf_and_write_an_audit_record(client):
+    from quantdesk import db, settings
+    from quantdesk.config import GATE_PRESETS
+    path = "/api/gate-presets/strict"
+    assert client.post(path, headers={"X-QD": "1"}).status_code == 401
+    client.post("/api/login", json={"password": "correct horse"})
+    assert client.post(path).status_code == 403
+    assert client.post("/api/gate-presets/unknown", headers={"X-QD": "1"}).status_code == 400
+    assert client.post(path, headers={"X-QD": "1"}).json() == GATE_PRESETS["strict"]
+    assert settings.get("gates") == GATE_PRESETS["strict"]
+    assert db.q1("SELECT COUNT(*) n FROM audit_log WHERE action='settings.gates'")["n"] == 1
+    system = client.get("/api/system").json()
+    assert system["gate_profile"] == "strict" and system["gate_presets"] == GATE_PRESETS
+    client.post("/api/settings/gates", json={"min_test_sharpe": 0.6}, headers={"X-QD": "1"})
+    assert client.get("/api/system").json()["gate_profile"] == "custom"
+
+
+def test_causal_dsl_requirement_must_be_boolean(client):
+    client.post("/api/login", json={"password": "correct horse"})
+    assert client.post("/api/settings/gates", json={"require_causal_dsl": "false"},
+                       headers={"X-QD": "1"}).status_code == 400

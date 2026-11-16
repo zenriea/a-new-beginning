@@ -27,7 +27,7 @@ from starlette.concurrency import run_in_threadpool
 from .. import clock, db, settings, venues
 from ..agent import journal
 from ..agent.llm import budget_status
-from ..config import DEFAULT_SETTINGS, load_config
+from ..config import DEFAULT_SETTINGS, GATE_PRESETS, load_config
 from ..marketdata import store
 from ..research.sandbox import isolation_report
 from ..trading import ledger, live, oms
@@ -359,6 +359,9 @@ async def llm_call(cid: int):
 async def system():
     def f():
         return {"settings": settings.all_settings(), "defaults": DEFAULT_SETTINGS,
+                "gate_presets": GATE_PRESETS,
+                "gate_profile": next((name for name, values in GATE_PRESETS.items()
+                                      if settings.get("gates") == values), "custom"),
                 "ceilings": {k: getattr(cfg, k) for k in ("ceiling_max_position_pct", "ceiling_max_gross_pct",
                                                           "ceiling_max_strategy_pct", "ceiling_max_order_usd",
                                                           "ceiling_monthly_llm_usd")},
@@ -444,6 +447,19 @@ async def retire(sid: int):
                       refs={"strategy_id": sid}, author="operator")
         _audit("strategy.retire", {"id": sid})
         return {"ok": True}
+    return await run_in_threadpool(f)
+
+
+@app.post("/api/gate-presets/{name}", dependencies=[Depends(require_write)])
+async def apply_gate_preset(name: str):
+    if name not in GATE_PRESETS:
+        raise HTTPException(400, "unknown gate preset")
+
+    def f():
+        merged = settings.operator_update("gates", GATE_PRESETS[name])
+        journal.write("system", f"Operator selected {name} gate preset",
+                      "Applies to future research decisions; existing allocations are unchanged.", author="operator")
+        return merged
     return await run_in_threadpool(f)
 
 

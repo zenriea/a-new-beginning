@@ -61,7 +61,9 @@ Observe ─► Investigate ─► Test ─► Challenge ─► Decide ─► Tra
   expected maximum Sharpe of N zero-skill trials, where N counts earlier experiments whose test
   windows overlap this one).
 * **Decide**: the gates in `research/gates.py` (operator-set thresholds) must all pass before any
-  capital can be allocated. The analyst can always reject; an allocation request is capped by
+  capital can be allocated. **Default exploratory gates admit paper experiments; they do not
+  establish a statistically validated edge.** Select strict gates in Limits & system for more
+  selective screening. The analyst can always reject; an allocation request is capped by
   operator limits. New strategies start at an **incubation** size (50 % of approval).
 * **Trade** (`trading/live.py`): on every newly closed bar, the frozen rules run through the
   **same** `compute_signals` and `step()` code as the backtester. Each order becomes an *intent*
@@ -98,8 +100,10 @@ The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-li
 * **Independent risk engine** (`trading/risk.py`), a pure function: emergency stop, pause,
   drawdown halt, daily loss limit, session open, quote freshness, bar freshness, order rate, cash
   (no leverage), no shorting, per-symbol, gross, crypto, per-strategy and per-order caps. Buys are
-  resized to fit or rejected. Sells stay allowed under loss limits. Kill switches are re-checked
-  at fill time.
+  resized to fit or rejected. Queued buys reserve cash and gross, symbol, crypto and strategy
+  exposure. Buy exposure and loss limits are checked again at the fee-inclusive fill price,
+  excluding only that order's own reservation. A resized fill cancels its remainder.
+  Sells stay allowed under loss limits. Kill switches are re-checked at fill time.
 * **The agent cannot loosen limits.** Settings are written only by `settings.operator_update`,
   called only from the authenticated API, and clamped to hard ceilings in `config.py` (e.g. gross
   exposure ≤ 100 %). A test fails the build if agent, research, trading or market-data code
@@ -119,10 +123,11 @@ The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-li
   strategy, and stale quotes mean no fill. Both are journaled once per transition.
 * **Sandbox for model-written code**: AST allowlist (no imports, files, dunders or arbitrary numpy
   attributes), a separate process with a cleared environment (no secrets), CPU, memory, file-size
-  and process limits, a network namespace, and a drop to `nobody`. It also runs a **causality
-  check**: it reruns on truncated history and rejects code whose past signals change when future
-  bars are removed. In Docker it runs in its own container with `network_mode: none`, a read-only
-  filesystem, no secrets and dropped capabilities.
+  and process limits, a network namespace when supported, and a drop to `nobody` when started
+  as root. Its **sampled causality check** reruns at three truncated histories and rejects code
+  whose past signals change there. This is a heuristic, not proof that arbitrary Python is
+  causal. Strict gates require the restricted causal DSL instead. In Docker it runs in its own
+  container with `network_mode: none`, a read-only filesystem, no secrets and dropped capabilities.
 * **Remote access**: a password login sets an HMAC-signed, expiring, HttpOnly SameSite=Strict
   cookie; writes require an `X-QD` header (CSRF protection); login is rate-limited; strict CSP.
   Without a password only localhost is served. Secrets stay server-side.
@@ -130,6 +135,27 @@ The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-li
   entries link to the exact prompt and response (`llm_calls`). Q&A drops citations to records that
   don't exist. Fills, intents, data and risk entries are written by deterministic code, never by
   the model.
+
+### Gate presets
+
+Limits & system labels the current gates **exploratory**, **strict**, or **custom**. Preset buttons
+replace gate settings through the authenticated operator API and create an audit record. Existing
+settings are not silently migrated. Presets affect future research decisions, not existing allocations.
+
+| Gate | Exploratory (default) | Strict |
+| --- | --- | --- |
+| Completed test trades | ≥ 8 | ≥ 30 |
+| Test / validation Sharpe | ≥ 0 / ≥ −0.5 | ≥ 0.5 / ≥ 0.25 |
+| Test return at doubled costs | > −5% | > 0% |
+| Test Sharpe with one-bar delay | > −0.5 | > 0 |
+| Positive neighbors / sub-periods | ≥ 34% / ≥ 34% | ≥ 67% / ≥ 75% |
+| Top-5-trade concentration | ≤ 100% | ≤ 50% |
+| Deflated PSR score | ≥ 0.25 | ≥ 0.95 |
+| Strategy language | DSL or sampled-check Python | DSL only |
+
+Even strict screening is **not a profitability guarantee**. PSR/deflation uses simplifying sampling
+assumptions; autocorrelation, adaptive holdout reuse, survivorship and LLM hindsight remain concerns.
+A sustained, timestamped forward-paper record is still required.
 
 ### Limitations and leakage you should know about
 
@@ -145,11 +171,15 @@ The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-li
   so spreads can be wider or one-sided. The simulator then uses a fresh last trade plus a modeled
   spread and labels the fill accordingly. Historical spreads are modeled, not observed. Coinbase
   volume (one venue) is used for liquidity, which is conservative.
-* **Simplifications.** Daily NASDAQ bars only; stops are checked on bar closes; dividends on live
+* **Simplifications.** Research and signal evaluation use 15-minute bars; stops are checked on bar closes; dividends on live
   positions are not credited; queue position and intraday auctions are not modeled. Splits are
   *inferred* from re-adjusted price history rather than read from a corporate-actions feed, and only
   standard ratios are applied automatically (anything else is flagged for you).
 * **Cost parameters are assumptions.** Verify the SEC Section 31 rate (it changes) and your fee tier.
+* **Liquidity estimates.** Backtests and paper execution share a causal 20-trading-day ADV/daily-volatility
+  estimator, with partial windows allowed after 10 valid observations. Future or unfinished bars
+  are excluded. Earlier backtests used a one-day estimator; rerun experiments rather than rewriting
+  stored records when comparing results across this change.
 
 ## Setup
 
@@ -265,6 +295,13 @@ unprivileged user) but without its own network namespace.
 ```bash
 pip install -r requirements-dev.txt && python -m pytest -q
 ```
+
+Runtime and development installs use the exact versions in `requirements-lock.txt`.
+The GitHub Actions workflow runs the suite on Linux with Python 3.12, 3.13 and 3.14,
+including the Linux-only sandbox tests, dependency checks and source syntax checks.
+The local Python sandbox requires Linux; use Docker or Linux/WSL for model-written code.
+The strict preset does not admit Python strategies even if their sampled checks pass.
+The historical verification notes below describe the original build, not a CI run of this revision.
 
 ## Operating costs (estimates)
 

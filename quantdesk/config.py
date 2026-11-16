@@ -175,6 +175,25 @@ def load_config(reload: bool = False, **overrides) -> Config:
 # Every key here is editable only via the authenticated operator API, and each
 # numeric limit is clamped to the hard ceilings in Config.
 # ---------------------------------------------------------------------------
+GATE_PRESETS = {
+    # Admission to exploratory paper trading, NOT evidence of a statistical edge.
+    "exploratory": {
+        "min_test_trades": 8, "min_test_sharpe": 0.0, "min_val_sharpe": -0.5,
+        "min_cost_stress_return": -0.05, "min_delay_stress_sharpe": -0.5,
+        "min_neighbor_positive_frac": 0.34, "min_subperiod_positive_frac": 0.34,
+        "max_top5_concentration": 1.0, "min_deflated_psr": 0.25,
+        "require_causal_dsl": False,
+    },
+    # More selective screening, still not a substitute for forward-paper evidence.
+    "strict": {
+        "min_test_trades": 30, "min_test_sharpe": 0.5, "min_val_sharpe": 0.25,
+        "min_cost_stress_return": 0.0, "min_delay_stress_sharpe": 0.0,
+        "min_neighbor_positive_frac": 0.67, "min_subperiod_positive_frac": 0.75,
+        "max_top5_concentration": 0.5, "min_deflated_psr": 0.95,
+        "require_causal_dsl": True,
+    },
+}
+
 DEFAULT_SETTINGS: dict = {
     "universe": {
         # US equities (the venue is named NASDAQ but any Alpaca-listed stock/ETF works, NYSE too)
@@ -258,19 +277,7 @@ DEFAULT_SETTINGS: dict = {
         "min_live_days_before_increase": 10,
         "observation_blinding": True,  # hypothesis context excludes data the test window could use
     },
-    "gates": {
-        # Deliberately loose (paper trading: get strategies live and let live results cull them;
-        # incubation_fraction keeps new ones small and the daily review retires losers).
-        "min_test_trades": 8,
-        "min_test_sharpe": 0.0,
-        "min_val_sharpe": -0.5,
-        "min_cost_stress_return": -0.05,
-        "min_delay_stress_sharpe": -0.5,
-        "min_neighbor_positive_frac": 0.34,
-        "min_subperiod_positive_frac": 0.34,
-        "max_top5_concentration": 1.0,
-        "min_deflated_psr": 0.25,
-    },
+    "gates": dict(GATE_PRESETS["exploratory"]),
     "agent": {"paused": False, "emergency_stop": False},
 }
 

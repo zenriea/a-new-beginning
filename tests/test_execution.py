@@ -128,3 +128,82 @@ def test_costs_model():
     k = DEFAULT_SETTINGS["costs"]["CRYPTO"]
     assert costs.fees("CRYPTO", "buy", 1, 10000, k) == pytest.approx(25.0)
     assert costs.impact_bps(1e6, 1e8, 0.02, c) > costs.impact_bps(1e4, 1e8, 0.02, c)
+
+
+@pytest.mark.parametrize("change", ["position", "gross", "crypto", "allocation", "strategy", "order"])
+def test_fill_rechecks_changed_limits_and_cancels_remainder(env, change):
+    from quantdesk import clock, db, settings
+    from quantdesk.trading import execution, oms
+    crypto = change == "crypto"
+    symbol = "BTC-USD" if crypto else "AAPL"
+    put_bars(symbol, [100.0] * 40, volume=5e7)
+    sid = make_strategy(venue="CRYPTO" if crypto else "NASDAQ")
+    put_quote(symbol, 100, 100)
+    order = oms.create_order(symbol=symbol, side="buy", qty=50, reason="entry", rationale="test",
+                             idem_key="limit-change", strategy_id=sid)
+    assert order["status"] == "submitted"
+    if change == "allocation":
+        db.ex("UPDATE strategies SET allocation=1000 WHERE id=?", (sid,))
+    else:
+        key = {"position": "max_position_pct", "gross": "max_gross_pct", "crypto": "max_crypto_pct",
+               "strategy": "max_strategy_pct",
+               "order": "max_order_usd"}[change]
+        settings.operator_update("risk", {key: 1000 if change == "order" else 0.01})
+    clock.advance(3)
+    put_quote(symbol, 100, 100)
+    fills = execution.process_orders()
+    assert len(fills) == 1
+    fill = db.q1("SELECT * FROM fills WHERE order_id=?", (order["id"],))
+    assert fill["qty"] * fill["price"] + fill["fee"] <= 1000 + 1e-6
+    assert db.q1("SELECT status FROM orders WHERE id=?", (order["id"],))["status"] == "cancelled"
+    assert db.q1("SELECT COUNT(*) n FROM risk_events WHERE kind='fill_risk_check'")["n"] == 1
+
+
+def test_fill_resizes_after_price_gap_and_keeps_other_orders_reserved(env):
+    from quantdesk import clock, db, settings
+    from quantdesk.trading import execution, oms
+    _setup()
+    settings.operator_update("risk", {"max_position_pct": 0.10})
+    sid = make_strategy()
+    put_quote("AAPL", 100, 100)
+    orders = [oms.create_order(symbol="AAPL", side="buy", qty=50, reason="entry", rationale="test",
+                               idem_key=f"gap-{i}", strategy_id=sid) for i in range(2)]
+    clock.advance(3)
+    put_quote("AAPL", 150, 150)
+    execution.process_orders()
+    fills = db.q("SELECT * FROM fills ORDER BY id")
+    assert fills and fills[0]["qty"] <= 16  # $10k cap minus the other order's $7.5k reservation
+    assert sum(f["qty"] * f["price"] + f["fee"] for f in fills) <= 10000 + 1e-6
+    assert db.q1("SELECT status FROM orders WHERE id=?", (orders[0]["id"],))["status"] == "cancelled"
+    # Cancelling the first remainder releases room for the second order.
+    assert db.q1("SELECT status FROM orders WHERE id=?", (orders[1]["id"],))["status"] == "filled"
+
+
+def test_fill_does_not_double_count_itself_or_apply_submission_rate_again(env):
+    from quantdesk import clock, db, settings
+    from quantdesk.trading import execution, oms
+    _setup()
+    settings.operator_update("risk", {"max_orders_per_hour": 1})
+    sid = make_strategy(allocation=1000)
+    put_quote("AAPL", 100, 100)
+    order = oms.create_order(symbol="AAPL", side="buy", qty=9, reason="entry", rationale="test",
+                             idem_key="own-reservation", strategy_id=sid)
+    clock.advance(3)
+    put_quote("AAPL", 100, 100)
+    assert len(execution.process_orders()) == 1
+    assert db.q1("SELECT status FROM orders WHERE id=?", (order["id"],))["status"] == "filled"
+
+
+def test_fill_rejects_when_operator_removes_all_exposure_room(env):
+    from quantdesk import clock, db, settings
+    from quantdesk.trading import execution, oms
+    _setup()
+    sid = make_strategy()
+    put_quote("AAPL", 100, 100)
+    order = oms.create_order(symbol="AAPL", side="buy", qty=10, reason="entry", rationale="test",
+                             idem_key="no-room", strategy_id=sid)
+    settings.operator_update("risk", {"max_gross_pct": 0})
+    clock.advance(3)
+    put_quote("AAPL", 100, 100)
+    assert execution.process_orders() == []
+    assert db.q1("SELECT status FROM orders WHERE id=?", (order["id"],))["status"] == "cancelled"

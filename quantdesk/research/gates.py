@@ -35,8 +35,11 @@ def evaluate(result: dict, g: dict) -> dict:
         _g("top5_concentration", c.get("top5_concentration_pre_test"), "<=", g["max_top5_concentration"],
            "Profits should not hinge on a handful of trades."),
         _g("deflated_psr", t.get("deflated_psr"), ">=", g["min_deflated_psr"],
-           "Probability the test Sharpe beats the best of N zero-skill trials."),
+           "PSR score against the expected best of N zero-skill trials, under sampling assumptions; not proof of an edge."),
     ]
+    if g.get("require_causal_dsl"):
+        checks.append(_g("causal_dsl", result.get("strategy_kind") == "dsl", ">=", True,
+                         "Strict screening excludes Python: sampled prefix checks cannot prove causality."))
     passed = all(x["pass"] for x in checks)
     return {"passed": passed, "checks": checks,
             "failed": [x["name"] for x in checks if not x["pass"]]}
