@@ -26,12 +26,12 @@ from . import ledger, oms
 def liquidity(symbol: str, venue: str) -> tuple[float | None, float | None]:
     """(ADV in USD, daily sigma) from the last 20 days of stored bars."""
     v = VENUES[venue]
-    n = 20 if v.timeframe == "1d" else 20 * 24
+    n = int(20 * v.bars_per_day)
     b = store.load_bars(symbol, v.timeframe, limit=n + 1)
     if len(b["close"]) < 10:
         return None, None
     dollar = b["close"] * b["volume"]
-    bpd = 1.0 if v.timeframe == "1d" else 24.0
+    bpd = v.bars_per_day
     adv = float(np.mean(dollar)) * bpd
     lr = np.diff(np.log(b["close"]))
     sigma = float(np.std(lr, ddof=1) * math.sqrt(bpd)) if lr.size > 2 else None

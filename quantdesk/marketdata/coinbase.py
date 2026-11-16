@@ -8,7 +8,7 @@ from .base import Bar, DataError, Provider, Quote
 from .http import get_json
 
 BASE = "https://api.exchange.coinbase.com"
-GRAN = {"1h": 3600, "1d": 86400}
+GRAN = {"15m": 900, "1h": 3600, "1d": 86400}
 
 
 def _iso(epoch: int) -> str:

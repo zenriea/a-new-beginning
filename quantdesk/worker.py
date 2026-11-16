@@ -95,6 +95,7 @@ def recover(prev_heartbeat: float | None) -> dict:
                       "The idea can be re-tested as a new experiment.", refs={"experiment_id": e["id"]}, author="system",
                       dedupe_key=f"interrupted:{e['id']}")
     db.ex("DELETE FROM jobs WHERE name='research'")  # pre-0.2 shared research clock, replaced by research:<venue>
+    info["retired_for_bar_size"] = retire_on_timeframe_change()
     chk = ledger.integrity_check()
     info["integrity"] = chk
     if not chk["ok"]:
@@ -103,6 +104,29 @@ def recover(prev_heartbeat: float | None) -> dict:
                       f"Recomputing from fills does not match stored balances: {chk}. New buys are blocked until the "
                       "operator investigates and clears the halt.", author="system")
     return info
+
+
+def retire_on_timeframe_change() -> list[int]:
+    """Strategy windows are counted in bars (sma(close, 200) meant 200 days on daily bars); after a
+    bar-size change they would silently mean something else, so those strategies are closed out."""
+    out = []
+    for venue, v in venues.VENUES.items():
+        key = f"timeframe:{venue}"
+        if db.get_meta(key) == v.timeframe:
+            continue
+        for s in db.q("SELECT * FROM strategies WHERE venue=? AND status IN ('active','incubating')", (venue,)):
+            s = dict(s)
+            why = (f"{venue} now trades on {v.timeframe} bars; this strategy was tested on the previous bar size, "
+                   "so its windows no longer mean what the test measured.")
+            live.flatten_strategy(s, why, origin="system")
+            db.ex("UPDATE strategies SET status='retired', retired_at=?, retire_reason=? WHERE id=?",
+                  (clock.now(), "bar size changed", s["id"]))
+            journal.write("decision", f"Retired {s['name']} v{s['version']}: bar size changed",
+                          why + " Its positions are being closed; research will test new ideas on the new bars.",
+                          refs={"strategy_id": s["id"]}, author="system")
+            out.append(s["id"])
+        db.set_meta(key, v.timeframe)
+    return out
 
 
 # ------------------------------------------------------------------ jobs
@@ -165,15 +189,10 @@ def bars_tick() -> None:
 
 
 def signals_tick() -> None:
-    sch = settings.get("schedule")
     now = clock.now()
     live.activate_waiting()
     for s in db.q("SELECT * FROM strategies WHERE status='active'"):
         s = dict(s)
-        if s["venue"] == "NASDAQ":
-            close = venues.last_close_before(now)
-            if now < close + sch["nasdaq_signal_delay_min"] * 60:
-                continue
         exp = freshness.expected_last_bar(s["venue"], now)
         if (s["last_signal_bar"] or 0) >= exp:
             continue
@@ -318,12 +337,21 @@ def _next_research_at(venue: str, now: float) -> tuple[str, float]:
         return f"Research cycle ({venue}, daily limit reached)", max(at, now - now % 86400 + 86400)
     if block == "waiting for a new bar":
         try:
-            nxt = (int(now // 3600) + 1) * 3600 + 60 if venue == "CRYPTO" else \
-                venues.next_close(now) + freshness.SIP_DELAY + 120
+            nxt = _next_bar_at(venue, now)
         except Exception:  # calendar out of range: show the clock-based time only
             nxt = at
         at = max(at, nxt)
     return f"Research cycle ({venue})", at
+
+
+def _next_bar_at(venue: str, now: float) -> float:
+    """When the next bar becomes usable (closed, plus the SIP delay for equities)."""
+    step = venues.VENUES[venue].bar_seconds
+    if venue == "CRYPTO":
+        return (int(now // step) + 1) * step + 60
+    if venues.is_open("NASDAQ", now):
+        return (int(now // step) + 1) * step + freshness.SIP_DELAY + 60
+    return venues.next_open(now) + step + freshness.SIP_DELAY + 60
 
 
 def next_actions() -> list[dict]:
@@ -333,14 +361,12 @@ def next_actions() -> list[dict]:
     for v in RESEARCH_VENUES:
         what, at = _next_research_at(v, now)
         out.append({"what": what, "at": at})
-    out.append({"what": "Next crypto hourly bar close", "at": (int(now // 3600) + 1) * 3600 + 60})
+    out.append({"what": "Next crypto 15-minute bar, then signal evaluation", "at": _next_bar_at("CRYPTO", now)})
     try:
         if venues.is_open("NASDAQ", now):
-            sess = venues.session_for(now)
-            out.append({"what": "NASDAQ close, then daily signal evaluation",
-                        "at": venues.session_bounds(sess)[1] + sch["nasdaq_signal_delay_min"] * 60})
+            out.append({"what": "Next stock 15-minute bar, then signal evaluation", "at": _next_bar_at("NASDAQ", now)})
         else:
-            out.append({"what": "NASDAQ opens (queued orders become eligible)", "at": venues.next_open(now)})
+            out.append({"what": "Stock market opens (queued orders become eligible)", "at": venues.next_open(now)})
     except Exception:
         pass
     day = now - now % 86400 + sch["review_hour_utc"] * 3600

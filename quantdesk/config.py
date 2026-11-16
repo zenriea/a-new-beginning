@@ -177,13 +177,25 @@ def load_config(reload: bool = False, **overrides) -> Config:
 # ---------------------------------------------------------------------------
 DEFAULT_SETTINGS: dict = {
     "universe": {
+        # US equities (the venue is named NASDAQ but any Alpaca-listed stock/ETF works, NYSE too)
         "NASDAQ": ["QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO",
                    "TSLA", "COST", "NFLX", "AMD", "PEP", "ADBE", "CSCO",
-                   # liquid, higher-volatility mid/large caps: more signals per month
+                   # liquid, higher-volatility mid/large caps
                    "PLTR", "COIN", "MSTR", "HOOD", "SOFI", "MARA", "RIOT", "SMCI", "ARM", "MU",
-                   "INTC", "PYPL", "ABNB", "CRWD", "DDOG", "ZS", "AFRM", "DKNG", "RIVN"],
+                   "INTC", "PYPL", "ABNB", "CRWD", "DDOG", "ZS", "AFRM", "DKNG", "RIVN",
+                   "TSM", "BABA", "UBER", "NET", "RBLX", "CVNA", "SNAP", "PINS", "NIO", "F", "CCL", "AAL",
+                   # small/mid-cap movers (very volatile)
+                   "GME", "AMC", "IONQ", "RGTI", "QBTS", "SOUN", "BBAI", "RKLB", "ACHR", "JOBY", "OKLO",
+                   "SMR", "HIMS", "UPST", "CLSK", "PLUG", "LCID", "OPEN",
+                   # ETFs, incl. leveraged/inverse (long-only account; the inverse ones act as hedges)
+                   "SPY", "IWM", "DIA", "SMH", "XLF", "XLE", "ARKK",
+                   "TQQQ", "SQQQ", "SOXL", "SOXS", "UPRO", "TNA"],
         "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD",
-                   "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD", "UNI-USD", "AAVE-USD", "NEAR-USD"],
+                   "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD", "UNI-USD", "AAVE-USD", "NEAR-USD",
+                   "SUI-USD", "APT-USD", "ARB-USD", "OP-USD", "SEI-USD", "HBAR-USD", "FET-USD",
+                   "RENDER-USD", "INJ-USD", "TIA-USD", "XLM-USD", "ATOM-USD", "FIL-USD", "ALGO-USD",
+                   # memecoins
+                   "PEPE-USD", "SHIB-USD", "BONK-USD", "WIF-USD", "FLOKI-USD"],
     },
     "benchmarks": {"NASDAQ": "QQQ", "CRYPTO": "BTC-USD", "account": "QQQ"},
     "risk": {
@@ -196,7 +208,7 @@ DEFAULT_SETTINGS: dict = {
         "min_order_usd": 25.0,
         "daily_loss_limit_pct": 0.025,  # vs. start-of-UTC-day equity; blocks new risk
         "max_drawdown_pct": 0.10,       # vs. peak equity; halts new risk until operator resets
-        "max_orders_per_hour": 60,
+        "max_orders_per_hour": 120,
         "max_quote_age_sec": 120,
         "max_participation": 0.01,      # of average daily volume per order
         "max_spread_bps": 60.0,         # wider quotes are treated as unusable
@@ -222,18 +234,17 @@ DEFAULT_SETTINGS: dict = {
         "latency_sec": 2.0,
         "order_ttl_sec": 600,
         "fractional_shares": False,
-        "nasdaq_trade_delay_min": 5,   # minutes after the open before daily-strategy orders go out
+        "nasdaq_trade_delay_min": 5,   # minutes after the open before orders queued overnight go out
     },
     "schedule": {
         "quote_poll_sec": 20,
         "bar_refresh_min": 15,
-        # Each venue has its own research clock. Crypto bars close every hour, 24/7; NASDAQ
-        # gets one new daily bar per session, so it is researched once per new bar at most.
+        # Each venue has its own research clock. Both trade on 15-minute bars (stocks only in the
+        # regular session); the daily LLM budget is the real cap on how much research runs.
         "crypto_research_hours": 2,
-        "nasdaq_research_hours": 20,
+        "nasdaq_research_hours": 2,
         "review_hour_utc": 22,
         "max_research_per_day": 12,     # per venue
-        "nasdaq_signal_delay_min": 20,  # minutes after the close before evaluating daily signals
     },
     "budget": {
         "monthly_usd": 40.0,
@@ -248,16 +259,17 @@ DEFAULT_SETTINGS: dict = {
         "observation_blinding": True,  # hypothesis context excludes data the test window could use
     },
     "gates": {
-        # Looser than a real-money desk would use (paper trading: favour getting live evidence sooner).
-        "min_test_trades": 20,       # favours strategies that trade often
-        "min_test_sharpe": 0.2,
-        "min_val_sharpe": 0.0,
-        "min_cost_stress_return": 0.0,
-        "min_delay_stress_sharpe": 0.0,
-        "min_neighbor_positive_frac": 0.5,
-        "min_subperiod_positive_frac": 0.5,
+        # Deliberately loose (paper trading: get strategies live and let live results cull them;
+        # incubation_fraction keeps new ones small and the daily review retires losers).
+        "min_test_trades": 8,
+        "min_test_sharpe": 0.0,
+        "min_val_sharpe": -0.5,
+        "min_cost_stress_return": -0.05,
+        "min_delay_stress_sharpe": -0.5,
+        "min_neighbor_positive_frac": 0.34,
+        "min_subperiod_positive_frac": 0.34,
         "max_top5_concentration": 1.0,
-        "min_deflated_psr": 0.50,
+        "min_deflated_psr": 0.25,
     },
     "agent": {"paused": False, "emergency_stop": False},
 }

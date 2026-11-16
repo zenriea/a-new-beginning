@@ -10,6 +10,7 @@ import datetime as dt
 from dataclasses import dataclass
 from functools import lru_cache
 
+import numpy as np
 import pandas as pd
 
 UTC = dt.timezone.utc
@@ -19,15 +20,17 @@ UTC = dt.timezone.utc
 class Venue:
     name: str
     asset_class: str          # "equity" | "crypto"
-    timeframe: str            # research/trading bar size: "1d" or "1h"
+    timeframe: str            # research/trading bar size
     bar_seconds: int
     periods_per_year: float   # for annualisation
     qty_decimals: int         # 0 = whole shares
+    bars_per_day: float
 
 
+# "NASDAQ" is the US-equity venue: any Alpaca-listed stock or ETF (NYSE too), regular session only.
 VENUES = {
-    "NASDAQ": Venue("NASDAQ", "equity", "1d", 86400, 252.0, 0),
-    "CRYPTO": Venue("CRYPTO", "crypto", "1h", 3600, 24 * 365.0, 8),
+    "NASDAQ": Venue("NASDAQ", "equity", "15m", 900, 252 * 26.0, 0, 26.0),
+    "CRYPTO": Venue("CRYPTO", "crypto", "15m", 900, 365 * 96.0, 8, 96.0),
 }
 
 
@@ -87,6 +90,20 @@ def next_close(epoch: float) -> float:
 def last_close_before(epoch: float) -> float:
     cal = _xnas()
     return cal.previous_close(_to_ts(epoch)).timestamp()
+
+
+def in_regular_session(ts: list[int], bar_seconds: int) -> np.ndarray:
+    """Mask of intraday bars that lie wholly inside a NASDAQ regular session (drops pre/post-market)."""
+    if not len(ts):
+        return np.zeros(0, dtype=bool)
+    t = pd.to_datetime(np.asarray(ts, dtype="int64"), unit="s", utc=True)
+    days = t.tz_convert("America/New_York").tz_localize(None).normalize()
+    sched = _xnas().schedule
+    o = sched["open"].reindex(days).to_numpy(dtype="datetime64[ns]")
+    c = sched["close"].reindex(days).to_numpy(dtype="datetime64[ns]")
+    tv = t.tz_localize(None).to_numpy(dtype="datetime64[ns]")
+    with np.errstate(invalid="ignore"):
+        return (tv >= o) & (tv + np.timedelta64(bar_seconds, "s") <= c)  # NaT (no session) compares False
 
 
 def session_label(bar_ts: int) -> str:

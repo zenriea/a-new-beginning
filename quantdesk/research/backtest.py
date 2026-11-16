@@ -30,10 +30,11 @@ class BTResult:
     benchmark: dict = field(default_factory=dict)
 
 
-def liquidity_arrays(panel: dict, venue: str, lookback: int = 20):
-    """Causal ADV (USD/day) and daily sigma, using bars strictly BEFORE t."""
+def liquidity_arrays(panel: dict, venue: str, lookback: int | None = None):
+    """Causal ADV (USD/day) and daily sigma, using bars strictly BEFORE t (default: one day of bars)."""
     v = VENUES[venue]
-    bpd = 1.0 if v.timeframe == "1d" else 24.0
+    bpd = v.bars_per_day
+    lookback = lookback or int(bpd)
     close, vol = panel["close"], panel["volume"]
     dollar = close * vol
     T, N = close.shape

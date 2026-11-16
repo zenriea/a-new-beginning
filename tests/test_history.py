@@ -1,4 +1,4 @@
-"""Crypto keeps 3 years of hourly history; older installs extend backwards once."""
+"""Crypto keeps BACKFILL_DAYS of 15-minute history; older, shorter installs extend backwards once."""
 from quantdesk.marketdata.synthetic import SyntheticProvider
 
 
@@ -14,15 +14,15 @@ class Counting(SyntheticProvider):
 
 def _first(sym):
     from quantdesk import db
-    return db.q1("SELECT MIN(ts) t FROM bars WHERE symbol=? AND timeframe='1h'", (sym,))["t"]
+    return db.q1("SELECT MIN(ts) t FROM bars WHERE symbol=? AND timeframe='15m'", (sym,))["t"]
 
 
-def test_new_install_backfills_three_years_of_crypto(env):
+def test_new_install_backfills_full_crypto_history(env):
     from quantdesk import clock
     from quantdesk.marketdata import ingest
     ingest.set_provider("CRYPTO", Counting())
     ingest.ingest_bars("CRYPTO", ["BTC-USD"])
-    assert clock.now() - _first("BTC-USD") > 3 * 365 * 86400 - 2 * 86400
+    assert clock.now() - _first("BTC-USD") > (ingest.BACKFILL_DAYS["CRYPTO"] - 2) * 86400
 
 
 def test_existing_one_year_history_is_extended_backwards_once_one_symbol_per_tick(env):
@@ -30,18 +30,19 @@ def test_existing_one_year_history_is_extended_backwards_once_one_symbol_per_tic
     from quantdesk.marketdata import ingest
     p = Counting()
     ingest.set_provider("CRYPTO", p)
-    ingest.BACKFILL_DAYS["CRYPTO"], real = 365, ingest.BACKFILL_DAYS["CRYPTO"]
+    full = (ingest.BACKFILL_DAYS["CRYPTO"] - 2) * 86400
+    ingest.BACKFILL_DAYS["CRYPTO"], real = 90, ingest.BACKFILL_DAYS["CRYPTO"]
     try:
-        ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD"])   # an install from before this change
+        ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD"])   # an install with a shorter backfill
     finally:
         ingest.BACKFILL_DAYS["CRYPTO"] = real
     one_year = _first("BTC-USD")
-    assert clock.now() - one_year < 366 * 86400
+    assert clock.now() - one_year < 91 * 86400
     ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD"])
-    extended = [s for s in ("BTC-USD", "ETH-USD") if clock.now() - _first(s) > 3 * 365 * 86400 - 2 * 86400]
+    extended = [s for s in ("BTC-USD", "ETH-USD") if clock.now() - _first(s) > full]
     assert len(extended) == 1                                  # one symbol per tick keeps the loop responsive
     ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD"])
-    assert all(clock.now() - _first(s) > 3 * 365 * 86400 - 2 * 86400 for s in ("BTC-USD", "ETH-USD"))
+    assert all(clock.now() - _first(s) > full for s in ("BTC-USD", "ETH-USD"))
     n = len(p.calls)
     ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD"])
     older = [c for c in p.calls[n:] if c[1] < one_year]
@@ -71,7 +72,7 @@ def test_research_waits_until_history_extension_finishes(env):
     from quantdesk.marketdata import ingest
     settings.operator_update("universe", {"CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD"]})
     ingest.set_provider("CRYPTO", Counting())
-    ingest.BACKFILL_DAYS["CRYPTO"], real = 365, ingest.BACKFILL_DAYS["CRYPTO"]
+    ingest.BACKFILL_DAYS["CRYPTO"], real = 90, ingest.BACKFILL_DAYS["CRYPTO"]
     try:
         ingest.ingest_bars("CRYPTO", ["BTC-USD", "ETH-USD", "SOL-USD"])
     finally:

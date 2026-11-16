@@ -37,20 +37,18 @@ def test_recover_reports_downtime_and_cleans_up(env):
 
 
 def _daily_setup():
-    """AAPL/QQQ daily bars through the session before NASDAQ_OPEN_TS."""
-    from quantdesk.marketdata.freshness import expected_last_bar
-    last = expected_last_bar("NASDAQ", NASDAQ_OPEN_TS)
-    import exchange_calendars as xc
-    import pandas as pd
-    cal = xc.get_calendar("XNAS")
-    sessions = cal.sessions_window(pd.Timestamp(pd.Timestamp(last, unit="s").date()), -300)
+    """AAPL/QQQ regular-session 15-minute bars through the last bar published at NASDAQ_OPEN_TS."""
     from quantdesk.marketdata.base import Bar
-    from quantdesk.marketdata.freshness import daily_bar_ts
+    from quantdesk.marketdata.freshness import expected_last_bar
     from quantdesk.marketdata.store import upsert_bars
+    from quantdesk.venues import in_regular_session
+    last = expected_last_bar("NASDAQ", NASDAQ_OPEN_TS)
+    cand = list(range(last - 40 * 86400, last + 1, 900))
+    stamps = [t for t, k in zip(cand, in_regular_session(cand, 900)) if k][-300:]
     for sym, base in (("AAPL", 100.0), ("QQQ", 400.0)):
-        bars = [Bar(daily_bar_ts(s), base + i * 0.2, base + i * 0.2 + 1, base + i * 0.2 - 1, base + i * 0.2 + 0.1, 5e7)
-                for i, s in enumerate(sessions)]
-        upsert_bars(sym, "1d", bars)
+        bars = [Bar(t, base + i * 0.2, base + i * 0.2 + 1, base + i * 0.2 - 1, base + i * 0.2 + 0.1, 5e7)
+                for i, t in enumerate(stamps)]
+        upsert_bars(sym, "15m", bars)
     return last
 
 

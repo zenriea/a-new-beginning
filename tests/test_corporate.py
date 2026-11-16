@@ -34,13 +34,12 @@ class AdjustingProvider:
 
 
 def _sessions(n=60):
-    import exchange_calendars as xc
-    import pandas as pd
-    from quantdesk.marketdata.freshness import daily_bar_ts, expected_last_bar
+    """The last n regular-session 15-minute bar timestamps."""
+    from quantdesk.marketdata.freshness import expected_last_bar
+    from quantdesk.venues import in_regular_session
     last = expected_last_bar("NASDAQ", NASDAQ_OPEN_TS)
-    cal = xc.get_calendar("XNAS")
-    sess = cal.sessions_window(pd.Timestamp(pd.Timestamp(last, unit="s").date()), -n)
-    return [daily_bar_ts(s) for s in sess]
+    cand = list(range(last - 10 * 86400, last + 1, 900))
+    return [t for t, k in zip(cand, in_regular_session(cand, 900)) if k][-n:]
 
 
 def _hold(sid, symbol, qty, price):
@@ -86,7 +85,7 @@ def test_split_rewrites_history_and_adjusts_positions(env):
     prov.upto = len(ts) - 1           # and publishes the newest bar
     ev = ingest.ingest_bars("NASDAQ", ["AAPL"])
     assert any(e.get("kind") == "split" for e in ev)
-    closes = store.load_bars("AAPL", "1d")["close"]
+    closes = store.load_bars("AAPL", "15m")["close"]
     assert len(closes) == len(ts)
     assert closes.max() < 120          # no pre-split prices left: no fake cliff in history
     pos = ledger.sleeve_positions(sid)[0]

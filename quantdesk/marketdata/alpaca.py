@@ -14,7 +14,7 @@ from .base import Bar, DataError, Provider, Quote
 from .http import get_json
 
 BASE = "https://data.alpaca.markets"
-TF = {"1d": "1Day", "1h": "1Hour"}
+TF = {"1d": "1Day", "1h": "1Hour", "15m": "15Min"}
 
 
 def _iso(epoch: int) -> str:

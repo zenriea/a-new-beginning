@@ -9,7 +9,7 @@ const money = (v, d = 0) => v == null || isNaN(v) ? "–" : (v < 0 ? "−$" : "$
 const pct = (v, d = 2, sign = true) => v == null || isNaN(v) ? "–" : (sign && v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(d) + "%";
 const num = (v, d = 2) => v == null || isNaN(v) ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: Math.min(d, 2) > 0 && Math.abs(v) < 1000 ? Math.min(d, 2) : 0 });
 const qty = (v) => v == null ? "–" : Number.isInteger(v) ? v.toLocaleString() : Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
-const px = (v) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
+const px = (v) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: v < 0.01 ? 10 : v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
 const signCls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
 const arrow = (v) => (v > 0 ? "▲ " : v < 0 ? "▼ " : "");
 const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
@@ -136,7 +136,7 @@ function themedChartOptions() {
     grid: { vertLines: { visible: false }, horzLines: { color: cssVar("--border") } },
     rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false, timeVisible: true },
     crosshair: { mode: 0 },
-    localization: { priceFormatter: (v) => Math.abs(v) >= 1000 ? "$" + Math.round(v).toLocaleString() : v.toFixed(Math.abs(v) < 10 ? 3 : 2) },
+    localization: { priceFormatter: (v) => Math.abs(v) >= 1000 ? "$" + Math.round(v).toLocaleString() : Math.abs(v) < 1 ? String(Number(v.toPrecision(4))) : v.toFixed(Math.abs(v) < 10 ? 3 : 2) },
   };
 }
 function ensureEquityChart() {
@@ -330,7 +330,7 @@ async function renderMarket(body) {
     <select class="sel" id="sym">${all.map((s) => `<option ${s === state.symbol ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>
     <span id="quote" class="num secondary" style="font-size:13px"></span></div>
     <div class="chart-tip" id="px-tip" style="padding-left:0"></div><div class="chart-wrap" id="px-chart" style="height:340px"></div>
-    <div class="muted" style="font-size:12px;margin-top:6px">Markers show this account's simulated fills. NASDAQ: split/dividend-adjusted daily bars. Crypto: Coinbase hourly bars.</div>`;
+    <div class="muted" style="font-size:12px;margin-top:6px">Markers show this account's simulated fills. Stocks: split/dividend-adjusted 15-minute bars (regular session). Crypto: Coinbase 15-minute bars.</div>`;
   $("#sym").addEventListener("change", (e) => { state.symbol = e.target.value; renderMarket(body); });
   if (state.charts.px) { state.charts.px.chart.remove(); state.charts.px = null; }
   const chart = LightweightCharts.createChart($("#px-chart"), { ...themedChartOptions(), autoSize: true });
@@ -340,6 +340,10 @@ async function renderMarket(body) {
   const [c, fills] = await Promise.all([api(`/api/candles?symbol=${encodeURIComponent(state.symbol)}&limit=500`), api(`/api/fills?symbol=${encodeURIComponent(state.symbol)}&limit=200`)]);
   if (!c.bars.length) { $("#px-tip").textContent = "No bars stored for this symbol (data unavailable)."; return; }
   ser.setData(c.bars);
+  // memecoins trade far below $0.01: give the candles enough decimals not to flatten at 0
+  const lo = Math.min(...c.bars.map((b) => b.low));
+  const prec = lo > 0 && lo < 1 ? Math.min(12, 3 - Math.floor(Math.log10(lo))) : 2;
+  ser.applyOptions({ priceFormat: { type: "price", precision: prec, minMove: 10 ** -prec } });
   const times = c.bars.map((b) => b.time);
   const snap = (t) => { let lo = 0; for (let i = 0; i < times.length; i++) if (times[i] <= t) lo = i; return times[lo]; };
   ser.setMarkers(fills.filter((f) => f.ts >= times[0]).map((f) => ({ time: snap(f.ts), position: f.side === "buy" ? "belowBar" : "aboveBar",
@@ -362,7 +366,7 @@ const LIMIT_FIELDS = [
   ["risk", "max_orders_per_hour", "Max orders / hour"], ["risk", "max_quote_age_sec", "Max quote age (s)"],
   ["risk", "max_participation", "Max % of ADV per order"], ["risk", "max_spread_bps", "Max usable spread (bp)"],
   ["budget", "monthly_usd", "LLM budget / month ($)"], ["budget", "daily_usd", "LLM budget / day ($)"],
-  ["schedule", "crypto_research_hours", "Crypto research every (hours)"], ["schedule", "nasdaq_research_hours", "NASDAQ research every (hours, needs a new daily bar)"],
+  ["schedule", "crypto_research_hours", "Crypto research every (hours)"], ["schedule", "nasdaq_research_hours", "Stock research every (hours)"],
   ["schedule", "max_research_per_day", "Max experiments / day per venue"],
   ["schedule", "review_hour_utc", "Daily review hour (UTC)"],
   ["gates", "min_test_sharpe", "Gate: min test Sharpe"], ["gates", "min_val_sharpe", "Gate: min validation Sharpe"],

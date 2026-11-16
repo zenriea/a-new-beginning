@@ -44,10 +44,10 @@ def put_quote(symbol, bid, ask, ts=None, last=None, received=None):
            received if received is not None else clock.now()))
 
 
-def put_bars(symbol, closes, timeframe="1d", start=None, volume=1e7):
+def put_bars(symbol, closes, timeframe="15m", start=None, volume=1e7):
     from quantdesk.marketdata.base import Bar
     from quantdesk.marketdata.store import upsert_bars
-    step = 86400 if timeframe == "1d" else 3600
+    step = {"15m": 900, "1h": 3600, "1d": 86400}[timeframe]
     start = start if start is not None else 1700000000 - (1700000000 % step)
     bars = []
     for i, c in enumerate(closes):

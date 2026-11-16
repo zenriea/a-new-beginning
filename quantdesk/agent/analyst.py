@@ -55,51 +55,51 @@ class LLMAnalyst:
 # ----------------------------------------------------------------------------- demo
 TEMPLATES = {
     "NASDAQ": [
-        {"key": "trend_200", "title": "Long-term trend filter on large NASDAQ names",
+        {"key": "trend_200", "title": "Multi-day trend filter on US stocks",
          "rationale": "Slow-moving institutional flows can make trends persist; holding names above their long "
                       "moving average and stepping aside below it may cut drawdowns at modest cost.",
          "entry": "close > sma(close, slow) and sma(close, fast) > sma(close, slow)",
-         "exit": "close < sma(close, slow)", "params": {"fast": [20, 50], "slow": [100, 200]},
-         "sizing": {"method": "fixed", "weight": 0.15, "max_weight": 0.15, "target_vol": 0.15, "vol_lookback": 20}},
+         "exit": "close < sma(close, slow)", "params": {"fast": [26, 78], "slow": [260, 520]},
+         "sizing": {"method": "fixed", "weight": 0.15, "max_weight": 0.15, "target_vol": 0.15, "vol_lookback": 26}},
         {"key": "momentum_rotation", "title": "Cross-sectional momentum rotation with a market filter",
          "rationale": "Relative strength among large caps has historically persisted for months; a QQQ trend "
                       "filter avoids holding momentum through broad sell-offs.",
-         "entry": "ret(close, look) > 0 and market(close) > market(sma(close, 200))",
-         "exit": "ret(close, look) < 0 or market(close) < market(sma(close, 200))",
-         "rank_by": "ret(close, look)", "top_k": 3, "params": {"look": [63, 126]},
-         "sizing": {"method": "fixed", "weight": 0.3, "max_weight": 0.3, "target_vol": 0.15, "vol_lookback": 20}},
+         "entry": "ret(close, look) > 0 and market(close) > market(sma(close, 520))",
+         "exit": "ret(close, look) < 0 or market(close) < market(sma(close, 520))",
+         "rank_by": "ret(close, look)", "top_k": 3, "params": {"look": [26, 130]},
+         "sizing": {"method": "fixed", "weight": 0.3, "max_weight": 0.3, "target_vol": 0.15, "vol_lookback": 26}},
         {"key": "rsi2_reversion", "title": "Short-term pullbacks in uptrends (RSI-2 mean reversion)",
          "rationale": "Liquidity-driven short-term sell-offs in names that are in long-term uptrends often "
                       "partially reverse within days.",
-         "entry": "rsi(close, 2) < th and close > sma(close, 200)", "exit": "rsi(close, 2) > 70",
-         "max_hold_bars": 10, "params": {"th": [5, 10]},
-         "sizing": {"method": "fixed", "weight": 0.15, "max_weight": 0.15, "target_vol": 0.15, "vol_lookback": 20}},
+         "entry": "rsi(close, 2) < th and close > sma(close, 520)", "exit": "rsi(close, 2) > 70",
+         "max_hold_bars": 26, "params": {"th": [5, 10]},
+         "sizing": {"method": "fixed", "weight": 0.15, "max_weight": 0.15, "target_vol": 0.15, "vol_lookback": 26}},
         {"key": "breakout_55", "title": "Donchian breakout with volatility-scaled sizing",
          "rationale": "New multi-week highs can mark the start of trends; sizing by inverse volatility keeps risk "
                       "per position roughly equal.",
          "entry": "close > lag(highest(high, n), 1)", "exit": "close < lag(lowest(low, m), 1)",
-         "params": {"n": [20, 55], "m": [10, 20]},
-         "sizing": {"method": "inverse_vol", "weight": 0.2, "max_weight": 0.2, "target_vol": 0.04, "vol_lookback": 20}},
+         "params": {"n": [26, 78], "m": [13, 26]},
+         "sizing": {"method": "inverse_vol", "weight": 0.2, "max_weight": 0.2, "target_vol": 0.04, "vol_lookback": 26}},
     ],
     "CRYPTO": [
-        {"key": "crypto_trend", "title": "Hourly trend following on major crypto pairs",
+        {"key": "crypto_trend", "title": "Intraday trend following on crypto",
          "rationale": "Crypto returns have shown time-series momentum at multi-day horizons; staying long only "
                       "above a weekly trend may capture it while avoiding extended declines.",
          "entry": "close > ema(close, slow) and ema(close, fast) > ema(close, slow)",
-         "exit": "close < ema(close, slow)", "params": {"fast": [24, 72], "slow": [168, 336]},
-         "sizing": {"method": "inverse_vol", "weight": 0.3, "max_weight": 0.3, "target_vol": 0.25, "vol_lookback": 72}},
+         "exit": "close < ema(close, slow)", "params": {"fast": [96, 288], "slow": [672, 1344]},
+         "sizing": {"method": "inverse_vol", "weight": 0.3, "max_weight": 0.3, "target_vol": 0.25, "vol_lookback": 288}},
         {"key": "crypto_vol_breakout", "title": "Breakouts after volatility compression (crypto)",
          "rationale": "Periods of compressed volatility in crypto are often followed by directional moves; a "
                       "breakout above the recent range may be the start of one.",
-         "entry": "close > lag(highest(high, n), 1) and rvol(48) < rvol(336)",
-         "exit": "close < lag(lowest(low, m), 1)", "params": {"n": [48, 96], "m": [24, 48]},
-         "sizing": {"method": "fixed", "weight": 0.3, "max_weight": 0.3, "target_vol": 0.25, "vol_lookback": 72}},
-        {"key": "crypto_reversion", "title": "Fading sharp hourly drops in uptrends (crypto)",
-         "rationale": "Liquidation cascades can overshoot; in a prevailing uptrend, deeply oversold hourly "
+         "entry": "close > lag(highest(high, n), 1) and rvol(192) < rvol(1344)",
+         "exit": "close < lag(lowest(low, m), 1)", "params": {"n": [192, 384], "m": [96, 192]},
+         "sizing": {"method": "fixed", "weight": 0.3, "max_weight": 0.3, "target_vol": 0.25, "vol_lookback": 288}},
+        {"key": "crypto_reversion", "title": "Fading sharp intraday drops in uptrends (crypto)",
+         "rationale": "Liquidation cascades can overshoot; in a prevailing uptrend, deeply oversold 15-minute "
                       "readings may revert within a day or two.",
-         "entry": "zscore(close, 24) < -z and close > ema(close, 336)", "exit": "zscore(close, 24) > 0",
-         "max_hold_bars": 48, "params": {"z": [2, 2.5]},
-         "sizing": {"method": "fixed", "weight": 0.25, "max_weight": 0.25, "target_vol": 0.25, "vol_lookback": 72}},
+         "entry": "zscore(close, 96) < -z and close > ema(close, 1344)", "exit": "zscore(close, 96) > 0",
+         "max_hold_bars": 192, "params": {"z": [2, 2.5]},
+         "sizing": {"method": "fixed", "weight": 0.25, "max_weight": 0.25, "target_vol": 0.25, "vol_lookback": 288}},
     ],
 }
 

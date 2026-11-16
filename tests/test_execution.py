@@ -3,7 +3,7 @@ import pytest
 from conftest import NASDAQ_OPEN_TS, make_strategy, put_bars, put_quote
 
 
-def _setup(symbol="AAPL", tf="1d"):
+def _setup(symbol="AAPL", tf="15m"):
     put_bars(symbol, [100 + i * 0.1 for i in range(40)], tf, volume=5e7)
 
 
@@ -77,7 +77,7 @@ def test_ttl_expiry_resets_state(env):
 def test_liquidity_cap_partial_fill(env):
     from quantdesk import clock, db
     from quantdesk.trading import execution, oms
-    put_bars("AAPL", [100.0] * 40, "1d", volume=1000)       # ADV ~ $100k -> 1% = $1k
+    put_bars("AAPL", [100.0] * 40, volume=1000 / 26)   # ADV ~ $100k -> 1% = $1k
     sid = make_strategy(allocation=50000)
     put_quote("AAPL", 100.0, 100.02)
     o = oms.create_order(symbol="AAPL", side="buy", qty=50, reason="entry", rationale="why", idem_key="liq", strategy_id=sid)
