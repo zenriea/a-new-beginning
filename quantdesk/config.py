@@ -178,8 +178,12 @@ def load_config(reload: bool = False, **overrides) -> Config:
 DEFAULT_SETTINGS: dict = {
     "universe": {
         "NASDAQ": ["QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO",
-                   "TSLA", "COST", "NFLX", "AMD", "PEP", "ADBE", "CSCO"],
-        "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD"],
+                   "TSLA", "COST", "NFLX", "AMD", "PEP", "ADBE", "CSCO",
+                   # liquid, higher-volatility mid/large caps: more signals per month
+                   "PLTR", "COIN", "MSTR", "HOOD", "SOFI", "MARA", "RIOT", "SMCI", "ARM", "MU",
+                   "INTC", "PYPL", "ABNB", "CRWD", "DDOG", "ZS", "AFRM", "ROKU", "DKNG", "RIVN"],
+        "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD",
+                   "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD", "UNI-USD", "AAVE-USD", "NEAR-USD"],
     },
     "benchmarks": {"NASDAQ": "QQQ", "CRYPTO": "BTC-USD", "account": "QQQ"},
     "risk": {
@@ -192,7 +196,7 @@ DEFAULT_SETTINGS: dict = {
         "min_order_usd": 25.0,
         "daily_loss_limit_pct": 0.025,  # vs. start-of-UTC-day equity; blocks new risk
         "max_drawdown_pct": 0.10,       # vs. peak equity; halts new risk until operator resets
-        "max_orders_per_hour": 30,
+        "max_orders_per_hour": 60,
         "max_quote_age_sec": 120,
         "max_participation": 0.01,      # of average daily volume per order
         "max_spread_bps": 60.0,         # wider quotes are treated as unusable
@@ -225,10 +229,10 @@ DEFAULT_SETTINGS: dict = {
         "bar_refresh_min": 15,
         # Each venue has its own research clock. Crypto bars close every hour, 24/7; NASDAQ
         # gets one new daily bar per session, so it is researched once per new bar at most.
-        "crypto_research_hours": 4,
+        "crypto_research_hours": 2,
         "nasdaq_research_hours": 20,
         "review_hour_utc": 22,
-        "max_research_per_day": 6,      # per venue
+        "max_research_per_day": 12,     # per venue
         "nasdaq_signal_delay_min": 20,  # minutes after the close before evaluating daily signals
     },
     "budget": {
@@ -245,7 +249,7 @@ DEFAULT_SETTINGS: dict = {
     },
     "gates": {
         # Looser than a real-money desk would use (paper trading: favour getting live evidence sooner).
-        "min_test_trades": 8,
+        "min_test_trades": 20,       # favours strategies that trade often
         "min_test_sharpe": 0.2,
         "min_val_sharpe": 0.0,
         "min_cost_stress_return": 0.0,

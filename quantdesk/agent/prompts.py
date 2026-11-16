@@ -150,7 +150,7 @@ def hypothesis_prompt(ctx: dict) -> str:
         "The market context below is BLINDED: it ends before the earliest possible test window, so whatever "
         "you see cannot leak into the sealed test. The universe must be a subset of the approved symbols.\n"
         "Each round trip costs about trading_costs.approx_round_trip_bps, so an idea must earn more than that per "
-        "trade on average; prefer fewer, larger moves over frequent small ones. Capital is allocated only if every "
+        "trade on average. The operator wants an active book: favour ideas that trade often (several round trips a week across the universe, e.g. short-horizon mean reversion or breakouts with max_hold_bars) as long as each trade still clears costs. Capital is allocated only if every "
         "threshold in acceptance_gates passes (they include doubled costs and a one-bar delay), so design for them.\n"
         "Avoid whipsaw: when entry and exit flip on the same line (e.g. close vs one moving average), every wiggle "
         "around it is a costly round trip. Use a buffer between entry and exit and/or require confirmation, e.g. "
