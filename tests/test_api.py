@@ -72,3 +72,18 @@ def test_causal_dsl_requirement_must_be_boolean(client):
     client.post("/api/login", json={"password": "correct horse"})
     assert client.post("/api/settings/gates", json={"require_causal_dsl": "false"},
                        headers={"X-QD": "1"}).status_code == 400
+
+
+def test_legacy_gate_settings_inherit_defaults_and_keep_exploratory_label(client):
+    from quantdesk import db
+    from quantdesk.config import GATE_PRESETS
+    legacy = dict(GATE_PRESETS["exploratory"])
+    del legacy["require_causal_dsl"]
+    db.ex("INSERT INTO settings(key, value) VALUES('gates', ?) "
+          "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (db.dumps(legacy),))
+    client.post("/api/login", json={"password": "correct horse"})
+    system = client.get("/api/system").json()
+    assert system["settings"]["gates"] == GATE_PRESETS["exploratory"]
+    assert system["gate_profile"] == "exploratory"
+    # Read-time defaults must not rewrite the operator's saved settings.
+    assert "require_causal_dsl" not in db.loads(db.q1("SELECT value FROM settings WHERE key='gates'")["value"])

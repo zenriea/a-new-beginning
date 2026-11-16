@@ -207,3 +207,29 @@ def test_fill_rejects_when_operator_removes_all_exposure_room(env):
     put_quote("AAPL", 100, 100)
     assert execution.process_orders() == []
     assert db.q1("SELECT status FROM orders WHERE id=?", (order["id"],))["status"] == "cancelled"
+
+
+def test_fill_reports_unpriced_pending_order_without_claiming_operator_pause(env):
+    from quantdesk import clock, db, settings
+    from quantdesk.trading import execution, oms
+    sid = make_strategy()
+    put_quote("AAPL", 100, 100)
+    legacy = oms.create_order(symbol="AAPL", side="buy", qty=10, reason="entry", rationale="test",
+                              idem_key="unpriced-legacy", strategy_id=sid)
+    put_quote("MSFT", 100, 100)
+    order = oms.create_order(symbol="MSFT", side="buy", qty=10, reason="entry", rationale="test",
+                             idem_key="blocked-by-legacy", strategy_id=sid)
+    assert order["status"] == "submitted"
+    db.ex("UPDATE orders SET signal_snapshot='{}' WHERE id=?", (legacy["id"],))
+    db.ex("DELETE FROM quotes WHERE symbol='AAPL'")
+    clock.advance(3)
+    put_quote("MSFT", 100, 100)
+    assert execution.process_orders() == []
+    cancelled = db.q1("SELECT status, status_note FROM orders WHERE id=?", (order["id"],))
+    assert cancelled["status"] == "cancelled"
+    assert "pending buy without a reference price" in cancelled["status_note"]
+    assert "paused" not in cancelled["status_note"]
+    decision = db.loads(db.q1("SELECT detail FROM risk_events WHERE order_id=? AND kind='fill_risk_check'",
+                              (order["id"],))["detail"])
+    assert any(c["check"] == "pending_buy_priced" and not c["pass"] for c in decision["checks"])
+    assert settings.get("agent")["paused"] is False

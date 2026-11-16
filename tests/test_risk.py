@@ -208,7 +208,15 @@ def test_unpriced_legacy_pending_order_blocks_new_buys_but_not_sells(env):
     put_quote("MSFT", 100, 100)
     request = risk.OrderRequest("MSFT", "buy", 1, 100, sid)
     snapshot = risk.snapshot_for(request)
-    assert snapshot.paused and not risk.evaluate(request, snapshot, LIM).approved
+    assert snapshot.unpriced_pending and not snapshot.paused
+    decision = risk.evaluate(request, snapshot, LIM)
+    assert not decision.approved
+    assert decision.reason == "pending buy without a reference price blocks new risk"
+    assert any(c["check"] == "pending_buy_priced" and not c["pass"] for c in decision.checks)
+    assert not any(c["check"] == "paused" for c in decision.checks)
     snapshot.sleeve_qty = 1
     sell = risk.OrderRequest("MSFT", "sell", 1, 100, sid)
     assert risk.evaluate(sell, snapshot, LIM).approved
+    oms.close_order(order, "cancelled", "Remove unpriced legacy order.")
+    assert not risk.snapshot_for(request).unpriced_pending
+    assert risk.check(request).approved
