@@ -31,6 +31,15 @@ def test_auth_and_csrf(client):
     assert db.get_meta("session_secret") not in text        # signing key never exposed
 
 
+def test_stale_data_alert_ignores_symbols_dropped_from_universe(client):
+    from quantdesk.marketdata import store
+    store.set_status("bars:ROKU", False, "delisted")
+    store.set_status("bars:BTC-USD", False, "stale")
+    client.post("/api/login", json={"password": "correct horse"})
+    keys = [d["key"] for d in client.get("/api/state").json()["data"]["problems"]]
+    assert "bars:BTC-USD" in keys and "bars:ROKU" not in keys
+
+
 def test_login_rate_limit(client):
     codes = [client.post("/api/login", json={"password": "x"}).status_code for _ in range(7)]
     assert 429 in codes
