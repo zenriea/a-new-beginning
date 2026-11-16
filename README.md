@@ -137,7 +137,7 @@ Research tab is that record.
 * **Holdout reuse.** Later experiments are informed by earlier test outcomes. Each experiment
   counts the overlapping test windows and deflates its significance accordingly; this mitigates
   the problem but doesn't remove it.
-* **Survivorship.** The NASDAQ universe is today's large caps, so backtests overstate returns.
+* **Survivorship.** The NASDAQ universe is today's survivors (large caps plus liquid mid caps), so backtests overstate returns.
 * **Free-plan data.** Alpaca's free real-time quotes come from IEX only (a few percent of volume),
   so spreads can be wider or one-sided. The simulator then uses a fresh last trade plus a modeled
   spread and labels the fill accordingly. Historical spreads are modeled, not observed. Coinbase

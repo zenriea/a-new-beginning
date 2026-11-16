@@ -67,8 +67,9 @@ def test_symbol_with_shorter_history_is_not_refetched_forever(env):
 
 
 def test_research_waits_until_history_extension_finishes(env):
-    from quantdesk import worker
+    from quantdesk import settings, worker
     from quantdesk.marketdata import ingest
+    settings.operator_update("universe", {"CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD"]})
     ingest.set_provider("CRYPTO", Counting())
     ingest.BACKFILL_DAYS["CRYPTO"], real = 365, ingest.BACKFILL_DAYS["CRYPTO"]
     try:

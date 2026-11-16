@@ -137,7 +137,7 @@ def test_hypothesis_prompt_shows_costs_and_gates(env):
     prompt = fc.calls[0]["messages"][0]["content"]
     ctx = json.loads(prompt.split("CONTEXT (JSON):\n", 1)[1])
     assert ctx["trading_costs"]["approx_round_trip_bps"] == pytest.approx(6.0)  # 2 x (2 spread + 1 slippage)
-    assert ctx["acceptance_gates"]["min_test_trades"] == 8
+    assert ctx["acceptance_gates"]["min_test_trades"] == 20
     assert "round trip" in prompt
 
 
