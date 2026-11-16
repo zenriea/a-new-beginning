@@ -60,6 +60,8 @@ def _drop_privileges():
 @lru_cache(maxsize=1)
 def _netns_prefix() -> tuple[str, ...]:
     """Use a private network namespace if this kernel/container permits it."""
+    if sys.platform != "linux":
+        return ()
     exe = shutil.which("unshare")
     if not exe:
         return ()
@@ -74,11 +76,14 @@ def _netns_prefix() -> tuple[str, ...]:
 def isolation_report() -> dict:
     cfg = load_config()
     return {"mode": cfg.sandbox_mode, "network_namespace": bool(_netns_prefix()),
-            "drops_to_nobody": os.geteuid() == 0, "cpu_seconds": CPU_SECONDS,
+            "local_supported": sys.platform == "linux",
+            "drops_to_nobody": hasattr(os, "geteuid") and os.geteuid() == 0, "cpu_seconds": CPU_SECONDS,
             "memory_mb": MEMORY_BYTES // (1024 * 1024), "env": "cleared (no secrets)"}
 
 
 def run_local(job: dict) -> dict:
+    if sys.platform != "linux":
+        raise SandboxError("local Python sandbox requires Linux; use Docker or Linux/WSL")
     child = str(Path(__file__).with_name("sandbox_child.py"))
     cmd = list(_netns_prefix()) + [sys.executable, "-I", child]
     try:

@@ -38,19 +38,21 @@ def create_order(*, symbol: str, side: str, qty: float, reason: str, rationale: 
     if existing:
         return dict(existing) | {"duplicate": True}
     now = clock.now()
+    px, _, _ = store.mark_price(symbol)
+    snapshot = dict(signal_snapshot or {})
+    snapshot["risk_price_hint"] = px or 0.0
     with db.tx():
         if db.q1("SELECT 1 FROM orders WHERE client_order_id=?", (coid,)):
             return dict(db.q1("SELECT * FROM orders WHERE client_order_id=?", (coid,))) | {"duplicate": True}
         oid = db.ex("INSERT INTO orders(client_order_id, strategy_id, symbol, venue, side, qty, status, reason, rationale, "
                     "signal_snapshot, origin, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (coid, strategy_id, symbol, venue, side, qty, "intent", reason, rationale,
-                     db.dumps(signal_snapshot or {}), origin, now))
+                     db.dumps(snapshot), origin, now))
     name = _strategy_name(strategy_id)
     journal.write("intent", f"Intent: {side} {_fmt_qty(qty)} {symbol}" + (f" ({name})" if name else ""),
                   f"{rationale}\n\nThis is an intended order, not a fill. It still has to pass the risk engine "
                   f"and execute against live quotes.",
                   refs={"order_id": oid, "strategy_id": strategy_id}, author="rules", dedupe_key=f"intent:{coid}")
-    px, _, _ = store.mark_price(symbol)
     open_now = venues.is_open(venue, now)
     dec = risk.check(risk.OrderRequest(symbol, side, qty, px or 0.0, strategy_id, origin), bars_ok=bars_ok,
                      at_submission_time=not open_now)

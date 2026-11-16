@@ -125,3 +125,98 @@ def test_gate_thresholds_are_operator_editable_within_bounds(env):
         settings.operator_update("gates", {"min_test_sharpe": 50})
     with pytest.raises(settings.SettingsError):
         settings.operator_update("gates", {"min_deflated_psr": 1.5})
+
+
+def test_pending_buys_reserve_symbol_and_crypto_room(env):
+    d = ev(req(qty=100), snap(open_buy_notional=14000, open_buy_by_symbol={"AAPL": 14000}))
+    assert d.approved and d.qty == 10
+    d = ev(req(qty=1, price=10000, symbol="BTC-USD"),
+           snap(open_buy_notional=24000, open_crypto_buy_notional=24000))
+    assert d.approved and d.qty == pytest.approx(0.1)
+
+
+def test_snapshot_excludes_only_current_order_reservation(env):
+    from conftest import make_strategy
+    from quantdesk.trading import oms, risk
+    sid = make_strategy()
+    put_quote("AAPL", 100, 100)
+    orders = [oms.create_order(symbol="AAPL", side="buy", qty=50, reason="entry", rationale="test",
+                               idem_key=f"reservation-{i}", strategy_id=sid) for i in range(2)]
+    request = risk.OrderRequest("AAPL", "buy", 50, 100, sid)
+    full = risk.snapshot_for(request)
+    filling = risk.snapshot_for(request, exclude_order_id=orders[0]["id"])
+    assert full.open_buy_notional == full.open_buy_by_symbol["AAPL"] == 10000
+    assert full.strategy_invested == 10000
+    assert filling.open_buy_notional == filling.open_buy_by_symbol["AAPL"] == 5000
+    assert filling.strategy_invested == 5000
+
+
+def test_queued_orders_cannot_overbook_symbol_across_strategies(env):
+    from conftest import make_strategy
+    from quantdesk.trading import oms
+    put_quote("AAPL", 100, 100)
+    orders = [oms.create_order(symbol="AAPL", side="buy", qty=100, reason="entry", rationale="test",
+                               idem_key=f"symbol-{i}", strategy_id=make_strategy()) for i in range(3)]
+    assert [o["qty"] for o in orders[:2]] == [100, 50]
+    assert orders[2]["status"] == "rejected"
+
+
+def test_queued_orders_cannot_overbook_crypto_across_symbols(env):
+    from conftest import make_strategy
+    from quantdesk.trading import oms, risk
+    sid = make_strategy(venue="CRYPTO", allocation=50000)
+    orders = []
+    for symbol in ("BTC-USD", "ETH-USD", "SOL-USD"):
+        put_quote(symbol, 100, 100)
+        orders.append(oms.create_order(symbol=symbol, side="buy", qty=150, reason="entry", rationale="test",
+                                      idem_key=symbol, strategy_id=sid))
+    assert orders[0]["qty"] == 150 and orders[1]["qty"] == 100
+    assert orders[2]["status"] == "rejected"
+    snapshot = risk.snapshot_for(risk.OrderRequest("BTC-USD", "buy", 1, 100, sid))
+    assert snapshot.open_crypto_buy_notional == 25000
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), -1.0])
+def test_nonfinite_or_negative_prices_are_rejected(env, price):
+    assert not ev(req(price=price), snap()).approved
+
+
+def test_pending_reservation_survives_price_fall_and_partial_fill(env):
+    from conftest import make_strategy
+    from quantdesk import db
+    from quantdesk.trading import oms, risk
+    sid = make_strategy()
+    put_quote("AAPL", 100, 100)
+    order = oms.create_order(symbol="AAPL", side="buy", qty=100, reason="entry", rationale="test",
+                             idem_key="partial", strategy_id=sid)
+    db.ex("UPDATE orders SET filled_qty=40, status='partially_filled' WHERE id=?", (order["id"],))
+    put_quote("AAPL", 80, 80)
+    snapshot = risk.snapshot_for(risk.OrderRequest("AAPL", "buy", 1, 80, sid))
+    assert snapshot.open_buy_notional == 6000
+
+
+def test_unpriced_legacy_pending_order_blocks_new_buys_but_not_sells(env):
+    from conftest import make_strategy
+    from quantdesk import db
+    from quantdesk.trading import oms, risk
+    sid = make_strategy()
+    put_quote("AAPL", 100, 100)
+    order = oms.create_order(symbol="AAPL", side="buy", qty=10, reason="entry", rationale="test",
+                             idem_key="legacy", strategy_id=sid)
+    db.ex("UPDATE orders SET signal_snapshot='{}' WHERE id=?", (order["id"],))
+    db.ex("DELETE FROM quotes WHERE symbol='AAPL'")
+    put_quote("MSFT", 100, 100)
+    request = risk.OrderRequest("MSFT", "buy", 1, 100, sid)
+    snapshot = risk.snapshot_for(request)
+    assert snapshot.unpriced_pending and not snapshot.paused
+    decision = risk.evaluate(request, snapshot, LIM)
+    assert not decision.approved
+    assert decision.reason == "pending buy without a reference price blocks new risk"
+    assert any(c["check"] == "pending_buy_priced" and not c["pass"] for c in decision.checks)
+    assert not any(c["check"] == "paused" for c in decision.checks)
+    snapshot.sleeve_qty = 1
+    sell = risk.OrderRequest("MSFT", "sell", 1, 100, sid)
+    assert risk.evaluate(sell, snapshot, LIM).approved
+    oms.close_order(order, "cancelled", "Remove unpriced legacy order.")
+    assert not risk.snapshot_for(request).unpriced_pending
+    assert risk.check(request).approved

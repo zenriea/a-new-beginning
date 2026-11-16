@@ -48,6 +48,9 @@ class Snapshot:
     drawdown_halt: bool
     bars_ok: bool = True
     open_buy_notional: float = 0.0
+    open_buy_by_symbol: dict = field(default_factory=dict)
+    open_crypto_buy_notional: float = 0.0
+    unpriced_pending: bool = False
 
 
 @dataclass
@@ -63,7 +66,7 @@ class Decision:
                 "reason": self.reason, "resized": self.resized}
 
 
-def evaluate(req: OrderRequest, s: Snapshot, lim: dict) -> Decision:
+def evaluate(req: OrderRequest, s: Snapshot, lim: dict, *, check_order_rate: bool = True) -> Decision:
     checks = []
     venue = venue_of(req.symbol)
     decimals = VENUES[venue].qty_decimals
@@ -75,6 +78,8 @@ def evaluate(req: OrderRequest, s: Snapshot, lim: dict) -> Decision:
     def reject(reason):
         return Decision(False, 0.0, checks, reason)
 
+    if req.side not in ("buy", "sell"):
+        return reject("invalid order side")
     reducing = req.side == "sell"
     if req.qty <= 0 or not math.isfinite(req.qty):
         note("qty_positive", False, f"qty={req.qty}")
@@ -91,6 +96,9 @@ def evaluate(req: OrderRequest, s: Snapshot, lim: dict) -> Decision:
         note("drawdown_halt", False, "max drawdown breached; operator must reset")
         return reject("drawdown halt active")
     # 2. market + data
+    if not reducing and not note("pending_buy_priced", not s.unpriced_pending,
+                                 "pending buy without a reference price" if s.unpriced_pending else "all pending buys priced"):
+        return reject("pending buy without a reference price blocks new risk")
     if not note("market_open", s.market_open, "session open" if s.market_open else "venue closed"):
         return reject(f"{venue} is closed")
     if not note("quote_fresh", s.quote_ok and s.quote_age is not None and s.quote_age <= lim["max_quote_age_sec"],
@@ -100,11 +108,11 @@ def evaluate(req: OrderRequest, s: Snapshot, lim: dict) -> Decision:
     if not reducing and not note("bars_current", s.bars_ok, "signal bars current" if s.bars_ok else "bars stale"):
         return reject("bar data stale")
     # 3. order rate
-    if not note("order_rate", s.orders_last_hour < lim["max_orders_per_hour"],
+    if check_order_rate and not note("order_rate", s.orders_last_hour < lim["max_orders_per_hour"],
                 f"{s.orders_last_hour} orders in the last hour (max {lim['max_orders_per_hour']})"):
         return reject("order rate limit")
     px = req.price_hint
-    if not px or px <= 0:
+    if not px or not math.isfinite(px) or px <= 0:
         note("price", False, "no reference price")
         return reject("no reference price")
     qty = req.qty
@@ -123,13 +131,15 @@ def evaluate(req: OrderRequest, s: Snapshot, lim: dict) -> Decision:
     caps = {
         "max_order_usd": lim["max_order_usd"],
         "cash": max(0.0, s.cash - s.open_buy_notional) * 0.995,
-        "max_position_pct": lim["max_position_pct"] * eq - s.symbol_value.get(req.symbol, 0.0),
+        "max_position_pct": (lim["max_position_pct"] * eq - s.symbol_value.get(req.symbol, 0.0)
+                             - s.open_buy_by_symbol.get(req.symbol, 0.0)),
         "max_gross_pct": lim["max_gross_pct"] * eq - s.gross - s.open_buy_notional,
     }
     if venue == "CRYPTO":
-        caps["max_crypto_pct"] = lim["max_crypto_pct"] * eq - s.crypto_gross
+        caps["max_crypto_pct"] = lim["max_crypto_pct"] * eq - s.crypto_gross - s.open_crypto_buy_notional
     if s.strategy_allocation is not None:
-        caps["strategy_allocation"] = s.strategy_allocation - s.strategy_invested
+        caps["strategy_allocation"] = (min(s.strategy_allocation, lim["max_strategy_pct"] * eq)
+                                        - s.strategy_invested)
     # 4. loss limits block new risk
     day_loss = (s.day_start_equity - eq) / s.day_start_equity if s.day_start_equity else 0.0
     if not note("daily_loss", day_loss < lim["daily_loss_limit_pct"],
@@ -170,7 +180,8 @@ def peak_and_day_start(now: float, equity: float) -> tuple[float, float]:
     return peak, float(d["equity"]) if d else equity
 
 
-def snapshot_for(req: OrderRequest, bars_ok: bool = True) -> Snapshot:
+def snapshot_for(req: OrderRequest, bars_ok: bool = True, *, exclude_order_id: int | None = None) -> Snapshot:
+    """Reserve all pending buys; exclude only the order currently being filled."""
     now = clock.now()
     eb = ledger.equity_breakdown()
     agent = settings.get("agent")
@@ -185,14 +196,32 @@ def snapshot_for(req: OrderRequest, bars_ok: bool = True) -> Snapshot:
         for p in ledger.sleeve_positions(req.strategy_id):
             m, _, _ = store.mark_price(p["symbol"])
             invested += p["qty"] * (m or p["avg_cost"])
-        for pend in db.q("SELECT symbol, qty-filled_qty AS rem FROM orders WHERE strategy_id=? AND side='buy' "
-                         "AND status IN ('submitted','partially_filled')", (req.strategy_id,)):
-            invested += pend["rem"] * (store.mark_price(pend["symbol"])[0] or 0)
     open_buys = 0.0
-    for o in db.q("SELECT symbol, qty-filled_qty AS rem FROM orders WHERE side='buy' AND status IN ('submitted','partially_filled')"):
+    open_crypto = 0.0
+    open_by_symbol = {}
+    unpriced_pending = False
+    for o in db.q("SELECT id, symbol, strategy_id, signal_snapshot, qty-filled_qty AS rem FROM orders "
+                  "WHERE side='buy' AND status IN ('submitted','partially_filled')"):
+        if o["id"] == exclude_order_id:
+            continue
         m, _, _ = store.mark_price(o["symbol"])
-        open_buys += (m or 0) * o["rem"]
-    n_hour = db.q1("SELECT COUNT(*) n FROM orders WHERE created_at > ? AND status != 'rejected'", (now - 3600,))["n"]
+        quote = store.get_quote(o["symbol"])
+        original = db.loads(o["signal_snapshot"], {}).get("risk_price_hint", 0.0)
+        price = max(m or 0.0, (quote or {}).get("ask") or 0.0, original)
+        if not math.isfinite(price) or price <= 0:
+            unpriced_pending = True  # unknown reservation must never create extra buying room
+            continue
+        notional = price * max(0.0, o["rem"])
+        open_buys += notional
+        open_by_symbol[o["symbol"]] = open_by_symbol.get(o["symbol"], 0.0) + notional
+        if venue_of(o["symbol"]) == "CRYPTO":
+            open_crypto += notional
+        if o["strategy_id"] == req.strategy_id:
+            invested += notional
+    # A newly inserted intent is not yet admitted; counting it rejects the first
+    # order when the operator sets a one-order/hour limit.
+    n_hour = db.q1("SELECT COUNT(*) n FROM orders WHERE created_at > ? "
+                  "AND status NOT IN ('intent','rejected')", (now - 3600,))["n"]
     return Snapshot(
         now=now, equity=eb["equity"], cash=eb["cash"], gross=eb["gross"], crypto_gross=eb["crypto_gross"],
         symbol_value={s: v["value"] for s, v in eb["positions"].items()},
@@ -202,7 +231,8 @@ def snapshot_for(req: OrderRequest, bars_ok: bool = True) -> Snapshot:
         market_open=venues.is_open(venue_of(req.symbol), now),
         paused=bool(agent.get("paused")) or db.get_meta("system_halt") == "1",
         emergency_stop=bool(agent.get("emergency_stop")), drawdown_halt=db.get_meta("drawdown_halt") == "1",
-        bars_ok=bars_ok, open_buy_notional=open_buys)
+        bars_ok=bars_ok, open_buy_notional=open_buys, open_buy_by_symbol=open_by_symbol,
+        open_crypto_buy_notional=open_crypto, unpriced_pending=unpriced_pending)
 
 
 def check(req: OrderRequest, bars_ok: bool = True, at_submission_time: bool = False) -> Decision:

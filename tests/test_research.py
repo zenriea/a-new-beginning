@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import sys
 
 from conftest import put_bars
 
@@ -98,6 +99,7 @@ def test_split_is_chronological_and_freeze_precedes_test(env, monkeypatch):
     assert res2["test"]["deflated_psr"] <= res["test"]["deflated_psr"] + 1e-9
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux sandbox resource/namespace isolation")
 def test_sandbox_blocks_and_detects_lookahead():
     from quantdesk.research import sandbox
     from quantdesk.research.sandbox_policy import PolicyError, check_source
@@ -115,6 +117,7 @@ def test_sandbox_blocks_and_detects_lookahead():
             check_source(evil)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux sandbox resource/namespace isolation")
 def test_sandbox_has_no_secrets_or_network(monkeypatch):
     from quantdesk.research import sandbox
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret-should-not-leak")
@@ -143,6 +146,14 @@ def _spec(**kw):
 def test_long_hourly_windows_are_allowed():
     from quantdesk.research.strategy import validate_spec
     validate_spec(_spec(), {"CRYPTO": ["BTC-USD"]})          # 60 days of hourly bars
+
+
+def test_local_sandbox_fails_closed_on_unsupported_platform(env, monkeypatch):
+    from quantdesk.research import sandbox
+    monkeypatch.setattr(sandbox.sys, "platform", "win32")
+    with pytest.raises(sandbox.SandboxError, match="requires Linux"):
+        sandbox.run_local({})
+    assert sandbox.isolation_report()["local_supported"] is False
 
 
 def test_every_grid_value_is_checked_and_dsl_errors_are_spec_errors():

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..trading import costs as C
+from ..trading.liquidity import estimates
 from ..venues import VENUES
 from . import metrics
 from .strategy import PosState, Signals, entry_weight, step
@@ -31,24 +32,9 @@ class BTResult:
 
 
 def liquidity_arrays(panel: dict, venue: str, lookback: int | None = None):
-    """Causal ADV (USD/day) and daily sigma, using bars strictly BEFORE t (default: one day of bars)."""
-    v = VENUES[venue]
-    bpd = v.bars_per_day
-    lookback = lookback or int(bpd)
-    close, vol = panel["close"], panel["volume"]
-    dollar = close * vol
-    T, N = close.shape
-    adv = np.full((T, N), np.nan)
-    sig = np.full((T, N), np.nan)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        lr = np.log(close[1:] / close[:-1])
-    lr = np.vstack([np.full((1, N), np.nan), lr])
-    for t in range(lookback + 1, T):
-        win_d = dollar[t - lookback:t]
-        win_r = lr[t - lookback:t]
-        adv[t] = np.nanmean(win_d, axis=0) * bpd
-        sig[t] = np.nanstd(win_r, axis=0, ddof=1) * math.sqrt(bpd)
-    return adv, sig
+    """Same 20-day estimator as paper execution, using bars strictly BEFORE t."""
+    adv, sig = estimates(panel["close"], panel["volume"], VENUES[venue].bars_per_day, lookback)
+    return adv[:-1], sig[:-1]
 
 
 def run(spec: dict, panel: dict, sig: Signals, costs_cfg: dict, start: int, end: int,

@@ -58,6 +58,8 @@ def validate(key: str, value: dict) -> dict:
     for sub, v in value.items():
         if isinstance(DEFAULT_SETTINGS[key], dict) and sub not in DEFAULT_SETTINGS[key]:
             raise SettingsError(f"unknown setting {key}.{sub}")
+        if isinstance(DEFAULT_SETTINGS[key].get(sub), bool) and not isinstance(v, bool):
+            raise SettingsError(f"{key}.{sub} must be a boolean")
         bounds = SETTING_BOUNDS.get((key, sub))
         if bounds is not None:
             if not isinstance(v, (int, float)) or isinstance(v, bool):

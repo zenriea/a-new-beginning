@@ -382,6 +382,12 @@ async function renderSystem(body) {
   const v = (g, k) => sys.settings[g][k];
   body.innerHTML = `
     <div class="section"><h4>Operating limits (only you can change these; the agent cannot)</h4>
+      <p class="secondary">Gate profile: <b>${esc(sys.gate_profile)}</b>.
+        Exploratory admits paper experiments, not validated trading edges. Strict requires the causal DSL and stronger screening.
+        Neither profile proves profitability. Current DSL requirement: ${sys.settings.gates.require_causal_dsl ? "on" : "off"}.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn" data-gate-preset="exploratory">Use exploratory gates</button>
+        <button class="btn" data-gate-preset="strict">Use strict gates</button></div>
       <form id="limits"><div class="form-grid">${LIMIT_FIELDS.map(([g, k, l]) => `<div class="field"><label>${esc(l)}</label>
         <input data-g="${g}" data-k="${k}" value="${esc(v(g, k))}" inputmode="decimal"></div>`).join("")}</div>
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn" type="submit">Save limits</button>
@@ -395,6 +401,7 @@ async function renderSystem(body) {
     <div class="section"><h4>Integrity & isolation</h4><div class="secondary" style="font-size:13px">
       Ledger rebuilt from fills: <b class="${sys.integrity.ok ? "up" : "down"}">${sys.integrity.ok ? "✓ matches" : "✗ MISMATCH"}</b> (cash ${money(sys.integrity.cash, 2)}).
       Research-code sandbox: ${esc(sys.sandbox.mode)}, env ${esc(sys.sandbox.env)}, network namespace ${sys.sandbox.network_namespace ? "yes" : "no"},
+      ${sys.sandbox.mode === "local" && !sys.sandbox.local_supported ? "<b>Python sandbox unavailable: requires Linux/Docker.</b>" : ""}
       ${sys.sandbox.cpu_seconds}s CPU / ${sys.sandbox.memory_mb} MB. LLM: ${esc(sys.llm.demo ? "demo (no key)" : sys.llm.model + " · effort " + sys.llm.effort)},
       knowledge cutoff assumed ${esc(sys.llm.knowledge_cutoff)}.</div></div>
     <div class="section"><h4>Recent LLM calls (audit)</h4>${calls.length ? `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>When</th><th>Purpose</th><th>Model</th><th class="r">Tokens in/out</th><th class="r">Cost</th><th>Status</th></tr></thead><tbody>
@@ -416,6 +423,13 @@ async function renderSystem(body) {
   });
 }
 $("#tab-body").addEventListener("click", async (e) => {
+  const preset = e.target.closest("[data-gate-preset]");
+  if (preset) {
+    if (!confirm(`Apply ${preset.dataset.gatePreset} gates to future research? This replaces gate edits, not existing allocations.`)) return;
+    try { await api(`/api/gate-presets/${preset.dataset.gatePreset}`, { method: "POST" }); toast("Gate preset saved"); renderTab(); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const ctl = e.target.closest("[data-ctl]");
   if (ctl) {
     if (ctl.dataset.ctl === "flatten_all" && !confirm("Close every position at the next usable quotes?")) return;
