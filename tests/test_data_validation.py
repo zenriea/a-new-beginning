@@ -67,3 +67,34 @@ def test_synthetic_history_does_not_change_when_more_bars_arrive(length):
     longer = _path("AAPL", 900, length + 101)
     for before, after in zip(short, longer):
         np.testing.assert_array_equal(before, after[:length])
+
+
+def test_one_invalid_bar_is_dropped_without_freezing_the_symbol(env):
+    from dataclasses import replace
+
+    from quantdesk import clock
+    from quantdesk.marketdata import ingest, store
+    from quantdesk.marketdata.synthetic import SyntheticProvider
+
+    real = SyntheticProvider("CRYPTO")
+    bad_ts = {}
+
+    class OneBadBar(SyntheticProvider):
+        def fetch_bars(self, symbols, timeframe, start, end):
+            data = real.fetch_bars(symbols, timeframe, start, end)
+            bars = data["BTC-USD"]
+            # Corrupt the same bar on every download, as a real provider would keep returning it.
+            bad_ts.setdefault("ts", bars[-5].ts)
+            data["BTC-USD"] = [replace(b, high=b.close * 0.5) if b.ts == bad_ts["ts"] else b for b in bars]
+            return data
+
+    ingest.set_provider("CRYPTO", OneBadBar("CRYPTO"))
+    ingest.ingest_bars("CRYPTO", ["BTC-USD"])
+    clock.advance(3600)  # a refresh re-downloads the overlap window, bad bar included
+    ingest.ingest_bars("CRYPTO", ["BTC-USD"])
+
+    stored = set(store.load_bars("BTC-USD", "15m")["ts"].tolist())
+    assert bad_ts["ts"] not in stored                      # the bad bar was not stored...
+    assert store.last_bar_ts("BTC-USD", "15m") > bad_ts["ts"] + 3000  # ...newer bars still arrive
+    status = {r["key"]: r for r in store.status_all()}
+    assert status["bars:BTC-USD"]["ok"]                      # and the symbol is not flagged stale

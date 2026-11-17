@@ -233,3 +233,36 @@ def test_fill_reports_unpriced_pending_order_without_claiming_operator_pause(env
                               (order["id"],))["detail"])
     assert any(c["check"] == "pending_buy_priced" and not c["pass"] for c in decision["checks"])
     assert settings.get("agent")["paused"] is False
+
+
+def test_one_failing_fill_does_not_roll_back_the_other_orders(env, monkeypatch):
+    from quantdesk import clock, db
+    from quantdesk.trading import execution, ledger, oms
+    _setup("AAPL")
+    _setup("MSFT")
+    sid = make_strategy({"universe": ["AAPL", "MSFT"]})
+    put_quote("AAPL", 100.0, 100.02)
+    put_quote("MSFT", 100.0, 100.02)
+    bad = oms.create_order(symbol="AAPL", side="buy", qty=10, reason="entry", rationale="why", idem_key="bad", strategy_id=sid)
+    good = oms.create_order(symbol="MSFT", side="buy", qty=10, reason="entry", rationale="why", idem_key="good", strategy_id=sid)
+    clock.advance(3)
+    put_quote("AAPL", 100.0, 100.02)
+    put_quote("MSFT", 100.0, 100.02)
+
+    real_fill = ledger.apply_fill
+
+    def flaky_fill(order, qty, price, fee, ref):
+        fid = real_fill(order, qty, price, fee, ref)  # writes a fill, cash and position...
+        if order["symbol"] == "AAPL":
+            raise ValueError("booking failed")       # ...then fails: all of it must be undone
+        return fid
+
+    monkeypatch.setattr(ledger, "apply_fill", flaky_fill)
+    fills = execution.process_orders()
+
+    assert [f["order_id"] for f in fills] == [good["id"]]
+    assert [r["symbol"] for r in db.q("SELECT symbol FROM fills")] == ["MSFT"]
+    assert db.q1("SELECT COUNT(*) n FROM positions WHERE symbol='AAPL' AND qty>0")["n"] == 0
+    row = db.q1("SELECT status, status_note FROM orders WHERE id=?", (bad["id"],))
+    assert row["status"] == "cancelled" and "booking failed" in row["status_note"]
+    assert db.q1("SELECT status FROM orders WHERE id=?", (good["id"],))["status"] == "filled"

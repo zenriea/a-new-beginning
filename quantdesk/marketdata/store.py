@@ -10,14 +10,18 @@ from ..venues import VENUES, venue_of
 from .base import Bar, DataError, Quote
 
 
+def valid_bar(b: Bar) -> bool:
+    """Finite positive prices, high/low bracketing open/close, nonnegative volume, int timestamp."""
+    prices = (b.open, b.high, b.low, b.close)
+    return (all(math.isfinite(v) and v > 0 for v in prices)
+            and math.isfinite(b.volume) and b.volume >= 0
+            and b.low <= min(b.open, b.close) and b.high >= max(b.open, b.close)
+            and isinstance(b.ts, int) and not isinstance(b.ts, bool) and b.ts > 0)
+
+
 def _validate_bars(bars: list[Bar]) -> None:
-    for b in bars:
-        prices = (b.open, b.high, b.low, b.close)
-        if (not all(math.isfinite(v) and v > 0 for v in prices)
-                or not math.isfinite(b.volume) or b.volume < 0
-                or b.low > min(b.open, b.close) or b.high < max(b.open, b.close)
-                or not isinstance(b.ts, int) or isinstance(b.ts, bool) or b.ts <= 0):
-            raise DataError("invalid OHLCV bar: require finite positive prices, valid range, volume and timestamp")
+    if not all(valid_bar(b) for b in bars):
+        raise DataError("invalid OHLCV bar: require finite positive prices, valid range, volume and timestamp")
 
 
 def upsert_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
