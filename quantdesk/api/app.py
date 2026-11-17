@@ -19,10 +19,11 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
 
 from .. import clock, db, settings, venues
 from ..agent import journal
@@ -53,7 +54,7 @@ def _sign(exp: int) -> str:
 
 
 def _valid(token: str | None) -> bool:
-    if not token or "." not in token:
+    if not token or len(token) > 128 or "." not in token:
         return False
     exp, mac = token.split(".", 1)
     if not exp.isdigit() or int(exp) < time.time():
@@ -67,7 +68,8 @@ def _client_ip(request: Request) -> str:
 
 def require_auth(request: Request):
     if not cfg.admin_password:
-        if _client_ip(request) not in ("127.0.0.1", "::1", "testclient"):
+        if (_client_ip(request) not in ("127.0.0.1", "::1", "testclient")
+                or request.url.hostname not in ("127.0.0.1", "::1", "localhost", "testserver")):
             raise HTTPException(403, "QD_ADMIN_PASSWORD is not set: remote access disabled")
         return
     if not _valid(request.cookies.get("qd_session")):
@@ -78,6 +80,13 @@ def require_write(request: Request):
     require_auth(request)
     if request.headers.get("x-qd") != "1":
         raise HTTPException(403, "missing X-QD header")
+    _require_same_origin(request)
+
+
+def _require_same_origin(request: Request):
+    origin = request.headers.get("origin")
+    if origin and origin != str(request.base_url).rstrip("/"):
+        raise HTTPException(403, "cross-origin writes are not allowed")
 
 
 @app.middleware("http")
@@ -86,22 +95,34 @@ async def security_headers(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
+    elif request.url.path in ("/", "/static/app.js", "/static/app.css"):
+        resp.headers["Cache-Control"] = "no-cache"
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self'")
     return resp
 
 
+class LoginBody(BaseModel):
+    password: str = Field(max_length=1024, strict=True)
+
+
+class AskBody(BaseModel):
+    question: str = Field(min_length=1, max_length=1000, strict=True)
+
+
 @app.post("/api/login")
-async def login(request: Request, response: Response):
+async def login(body: LoginBody, request: Request, response: Response):
+    _require_same_origin(request)
     ip = _client_ip(request)
     now = time.time()
     _attempts[ip] = [t for t in _attempts[ip] if now - t < 60]
     if len(_attempts[ip]) >= 5:
         raise HTTPException(429, "too many attempts; wait a minute")
     _attempts[ip].append(now)
-    body = await request.json()
-    pw = str(body.get("password", ""))
+    pw = body.password
     if not cfg.admin_password:
         raise HTTPException(400, "no password configured; local access only")
     if not hmac.compare_digest(hashlib.sha256(pw.encode()).digest(), hashlib.sha256(cfg.admin_password.encode()).digest()):
@@ -113,7 +134,7 @@ async def login(request: Request, response: Response):
     return {"ok": True}
 
 
-@app.post("/api/logout")
+@app.post("/api/logout", dependencies=[Depends(require_write)])
 async def logout(response: Response):
     response.delete_cookie("qd_session", path="/")
     return {"ok": True}
@@ -184,7 +205,8 @@ def _state() -> dict:
     bench = snap["benchmark_equity"] if snap else None
     data_status = store.status_all()
     uni = settings.get("universe")
-    tracked = {s for syms in uni.values() for s in syms}  # symbols dropped from the universe stop alerting
+    from ..worker import market_symbols
+    tracked = {s for syms in market_symbols().values() for s in syms}
     bad = [d for d in data_status if not d["ok"] and d["key"].split(":", 1)[-1] in tracked]
     if cfg.market_data_mode != "synthetic" and not cfg.alpaca_configured:
         nasdaq = set(uni["NASDAQ"])   # already covered by the "not configured" alert
@@ -232,7 +254,7 @@ async def state():
 
 
 @app.get("/api/equity", dependencies=[Depends(require_auth)])
-async def equity(points: int = 600):
+async def equity(points: int = Query(600, ge=2, le=3000)):
     def f():
         rows = db.q("SELECT ts, equity, benchmark_equity, crypto_benchmark_equity, gross, cash FROM equity_snapshots ORDER BY ts")
         if len(rows) > points:
@@ -243,27 +265,38 @@ async def equity(points: int = 600):
 
 
 @app.get("/api/journal", dependencies=[Depends(require_auth)])
-async def get_journal(after_id: int = 0, limit: int = 100, kind: str | None = None):
+async def get_journal(after_id: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500),
+                      kind: str | None = None):
     return await run_in_threadpool(journal.recent, min(limit, 500), after_id, kind.split(",") if kind else None)
 
 
 @app.get("/api/stream", dependencies=[Depends(require_auth)])
-async def stream(request: Request, after_id: int = 0):
+async def stream(request: Request, after_id: int = Query(0, ge=0)):
+    resume = request.headers.get("last-event-id", "")
+    if resume.isascii() and resume.isdigit() and len(resume) <= 19:
+        after_id = max(after_id, int(resume))
+
     async def gen():
         last = after_id
         tick = 0
         while True:
             if await request.is_disconnected():
                 break
-            rows = await run_in_threadpool(lambda: list(reversed(journal.recent(50, last))))
+            if cfg.admin_password and not _valid(request.cookies.get("qd_session")):
+                break
+            rows = await run_in_threadpool(journal.since, last, 50)
             for r in rows:
                 last = max(last, r["id"])
-                yield f"event: journal\ndata: {json.dumps(r, default=str)}\n\n"
+                yield f"id: {r['id']}\nevent: journal\ndata: {json.dumps(r, default=str)}\n\n"
+            if len(rows) == 50:
+                await asyncio.sleep(0)
+                continue
             tick += 1
             if tick % 5 == 0:
                 yield f"event: ping\ndata: {int(time.time())}\n\n"
             await asyncio.sleep(2)
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 def _rows(sql, params=(), json_fields=()):
@@ -271,7 +304,7 @@ def _rows(sql, params=(), json_fields=()):
 
 
 @app.get("/api/experiments", dependencies=[Depends(require_auth)])
-async def experiments(limit: int = 100):
+async def experiments(limit: int = Query(100, ge=1, le=500)):
     return await run_in_threadpool(_rows, "SELECT e.id, e.hypothesis_id, e.created_at, e.completed_at, e.venue, e.kind, e.status, "
                                    "e.chosen_params, e.test, e.gates, e.leakage, e.error, h.title, h.author FROM experiments e "
                                    "JOIN hypotheses h ON h.id=e.hypothesis_id ORDER BY e.id DESC LIMIT ?", (limit,),
@@ -295,34 +328,56 @@ async def experiment(eid: int):
 
 
 @app.get("/api/strategies", dependencies=[Depends(require_auth)])
-async def strategies():
+async def strategies(limit: int = Query(100, ge=1, le=500)):
     def f():
-        from ..agent.review import live_stats
-        out = []
-        for s in db.q("SELECT * FROM strategies ORDER BY id DESC"):
-            d = db.row_dict(s, ["spec", "expectations", "invalidation"])
-            d["live"] = live_stats(dict(s))
-            d["reviews"] = _rows("SELECT * FROM decisions WHERE subject_type='strategy' AND subject_id=? ORDER BY id DESC LIMIT 5",
-                                 (s["id"],), ("details",))
-            out.append(d)
-        return out
+        return [_strategy_model(s) for s in db.q("SELECT * FROM strategies ORDER BY id DESC LIMIT ?", (limit,))]
+    return await run_in_threadpool(f)
+
+
+def _strategy_model(s):
+    from ..agent.review import live_stats
+    d = db.row_dict(s, ["spec", "expectations", "invalidation"])
+    d["live"] = live_stats(dict(s))
+    d["reviews"] = _rows("SELECT * FROM decisions WHERE subject_type='strategy' AND subject_id=? ORDER BY id DESC LIMIT 5",
+                         (s["id"],), ("details",))
+    return d
+
+
+@app.get("/api/strategies/{sid}", dependencies=[Depends(require_auth)])
+async def strategy(sid: int):
+    def f():
+        s = db.q1("SELECT * FROM strategies WHERE id=?", (sid,))
+        if not s:
+            raise HTTPException(404, "strategy not found")
+        return _strategy_model(s)
     return await run_in_threadpool(f)
 
 
 @app.get("/api/orders", dependencies=[Depends(require_auth)])
-async def orders(limit: int = 200):
+async def orders(limit: int = Query(200, ge=1, le=500)):
     return await run_in_threadpool(_rows, "SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,), ("signal_snapshot", "risk_check"))
 
 
+@app.get("/api/orders/{oid}", dependencies=[Depends(require_auth)])
+async def order(oid: int):
+    def f():
+        o = db.row_dict(db.q1("SELECT * FROM orders WHERE id=?", (oid,)), ("signal_snapshot", "risk_check"))
+        if not o:
+            raise HTTPException(404, "order not found")
+        o["fills"] = _rows("SELECT * FROM fills WHERE order_id=? ORDER BY id", (oid,))
+        return o
+    return await run_in_threadpool(f)
+
+
 @app.get("/api/fills", dependencies=[Depends(require_auth)])
-async def fills(limit: int = 200, symbol: str | None = None):
+async def fills(limit: int = Query(200, ge=1, le=500), symbol: str | None = None):
     if symbol:
         return await run_in_threadpool(_rows, "SELECT * FROM fills WHERE symbol=? ORDER BY id DESC LIMIT ?", (symbol, limit))
     return await run_in_threadpool(_rows, "SELECT * FROM fills ORDER BY id DESC LIMIT ?", (limit,))
 
 
 @app.get("/api/candles", dependencies=[Depends(require_auth)])
-async def candles(symbol: str, limit: int = 400):
+async def candles(symbol: str = Query(min_length=1, max_length=30), limit: int = Query(400, ge=1, le=3000)):
     def f():
         tf = venues.VENUES[venues.venue_of(symbol)].timeframe
         b = store.load_bars(symbol, tf, limit=min(limit, 3000))
@@ -340,7 +395,7 @@ async def universe():
 
 
 @app.get("/api/llm_calls", dependencies=[Depends(require_auth)])
-async def llm_calls(limit: int = 50):
+async def llm_calls(limit: int = Query(50, ge=1, le=500)):
     return await run_in_threadpool(_rows, "SELECT id, ts, purpose, model, served_model, input_tokens, output_tokens, "
                                    "cache_read_tokens, cost_usd, status, error FROM llm_calls ORDER BY id DESC LIMIT ?", (limit,))
 
@@ -380,9 +435,8 @@ def _audit(action: str, detail=None):
 
 
 @app.post("/api/ask", dependencies=[Depends(require_write)])
-async def ask(request: Request):
-    body = await request.json()
-    q = str(body.get("question", "")).strip()
+async def ask(body: AskBody):
+    q = body.question.strip()
     if not q:
         raise HTTPException(400, "empty question")
     from ..agent.qa import ask as do_ask
@@ -410,16 +464,23 @@ async def control(action: str):
             journal.write("system", "Emergency stop cleared", "The agent remains paused until resumed.", author="operator")
         elif action == "flatten_all":
             ids = []
-            for s in db.q("SELECT * FROM strategies WHERE status IN ('active','incubating')"):
-                ids += live.flatten_strategy(dict(s), "Operator requested flatten-all.", origin="operator")
+            with db.tx():
+                settings.operator_update("agent", {"paused": True})
+                oms.cancel_all("Operator requested flatten-all.")
+                for s in db.q("SELECT * FROM strategies"):
+                    ids += live.flatten_strategy(dict(s), "Operator requested flatten-all.", origin="operator")
             journal.write("risk", "Operator: flatten all positions", f"{len(ids)} sell order(s) created; they fill at the "
-                          "next usable quotes (NASDAQ orders wait for the session).", author="operator")
+                           "next usable quotes (NASDAQ orders wait for the session). The agent is paused to prevent "
+                           "new entries; exits retry until flat.", author="operator")
         elif action == "reset_drawdown_halt":
             db.set_meta("drawdown_halt", "0")
             journal.write("system", "Drawdown halt reset by operator", "New positions are allowed again within limits.",
                           author="operator")
         elif action == "clear_system_halt":
-            db.set_meta("system_halt", "0")
+            with db.tx():
+                if not ledger.integrity_check()["ok"]:
+                    raise HTTPException(409, "ledger still fails integrity checks; repair the mismatch before clearing")
+                db.set_meta("system_halt", "0")
             journal.write("system", "System halt cleared by operator", "Ledger halt cleared.", author="operator")
         elif action.startswith("research_"):
             venue = action.split("_", 1)[1].upper()
@@ -441,8 +502,7 @@ async def retire(sid: int):
         s = db.q1("SELECT * FROM strategies WHERE id=?", (sid,))
         if not s:
             raise HTTPException(404)
-        live.flatten_strategy(dict(s), "Retired by operator.", origin="operator")
-        db.ex("UPDATE strategies SET status='retired', retired_at=?, retire_reason='operator' WHERE id=?", (clock.now(), sid))
+        live.retire_strategy(dict(s), "operator", origin="operator")
         journal.write("decision", f"Operator retired {s['name']} v{s['version']}", "Positions are being closed.",
                       refs={"strategy_id": sid}, author="operator")
         _audit("strategy.retire", {"id": sid})
@@ -464,8 +524,7 @@ async def apply_gate_preset(name: str):
 
 
 @app.post("/api/settings/{group}", dependencies=[Depends(require_write)])
-async def update_settings(group: str, request: Request):
-    body = await request.json()
+async def update_settings(group: str, body: dict):
     if group == "agent":
         raise HTTPException(400, "use /api/control for pause/stop")
 

@@ -1,6 +1,9 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
+import { deskHealth, equityInRange, limitUsage } from "./ui-model.mjs?v=20261117-refresh";
+
 const $ = (s, el = document) => el.querySelector(s);
-const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null };
+const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
+  timers: [], booting: false, tabVersion: 0, lastRefresh: null, equityRows: [], equityRange: "all" };
 
 // ---------------------------------------------------------------- helpers
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -39,8 +42,12 @@ async function api(path, opts = {}) {
     init.body = JSON.stringify(opts.body);
   } else if (opts.method) { init.method = opts.method; init.headers["X-QD"] = "1"; }
   const r = await fetch(path, init);
-  if (r.status === 401) { showLogin(); throw new Error("login required"); }
-  if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+  if (r.status === 401 && path !== "/api/login") { showLogin(); throw new Error("login required"); }
+  if (!r.ok) {
+    let m = r.statusText;
+    try { const d = (await r.json()).detail; m = Array.isArray(d) ? d.map((x) => x.msg).join("; ") : d || m; } catch {}
+    throw new Error(m);
+  }
   return r.json();
 }
 function toast(msg) {
@@ -48,13 +55,57 @@ function toast(msg) {
   setTimeout(() => t.remove(), 3500);
 }
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+const outlineIcon = (path) => `<svg viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
+const researchIcon = outlineIcon('<path d="M9 3h6m-5 0v6L4 19a1.4 1.4 0 0 0 1.2 2h13.6a1.4 1.4 0 0 0 1.2-2L14 9V3M7 15h10"/>');
+function emptyState(title, description, action = "") {
+  return `<div class="empty-state"><span class="empty-symbol">${researchIcon}</span><h3>${esc(title)}</h3><p>${esc(description)}</p>${action}</div>`;
+}
+
+// Navigation jumps to the existing live records, not a second copy of the data.
+function markNavigation(key) {
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    const active = item.dataset.nav === key;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "location"); else item.removeAttribute("aria-current");
+  });
+}
+function selectTab(key) {
+  const tab = $(`#tabs [data-tab="${key}"]`);
+  if (!tab) return;
+  document.querySelectorAll("#tabs .tab").forEach((item) => {
+    const active = item === tab;
+    item.classList.toggle("active", active); item.setAttribute("aria-selected", String(active)); item.tabIndex = active ? 0 : -1;
+  });
+  $("#tab-body").setAttribute("aria-labelledby", tab.id);
+  state.tab = key; markNavigation(key); renderTab();
+}
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-nav]");
+  if (!link) return;
+  event.preventDefault();
+  const key = link.dataset.nav;
+  if (!["overview", "journal"].includes(key)) selectTab(key); else markNavigation(key);
+  const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : "#records");
+  if (target) { target.scrollIntoView({ behavior: "instant", block: "start" }); target.focus({ preventScroll: true }); }
+});
 
 // ---------------------------------------------------------------- auth
-function showLogin() { $("#app").classList.add("hidden"); $("#login-view").classList.remove("hidden"); }
+function stopUpdates() {
+  state.timers.forEach(clearInterval); state.timers = [];
+  if (state.es) { state.es.close(); state.es = null; }
+}
+function showLogin() {
+  stopUpdates(); if (closeDrawer) closeDrawer();
+  $("#app").classList.add("hidden"); $("#login-view").classList.remove("hidden");
+}
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  try { await api("/api/login", { body: { password: $("#login-pw").value } }); $("#login-view").classList.add("hidden"); boot(); }
+  try { await api("/api/login", { body: { password: $("#login-pw").value } }); $("#login-pw").value = ""; $("#login-err").textContent = ""; await boot(); }
   catch (err) { $("#login-err").textContent = err.message; }
+});
+$("#btn-logout").addEventListener("click", async () => {
+  try { await api("/api/logout", { method: "POST" }); showLogin(); $("#login-pw").focus(); }
+  catch (err) { toast(err.message); }
 });
 
 // ---------------------------------------------------------------- theme
@@ -89,6 +140,11 @@ function renderBadges(s) {
   const c = s.controls;
   $("#btn-pause").textContent = c.paused ? "Resume agent" : "Pause agent";
   $("#btn-stop").textContent = c.emergency_stop ? "Clear emergency stop" : "Emergency stop";
+  $("#btn-pause").setAttribute("aria-pressed", String(c.paused));
+  $("#nav-research-count").textContent = s.counts.experiments.toLocaleString();
+  const health = deskHealth(s);
+  $("#desk-health").className = `desk-health ${health.tone}`;
+  $("#desk-health").innerHTML = `<span class="health-indicator"></span><div><b>${esc(health.label)}</b><small>Updated ${esc(new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }))}</small></div>`;
 }
 function renderAlerts(s) {
   const a = [];
@@ -105,35 +161,40 @@ function renderAlerts(s) {
 }
 $("#btn-pause").addEventListener("click", async () => {
   const act = state.s?.controls.paused ? "resume" : "pause";
-  await api(`/api/control/${act}`, { method: "POST" }); refresh();
+  try { await api(`/api/control/${act}`, { method: "POST" }); await refresh(); } catch (err) { toast(err.message); }
 });
 $("#btn-stop").addEventListener("click", async () => {
-  if (state.s?.controls.emergency_stop) { await api("/api/control/clear_emergency", { method: "POST" }); refresh(); return; }
-  if (!confirm("Emergency stop: halt all agent trading and cancel open orders? Positions are kept.")) return;
-  await api("/api/control/emergency_stop", { method: "POST" }); refresh();
+  try {
+    if (state.s?.controls.emergency_stop) { await api("/api/control/clear_emergency", { method: "POST" }); await refresh(); return; }
+    if (!confirm("Emergency stop: halt all agent trading and cancel open orders? Positions are kept.")) return;
+    await api("/api/control/emergency_stop", { method: "POST" }); await refresh();
+  } catch (err) { toast(err.message); }
 });
 
 // ---------------------------------------------------------------- KPIs
 function renderKPIs(s) {
   const a = s.account;
   const excess = a.benchmark_return != null ? a.return - a.benchmark_return : null;
+  const usage = limitUsage(a.exposure, s.limits.max_gross_pct), drawdown = limitUsage(a.drawdown, s.limits.max_drawdown_pct);
+  const track = (value) => `<div class="metric-track ${value >= 100 ? "bad" : value >= 80 ? "warn" : ""}" aria-hidden="true"><span style="width:${value}%"></span></div>`;
   const k = [
-    ["Equity", money(a.equity), `cash ${money(a.cash)}`],
-    ["P&L after costs", `<span class="${signCls(a.pnl)}">${arrow(a.pnl)}${money(a.pnl)}</span>`, `<span class="${signCls(a.return)}">${pct(a.return)}</span> on ${money(a.initial)}`],
-    [`vs ${esc(a.benchmark_symbol)} buy & hold`, excess == null ? "–" : `<span class="${signCls(excess)}">${arrow(excess)}${pct(excess)}</span>`,
-      a.benchmark_return == null ? "no benchmark mark yet" : `${esc(a.benchmark_symbol)} ${pct(a.benchmark_return)}`],
-    ["Drawdown", `<span class="${a.drawdown < 0 ? "down" : ""}">${pct(a.drawdown)}</span>`, `limit −${(s.limits.max_drawdown_pct * 100).toFixed(1)}% · peak ${money(a.peak)}`],
-    ["Exposure", pct(a.exposure, 1, false), `${money(a.gross)} invested · crypto ${money(a.crypto_gross)}`],
-    ["Costs paid", money(a.fees_paid, 2), `${s.counts.fills} fills · ${s.counts.orders} orders`],
+    ["Account equity", money(a.equity), `${money(a.cash)} available cash`, '<rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18m-5 5h2"/>', ""],
+    ["Net P&L", `<span class="${signCls(a.pnl)}">${money(a.pnl)}</span>`, `<span class="${signCls(a.return)}">${pct(a.return)}</span> since inception`, '<path d="m3 17 6-6 4 4 8-10m-6 0h6v6"/>', ""],
+    ["Gross exposure", pct(a.exposure, 1, false), `${money(a.gross)} / ${pct(s.limits.max_gross_pct, 0, false)} limit`, '<path d="M4 20V10m5 10V4m6 16v-7m5 7V7"/>', track(usage)],
+    ["Current drawdown", `<span class="${a.drawdown < 0 ? "down" : ""}">${pct(a.drawdown, 2, false)}</span>`, `Halt at −${(s.limits.max_drawdown_pct * 100).toFixed(1)}%`, '<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/>', track(drawdown)],
   ];
-  $("#kpis").innerHTML = k.map(([l, v, sub]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${sub}</div></div>`).join("");
+  $("#kpis").innerHTML = k.map(([l, v, sub, icon, meter]) => `<div class="kpi"><div class="label">${l}${outlineIcon(icon)}</div><div class="value">${v}</div><div class="sub">${sub}</div>${meter}</div>`).join("");
+  $("#performance-stats").innerHTML = `
+    <div class="performance-stat"><div class="label">vs. ${esc(a.benchmark_symbol)} buy &amp; hold</div><div class="value ${signCls(excess)}">${excess == null ? "–" : pct(excess)}</div><small>Since inception · percentage-point difference</small></div>
+    <div class="performance-stat"><div class="label">Fees paid</div><div class="value">${money(a.fees_paid, 2)}</div><small>${s.counts.fills} fills · ${s.counts.orders} orders</small></div>
+    <div class="performance-stat"><div class="label">Crypto exposure</div><div class="value">${money(a.crypto_gross)}</div><small>Equity high-water mark ${money(a.peak)}</small></div>`;
 }
 
 // ---------------------------------------------------------------- equity chart
 function themedChartOptions() {
   return {
     layout: { background: { type: "solid", color: cssVar("--surface-1") }, textColor: cssVar("--text-secondary"), fontFamily: getComputedStyle(document.body).fontFamily, fontSize: 11 },
-    grid: { vertLines: { visible: false }, horzLines: { color: cssVar("--border") } },
+    grid: { vertLines: { visible: false }, horzLines: { color: cssVar("--border"), style: 2 } },
     rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false, timeVisible: true },
     crosshair: { mode: 0 },
     localization: { priceFormatter: (v) => Math.abs(v) >= 1000 ? "$" + Math.round(v).toLocaleString() : Math.abs(v) < 1 ? String(Number(v.toPrecision(4))) : v.toFixed(Math.abs(v) < 10 ? 3 : 2) },
@@ -157,17 +218,34 @@ function ensureEquityChart() {
   return c;
 }
 async function loadEquity() {
-  const rows = await api("/api/equity");
+  state.equityRows = await api("/api/equity");
+  renderEquity();
+}
+function renderEquity() {
+  const rows = equityInRange(state.equityRows, state.equityRange, Date.now() / 1000);
   const c = ensureEquityChart();
-  if (!rows.length) { $("#equity-tip").textContent = "No equity snapshots yet: the worker writes one per minute."; return; }
   const ser = (f) => rows.filter((r) => r[f] != null).map((r) => ({ time: Math.floor(r.ts), value: r[f] }));
   c.acct.setData(ser("equity")); c.bench.setData(ser("benchmark_equity")); c.btc.setData(ser("crypto_benchmark_equity"));
+  $("#equity-tip").textContent = "";
+  const note = $("#equity-range-note");
+  note.classList.toggle("hidden", rows.length > 0);
+  note.textContent = !state.equityRows.length ? "No equity snapshots yet. The worker records the account once per minute." :
+    "No snapshots in this period. Choose All to see the recorded history.";
   c.chart.timeScale().fitContent();
   const bs = state.s?.account.benchmark_symbol || "QQQ";
   $("#equity-legend").innerHTML = [["--series-1", "Account (net of costs)"], ["--series-2", `${bs} buy & hold`], ["--series-3", "BTC-USD buy & hold"]]
     .map(([v, l]) => `<span><span class="sw" style="background:var(${v})"></span>${esc(l)}</span>`).join("");
-  $("#equity-since").textContent = `since ${day(rows[0].ts)}`;
+  $("#equity-since").textContent = rows.length ? `${day(rows[0].ts)} — ${day(rows[rows.length - 1].ts)}` : "No recorded marks in this period";
 }
+$("#equity-ranges").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-range]");
+  if (!button) return;
+  state.equityRange = button.dataset.range;
+  $("#equity-ranges").querySelectorAll("button").forEach((item) => {
+    item.classList.toggle("active", item === button); item.setAttribute("aria-pressed", String(item === button));
+  });
+  renderEquity();
+});
 
 // ---------------------------------------------------------------- desk view
 function renderNow(s) {
@@ -179,10 +257,10 @@ function renderNow(s) {
   $("#now").innerHTML = `
     <div class="now-activity act-${esc(a.activity || "starting")}">${esc(cap(a.activity || "starting"))}</div>
     <div class="now-detail">${esc(a.detail || "")} <span class="muted">· ${ago(a.updated_at)}</span></div>
-    ${exp ? `<div style="margin-top:10px;font-size:13px">Latest experiment: <a href="#" data-exp="${exp.id}">#${exp.id} ${esc(exp.title)}</a>
-      <span class="status ${esc(exp.status)}">${esc(exp.status)}</span></div>` : `<div class="muted" style="margin-top:10px">No experiments yet.</div>`}
-    <div style="margin-top:6px;font-size:13px" class="secondary">${live} live strateg${live === 1 ? "y" : "ies"}${waiting ? ` (+${waiting} waiting for room)` : ""} ·
-      ${s.counts.experiments} experiments run · ${s.open_orders.length} open order${s.open_orders.length === 1 ? "" : "s"}</div>
+    <div class="activity-counts"><span><b>${live}</b> active strateg${live === 1 ? "y" : "ies"}</span>${waiting ? `<span><b>${waiting}</b> waiting for room</span>` : ""}
+      <span><b>${s.counts.experiments}</b> experiments</span><span><b>${s.open_orders.length}</b> open orders</span></div>
+    ${exp ? `<div class="latest-experiment"><div class="eyebrow">LATEST EXPERIMENT</div><a href="#" data-exp="${exp.id}">#${exp.id} ${esc(exp.title)}</a>
+      <div><span class="status ${esc(exp.status)}">${esc(exp.status)}</span></div></div>` : `<div class="muted" style="margin-top:10px">No experiments yet.</div>`}
     <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span><span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span></li>`).join("")}</ul>`;
 }
 const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
@@ -197,7 +275,7 @@ function evidenceLinks(ev) {
 }
 function renderBeliefs(s) {
   if (!s.beliefs.length) {
-    $("#beliefs").innerHTML = `<div class="muted">No evidence-backed beliefs recorded yet. Beliefs are only stored when they cite an experiment, strategy or trade record.</div>`;
+    $("#beliefs").innerHTML = `<div class="belief-placeholder"><span class="empty-symbol">${researchIcon}</span><div><b>Evidence before conviction.</b><p>No evidence-backed beliefs yet. A thesis only appears here when it cites an experiment, strategy, or trade record. Until then, the desk stays open-minded.</p></div></div>`;
     return;
   }
   $("#beliefs").innerHTML = s.beliefs.slice(0, 5).map((b) => `<div class="belief">
@@ -209,9 +287,12 @@ function renderBeliefs(s) {
 const openPos = new Set();
 function renderPositions(s) {
   const p = s.positions;
-  $("#pos-summary").textContent = p.length ? `${p.length} position${p.length > 1 ? "s" : ""} · ${money(s.account.gross)}` : "";
+  $("#pos-summary").textContent = p.length ? `${p.length} position${p.length > 1 ? "s" : ""} · ${money(s.account.gross)}` : "All cash";
   if (!p.length) {
-    $("#positions").innerHTML = `<div class="empty">Flat. No positions are open. ${s.strategies.length ? "Live strategies are waiting for their entry rules." : "No strategy has passed testing yet, and holding cash is a valid position."}</div>`;
+    $("#positions").innerHTML = emptyState("Sometimes, cash is the position.", s.strategies.length ?
+      "No open positions. Approved strategies are waiting for their entry rules; the normal risk checks still apply." :
+      "No strategy has cleared testing yet. The desk keeps capital in cash until an idea qualifies.",
+      '<a class="btn small" href="#records" data-nav="research">Explore the research <span aria-hidden="true">↗</span></a>');
     return;
   }
   const rows = p.map((r, i) => {
@@ -250,18 +331,30 @@ $("#positions").addEventListener("click", (e) => {
 // ---------------------------------------------------------------- tabs
 $("#tabs").addEventListener("click", (e) => {
   const t = e.target.closest("[data-tab]"); if (!t) return;
-  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
-  state.tab = t.dataset.tab; renderTab();
+  selectTab(t.dataset.tab);
+});
+$("#tabs").addEventListener("keydown", (e) => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+  const tabs = [...$("#tabs").querySelectorAll("[role=tab]")], index = tabs.indexOf(document.activeElement);
+  if (index < 0) return;
+  e.preventDefault();
+  const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 :
+    (index + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  tabs[next].focus(); tabs[next].click();
 });
 async function renderTab() {
   const body = $("#tab-body");
+  const version = ++state.tabVersion;
+  if (state.charts.px) { state.charts.px.chart.remove(); state.charts.px = null; }
+  body.setAttribute("aria-busy", "true");
   try {
-    if (state.tab === "research") return renderResearch(body);
-    if (state.tab === "strategies") return renderStrategies(body);
-    if (state.tab === "orders") return renderOrders(body);
-    if (state.tab === "market") return renderMarket(body);
-    if (state.tab === "system") return renderSystem(body);
-  } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+    if (state.tab === "research") await renderResearch(body, version);
+    if (state.tab === "strategies") await renderStrategies(body, version);
+    if (state.tab === "orders") await renderOrders(body, version);
+    if (state.tab === "market") await renderMarket(body, version);
+    if (state.tab === "system") await renderSystem(body, version);
+  } catch (err) { if (version === state.tabVersion) body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  finally { if (version === state.tabVersion) body.setAttribute("aria-busy", "false"); }
 }
 
 const GATE_LABEL = { validation_sharpe: "Validation", test_sharpe: "Test Sharpe", test_trades: "Too few trades",
@@ -269,33 +362,37 @@ const GATE_LABEL = { validation_sharpe: "Validation", test_sharpe: "Test Sharpe"
   subperiod_positive_frac: "Sub-periods", top5_concentration: "Top-5 trades", deflated_psr: "Deflated PSR" };
 const gateLabel = (n) => GATE_LABEL[n] || n.replaceAll("_", " ");
 function gatesCell(e) {
+  if (!e.gates) return `<span class="muted">${e.error ? "could not run" : "not evaluated"}</span>`;
   if (e.error && !e.gates) return `<span class="muted">could not run</span>`;
   const failed = e.gates?.failed || [], total = e.gates?.checks?.length || 9;
   if (!failed.length) return `<span class="up">all ${total} passed</span>`;
   return `<b>${failed.length}/${total} failed</b><div class="chips">${failed.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}</div>`;
 }
 
-async function renderResearch(body) {
+async function renderResearch(body, version) {
   const ex = await api("/api/experiments");
-  if (!ex.length) { body.innerHTML = `<div class="empty">No experiments yet. The first research cycle runs shortly after the worker has market data.</div>`; return; }
+  if (version !== state.tabVersion) return;
+  if (!ex.length) { body.innerHTML = emptyState("The next idea starts here.", "No experiments yet. The first research cycle begins once the worker has market data. Every hypothesis will have a frozen test and a recorded decision."); return; }
   const passed = ex.filter((e) => e.status === "passed").length;
-  body.innerHTML = `<div class="secondary" style="margin-bottom:10px;font-size:13px">${ex.length} experiments · ${passed} passed every gate ·
-    ${ex.filter((e) => e.status === "failed").length} failed. Learning here means this record: each idea, its frozen test, and what was concluded.</div>
+  body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
+    <span class="summary-count"><span class="up">${passed}</span> passed</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} failed</span></div>
     <div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>Hypothesis</th><th>Venue</th><th>Status</th><th class="r">Test return</th>
     <th class="r">Test Sharpe</th><th class="r">Trades</th><th>Gates</th><th>When</th></tr></thead><tbody>
-    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num">${e.id}</td><td class="hyp">${esc(e.title)}<div class="muted" style="font-size:11.5px">${authorLabel(e.author)}</div></td>
+    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num">${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted" style="font-size:11.5px">${authorLabel(e.author)}</div></td>
       <td>${esc(e.venue)}</td><td><span class="status ${esc(e.status)}">${esc(e.status)}</span></td>
       <td class="r num ${signCls(e.test?.total_return)}">${pct(e.test?.total_return)}</td><td class="r num">${num(e.test?.sharpe)}</td>
       <td class="r num">${e.test?.n_trades ?? "–"}</td><td class="gates" style="font-size:12px">${gatesCell(e)}</td>
-      <td class="muted" style="white-space:nowrap">${ago(e.created_at)}</td></tr>`).join("")}</tbody></table></div>`;
+       <td class="muted" style="white-space:nowrap">${ago(e.created_at)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="research-note">A rejected idea is a recorded result, not a missing trade. Open an experiment to inspect its hypothesis, sealed test, and acceptance gates.</div>`;
 }
 
-async function renderStrategies(body) {
+async function renderStrategies(body, version) {
   const st = await api("/api/strategies");
-  if (!st.length) { body.innerHTML = `<div class="empty">No strategy has been approved. A strategy needs an experiment that passes every gate on the sealed test window.</div>`; return; }
+  if (version !== state.tabVersion) return;
+  if (!st.length) { body.innerHTML = emptyState("A strategy earns its place.", "No approved strategies yet. An experiment must pass every acceptance gate on its sealed test window before it can enter this portfolio."); return; }
   body.innerHTML = `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>Strategy</th><th>Status</th><th class="r">Allocation</th><th class="r">Live return</th>
     <th class="r">Expected (test CAGR)</th><th class="r">Fills</th><th class="r">Avg slippage</th><th></th></tr></thead><tbody>
-    ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b>${esc(s.name)} v${s.version}</b><div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div></td>
+    ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b><a href="#" data-strat="${s.id}">${esc(s.name)} v${s.version}</a></b><div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div></td>
       <td><span class="status ${esc(s.status)}">${esc(s.status)}</span></td>
       <td class="r num">${money(s.allocation)}<div class="muted" style="font-size:11px">approved ${money(s.approved_allocation)}</div></td>
       <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted" style="font-size:11px">${s.live.days_live}d live</div></td>
@@ -304,13 +401,14 @@ async function renderStrategies(body) {
       <td>${s.status === "retired" ? "" : `<button class="btn small" data-retire="${s.id}">Retire</button>`}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
-async function renderOrders(body) {
+async function renderOrders(body, version) {
   const [orders, fills] = await Promise.all([api("/api/orders?limit=100"), api("/api/fills?limit=100")]);
+  if (version !== state.tabVersion) return;
   body.innerHTML = `<div class="secondary" style="font-size:13px;margin-bottom:8px">An <b>intent</b> is recorded with its rationale before risk checks;
     a <b>fill</b> is a simulated execution against a live quote. They are never the same row.</div>
     <h4 class="muted" style="margin:6px 0">Orders</h4>
     ${orders.length ? `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>Created</th><th>Side</th><th>Symbol</th><th class="r">Qty</th><th class="r">Filled</th>
-      <th class="r">Avg px</th><th>Status</th><th>Note</th></tr></thead><tbody>${orders.map((o) => `<tr class="clickable" data-order="${o.id}"><td class="num">${o.id}</td>
+      <th class="r">Avg px</th><th>Status</th><th>Note</th></tr></thead><tbody>${orders.map((o) => `<tr class="clickable" data-order="${o.id}"><td class="num"><a href="#" data-order="${o.id}">${o.id}</a></td>
       <td class="muted" style="white-space:nowrap">${dt(o.created_at)}</td><td>${esc(o.side)}</td><td>${esc(o.symbol)}</td><td class="r num">${qty(o.qty)}</td>
       <td class="r num">${qty(o.filled_qty)}</td><td class="r num">${px(o.avg_price)}</td><td><span class="status ${esc(o.status)}">${esc(o.status)}</span></td>
       <td class="secondary" style="font-size:12px">${esc(o.status_note || o.reason)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No orders yet.</div>`}
@@ -322,22 +420,24 @@ async function renderOrders(body) {
       <td class="secondary" style="font-size:12px">${esc(f.price_basis)}${f.notes ? " · " + esc(f.notes) : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No fills yet.</div>`}`;
 }
 
-async function renderMarket(body) {
+async function renderMarket(body, version) {
   const u = await api("/api/universe");
+  if (version !== state.tabVersion) return;
   const all = [...u.NASDAQ, ...u.CRYPTO];
   state.symbol = state.symbol || all[0];
   body.innerHTML = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-    <select class="sel" id="sym">${all.map((s) => `<option ${s === state.symbol ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>
+    <label class="muted" for="sym">Symbol</label><select class="sel" id="sym">${all.map((s) => `<option ${s === state.symbol ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>
     <span id="quote" class="num secondary" style="font-size:13px"></span></div>
     <div class="chart-tip" id="px-tip" style="padding-left:0"></div><div class="chart-wrap" id="px-chart" style="height:340px"></div>
-    <div class="muted" style="font-size:12px;margin-top:6px">Markers show this account's simulated fills. Stocks: split/dividend-adjusted 15-minute bars (regular session). Crypto: Coinbase 15-minute bars.</div>`;
-  $("#sym").addEventListener("change", (e) => { state.symbol = e.target.value; renderMarket(body); });
+    <div class="muted" style="font-size:11px;margin-top:6px">Markers show this account's simulated fills. ${state.s?.mode.market_data === "synthetic" ? "Synthetic 15-minute bars for local/demo testing; these are not live market prices." : "Stocks: split/dividend-adjusted 15-minute bars (regular session). Crypto: Coinbase 15-minute bars."}</div>`;
+  $("#sym").addEventListener("change", (e) => { state.symbol = e.target.value; renderTab(); });
   if (state.charts.px) { state.charts.px.chart.remove(); state.charts.px = null; }
   const chart = LightweightCharts.createChart($("#px-chart"), { ...themedChartOptions(), autoSize: true });
   const up = cssVar("--good-mark"), dn = cssVar("--critical-mark");
   const ser = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderVisible: false, wickUpColor: up, wickDownColor: dn });
   state.charts.px = { chart, theme: () => chart.applyOptions(themedChartOptions()) };
   const [c, fills] = await Promise.all([api(`/api/candles?symbol=${encodeURIComponent(state.symbol)}&limit=500`), api(`/api/fills?symbol=${encodeURIComponent(state.symbol)}&limit=200`)]);
+  if (version !== state.tabVersion) return;
   if (!c.bars.length) { $("#px-tip").textContent = "No bars stored for this symbol (data unavailable)."; return; }
   ser.setData(c.bars);
   // memecoins trade far below $0.01: give the candles enough decimals not to flatten at 0
@@ -376,9 +476,10 @@ const LIMIT_FIELDS = [
   ["gates", "min_subperiod_positive_frac", "Gate: min share of positive sub-periods"],
   ["gates", "max_top5_concentration", "Gate: max top-5 trade concentration"],
 ];
-async function renderSystem(body) {
+async function renderSystem(body, version) {
   const sys = await api("/api/system");
   const calls = await api("/api/llm_calls?limit=15");
+  if (version !== state.tabVersion) return;
   const v = (g, k) => sys.settings[g][k];
   body.innerHTML = `
     <div class="section"><h4>Operating limits (only you can change these; the agent cannot)</h4>
@@ -388,8 +489,8 @@ async function renderSystem(body) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn" data-gate-preset="exploratory">Use exploratory gates</button>
         <button class="btn" data-gate-preset="strict">Use strict gates</button></div>
-      <form id="limits"><div class="form-grid">${LIMIT_FIELDS.map(([g, k, l]) => `<div class="field"><label>${esc(l)}</label>
-        <input data-g="${g}" data-k="${k}" value="${esc(v(g, k))}" inputmode="decimal"></div>`).join("")}</div>
+      <form id="limits"><div class="form-grid">${LIMIT_FIELDS.map(([g, k, l]) => `<div class="field"><label for="limit-${g}-${k}">${esc(l)}</label>
+        <input id="limit-${g}-${k}" data-g="${g}" data-k="${k}" value="${esc(v(g, k))}" inputmode="decimal" required></div>`).join("")}</div>
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn" type="submit">Save limits</button>
         <span class="muted" style="font-size:12px">Hard ceilings: position ≤ ${pct(sys.ceilings.ceiling_max_position_pct, 0, false)}, gross ≤ ${pct(sys.ceilings.ceiling_max_gross_pct, 0, false)} (no leverage),
         order ≤ ${money(sys.ceilings.ceiling_max_order_usd)}, LLM ≤ ${money(sys.ceilings.ceiling_monthly_llm_usd)}/mo.</span></div></form></div>
@@ -414,6 +515,8 @@ async function renderSystem(body) {
   $("#limits").addEventListener("submit", async (e) => {
     e.preventDefault();
     const groups = {};
+    const inputs = [...e.target.querySelectorAll("input")];
+    if (inputs.some((i) => !i.value.trim() || !Number.isFinite(Number(i.value)))) { toast("Every limit must be a finite number."); return; }
     e.target.querySelectorAll("input").forEach((i) => {
       const val = Number(i.value); if (Number.isNaN(val)) return;
       if (val !== Number(v(i.dataset.g, i.dataset.k))) (groups[i.dataset.g] ||= {})[i.dataset.k] = val;
@@ -432,22 +535,48 @@ $("#tab-body").addEventListener("click", async (e) => {
   }
   const ctl = e.target.closest("[data-ctl]");
   if (ctl) {
-    if (ctl.dataset.ctl === "flatten_all" && !confirm("Close every position at the next usable quotes?")) return;
+    if (ctl.dataset.ctl === "flatten_all" && !confirm("Pause new entries, cancel pending orders, and close every position at the next usable quotes?")) return;
     try { await api(`/api/control/${ctl.dataset.ctl}`, { method: "POST" }); toast("Done"); refresh(); } catch (err) { toast(err.message); }
     return;
   }
   const ret = e.target.closest("[data-retire]");
-  if (ret) { e.stopPropagation(); if (confirm("Retire this strategy and close its positions?")) { await api(`/api/strategies/${ret.dataset.retire}/retire`, { method: "POST" }); renderTab(); } return; }
-  const llm = e.target.closest("[data-llm]"); if (llm) return openLLM(llm.dataset.llm);
+  if (ret) {
+    e.stopPropagation();
+    if (confirm("Retire this strategy and close its positions?")) {
+      try { await api(`/api/strategies/${ret.dataset.retire}/retire`, { method: "POST" }); await renderTab(); }
+      catch (err) { toast(err.message); }
+    }
+    return;
+  }
+  const llm = e.target.closest("[data-llm]"); if (llm) return openLLM(llm.dataset.llm).catch((err) => toast(err.message));
 });
 
 // ---------------------------------------------------------------- drawers
+let closeDrawer = null;
 function drawer(title, html) {
-  $("#drawer-root").innerHTML = `<div class="drawer-bg"></div><div class="drawer" role="dialog" aria-label="${esc(title)}"><div class="drawer-h"><h3>${esc(title)}</h3>
+  if (closeDrawer) closeDrawer();
+  const previousFocus = document.activeElement;
+  $("#drawer-root").innerHTML = `<div class="drawer-bg"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="drawer-h"><h3>${esc(title)}</h3>
     <button class="btn small" id="drawer-close">Close</button></div><div class="drawer-b">${html}</div></div>`;
-  const close = () => { $("#drawer-root").innerHTML = ""; if (state.charts.exp) { state.charts.exp.chart.remove(); state.charts.exp = null; } };
+  const close = () => {
+    if (state.charts.exp) { state.charts.exp.chart.remove(); state.charts.exp = null; }
+    document.removeEventListener("keydown", onKey);
+    $("#drawer-root").innerHTML = ""; $("#app").inert = false; closeDrawer = null;
+    if (previousFocus?.isConnected) previousFocus.focus();
+  };
+  const onKey = (ev) => {
+    if (ev.key === "Escape") close();
+    if (ev.key === "Tab") {
+      const items = [...$(".drawer").querySelectorAll("button,a[href],input,select,[tabindex='0']")];
+      const first = items[0], last = items[items.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last?.focus(); }
+      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first?.focus(); }
+    }
+  };
+  closeDrawer = close;
+  $("#app").inert = true;
   $("#drawer-close").onclick = close; $(".drawer-bg").onclick = close;
-  document.addEventListener("keydown", function k(ev) { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", k); } });
+  document.addEventListener("keydown", onKey); $("#drawer-close").focus();
 }
 function metricsTable(cols) {
   const rows = [["Net return", "total_return", pct], ["CAGR", "cagr", pct], ["Sharpe", "sharpe", (x) => num(x)], ["Max drawdown", "max_drawdown", pct],
@@ -505,9 +634,7 @@ async function openExperiment(id) {
   }
 }
 async function openStrategy(id) {
-  const all = await api("/api/strategies");
-  const s = all.find((x) => String(x.id) === String(id));
-  if (!s) return toast("strategy not found");
+  const s = await api(`/api/strategies/${encodeURIComponent(id)}`);
   const sp = s.spec || {};
   drawer(`Strategy ${s.name} v${s.version}`, `
     <div class="section"><span class="status ${esc(s.status)}">${esc(s.status)}</span> <span class="muted">· ${esc(s.venue)} · approved ${dt(s.created_at)} · from <a href="#" data-exp="${s.experiment_id}">experiment #${s.experiment_id}</a></span></div>
@@ -522,10 +649,8 @@ async function openStrategy(id) {
       <div class="pre secondary" style="font-size:13px">${rich(r.rationale)}</div></div>`).join("") || `<div class="muted">No reviews yet (daily).</div>`}</div>`);
 }
 async function openOrder(id) {
-  const orders = await api("/api/orders?limit=500");
-  const o = orders.find((x) => String(x.id) === String(id));
-  if (!o) return toast("order not found");
-  const fills = (await api(`/api/fills?symbol=${encodeURIComponent(o.symbol)}&limit=500`)).filter((f) => f.order_id === o.id);
+  const o = await api(`/api/orders/${encodeURIComponent(id)}`);
+  const fills = o.fills;
   drawer(`Order #${o.id}: ${o.side} ${o.symbol}`, `
     <div class="section"><span class="status ${esc(o.status)}">${esc(o.status)}</span> <span class="muted">· ${esc(o.client_order_id)} · origin ${esc(o.origin)}</span></div>
     <div class="section"><h4>Rationale (written ${dt(o.created_at)}, before any fill)</h4><div class="pre">${rich(o.rationale)}</div></div>
@@ -544,10 +669,10 @@ async function openLLM(id) {
 document.addEventListener("click", (e) => {
   const a = e.target.closest("[data-exp],[data-strat],[data-order],[data-llm]");
   if (!a || a.closest("#tab-body [data-llm]") && !a.matches("a")) return;
-  if (a.dataset.exp) { e.preventDefault(); openExperiment(a.dataset.exp); }
-  else if (a.dataset.strat) { e.preventDefault(); openStrategy(a.dataset.strat); }
-  else if (a.dataset.order) { e.preventDefault(); openOrder(a.dataset.order); }
-  else if (a.dataset.llm && a.matches("a")) { e.preventDefault(); openLLM(a.dataset.llm); }
+  if (a.dataset.exp) { e.preventDefault(); openExperiment(a.dataset.exp).catch((err) => toast(err.message)); }
+  else if (a.dataset.strat) { e.preventDefault(); openStrategy(a.dataset.strat).catch((err) => toast(err.message)); }
+  else if (a.dataset.order) { e.preventDefault(); openOrder(a.dataset.order).catch((err) => toast(err.message)); }
+  else if (a.dataset.llm && a.matches("a")) { e.preventDefault(); openLLM(a.dataset.llm).catch((err) => toast(err.message)); }
 });
 
 // ---------------------------------------------------------------- journal
@@ -557,8 +682,8 @@ const KINDS = [["research", "Research", ["observation", "research", "hypothesis"
   ["data", "Data", ["data"]], ["system", "System", ["system"]]];
 const activeKinds = () => new Set(KINDS.filter(([k]) => state.filter.has(k)).flatMap(([, , ks]) => ks));
 function renderFilters() {
-  $("#filters").innerHTML = `<button class="fchip ${state.filter.size ? "" : "on"}" data-k="">All</button>` +
-    KINDS.map(([k, l]) => `<button class="fchip ${state.filter.has(k) ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
+  $("#filters").innerHTML = `<button class="fchip ${state.filter.size ? "" : "on"}" data-k="" aria-pressed="${!state.filter.size}">All</button>` +
+    KINDS.map(([k, l]) => `<button class="fchip ${state.filter.has(k) ? "on" : ""}" data-k="${k}" aria-pressed="${state.filter.has(k)}">${l}</button>`).join("");
 }
 $("#filters").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-k]"); if (!b) return;
@@ -607,16 +732,17 @@ function connectStream() {
   es.addEventListener("journal", (ev) => {
     const j = JSON.parse(ev.data);
     if (j.id <= state.lastId) return;
-    state.lastId = j.id; state.journal.unshift(j); renderFeed(new Set([j.id]));
+    state.lastId = j.id; state.journal.unshift(j); state.journal.length = Math.min(state.journal.length, 1000);
+    renderFeed(new Set([j.id]));
     if (["fill", "decision", "review", "risk"].includes(j.kind)) refresh();
   });
-  es.onopen = () => { $("#live-badge").className = "badge ok"; };
-  es.onerror = () => { $("#live-badge").className = "badge bad"; };
+  es.onopen = () => { $("#live-badge").className = "badge ok"; $("#live-badge").innerHTML = '<span class="dot"></span>live'; };
+  es.onerror = () => { $("#live-badge").className = "badge bad"; $("#live-badge").innerHTML = '<span class="dot"></span>reconnecting'; };
 }
 
 // ---------------------------------------------------------------- ask
-const SUGGEST = ["What are you researching right now?", "Why are you holding cash?", "What would make you sell your positions?", "What did your last failed test teach you?"];
-$("#suggest").innerHTML = SUGGEST.map((q) => `<button class="fchip" data-q="${esc(q)}">${esc(q)}</button>`).join("");
+const SUGGEST = [["Current research ↗", "What are you researching right now?"], ["Why cash? ↗", "Why are you holding cash?"], ["Latest lesson ↗", "What did your last failed test teach you?"]];
+$("#suggest").innerHTML = SUGGEST.map(([label, q]) => `<button class="fchip" data-q="${esc(q)}">${esc(label)}</button>`).join("");
 $("#suggest").addEventListener("click", (e) => { const b = e.target.closest("[data-q]"); if (b) askQuestion(b.dataset.q); });
 $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); const q = $("#ask-input").value.trim(); if (q) askQuestion(q); });
 async function askQuestion(q) {
@@ -638,18 +764,34 @@ async function askQuestion(q) {
 async function refresh() {
   try {
     const s = await api("/api/state"); state.s = s;
+    state.lastRefresh = Date.now() / 1000; $("#connection-alert").classList.add("hidden");
     renderBadges(s); renderAlerts(s); renderKPIs(s); renderNow(s); renderBeliefs(s); renderPositions(s);
-  } catch (err) { if (err.message !== "login required") console.error(err); }
+  } catch (err) {
+    if (err.message !== "login required") {
+      $("#desk-health").className = "desk-health bad";
+      $("#desk-health").innerHTML = '<span class="health-indicator"></span><div><b>Connection interrupted</b><small>Displayed values may be out of date</small></div>';
+      $("#connection-alert").textContent = `Dashboard data is not updating: ${err.message}. Last success: ${state.lastRefresh ? dt(state.lastRefresh) : "never"}. Retrying automatically.`;
+      $("#connection-alert").classList.remove("hidden");
+    }
+  }
 }
 async function boot() {
+  if (state.booting) return;
+  state.booting = true;
+  stopUpdates();
+  try {
   const sess = await fetch("/api/session").then((r) => r.json()).catch(() => ({ authenticated: false }));
   if (!sess.authenticated) { showLogin(); return; }
+  $("#btn-logout").classList.toggle("hidden", !sess.password_required);
+  $("#login-view").classList.add("hidden");
   $("#app").classList.remove("hidden");
   renderFilters();
   await refresh();
-  loadEquity(); loadJournal(); renderTab();
-  setInterval(refresh, 10000);
-  setInterval(loadEquity, 60000);
-  setInterval(() => { if (["research", "strategies", "orders"].includes(state.tab) && !$("#drawer-root").innerHTML) renderTab(); }, 30000);
+  const safe = (fn) => () => fn().catch((err) => { if (err.message !== "login required") toast(err.message); });
+  await Promise.all([safe(loadEquity)(), safe(loadJournal)(), renderTab()]);
+  if ($("#app").classList.contains("hidden")) return;
+  state.timers.push(setInterval(refresh, 10000), setInterval(safe(loadEquity), 60000),
+    setInterval(() => { if (["research", "strategies", "orders"].includes(state.tab) && !$("#drawer-root").innerHTML) renderTab(); }, 30000));
+  } finally { state.booting = false; }
 }
 boot();

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import time
 
 from .base import Bar, DataError, Provider, Quote
@@ -9,6 +10,7 @@ from .http import get_json
 
 BASE = "https://api.exchange.coinbase.com"
 GRAN = {"15m": 900, "1h": 3600, "1d": 86400}
+log = logging.getLogger(__name__)
 
 
 def _iso(epoch: int) -> str:
@@ -51,13 +53,17 @@ class CoinbaseProvider(Provider):
 
     def fetch_quotes(self, symbols):
         out = {}
+        errors = []
         for sym in symbols:
-            d = get_json(f"{BASE}/products/{sym}/ticker", timeout=5.0, retries=1)
             try:
+                d = get_json(f"{BASE}/products/{sym}/ticker", timeout=5.0, retries=1)
                 received = time.time()
                 last_ts = _parse_time(d["time"]) if d.get("time") else None
                 out[sym] = Quote(sym, received, float(d["bid"]), float(d["ask"]), None, None,
                                  float(d["price"]), last_ts, "coinbase")
-            except (KeyError, TypeError, ValueError) as e:
-                raise DataError(f"bad ticker for {sym}: {e}")
+            except (DataError, KeyError, TypeError, ValueError) as e:
+                errors.append(DataError(f"ticker unavailable for {sym}: {e}"))
+                log.warning("%s", errors[-1])
+        if not out and errors:
+            raise errors[0]
         return out

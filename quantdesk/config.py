@@ -302,7 +302,16 @@ SETTING_BOUNDS: dict = {
     ("schedule", "nasdaq_research_hours"): (0.5, 168),
     ("schedule", "max_research_per_day"): (0, 48),
     ("schedule", "quote_poll_sec"): (5, 600),
+    ("schedule", "bar_refresh_min"): (1, 1440),
     ("schedule", "review_hour_utc"): (0, 23),
+    ("execution", "latency_sec"): (0.0, 300.0),
+    ("execution", "order_ttl_sec"): (1, 86400),
+    ("execution", "nasdaq_trade_delay_min"): (0, 120),
+    ("research", "train_frac"): (0.1, 0.85),
+    ("research", "val_frac"): (0.05, 0.5),
+    ("research", "max_param_combos"): (1, 12),
+    ("research", "incubation_fraction"): (0.01, 1.0),
+    ("research", "min_live_days_before_increase"): (1, 365),
     ("gates", "min_test_trades"): (1, 1000),
     ("gates", "min_test_sharpe"): (-5.0, 5.0),
     ("gates", "min_val_sharpe"): (-5.0, 5.0),
@@ -313,6 +322,10 @@ SETTING_BOUNDS: dict = {
     ("gates", "max_top5_concentration"): (0.0, 100.0),
     ("gates", "min_deflated_psr"): (0.0, 1.0),
 }
+
+for _venue, _costs in DEFAULT_SETTINGS["costs"].items():
+    for _key in _costs:
+        SETTING_BOUNDS[("costs", _venue, _key)] = (0.0, 1000.0 if _key == "impact_coef" else 10000.0)
 
 # Prices per 1M tokens (input, output, cache_write, cache_read). Editable here if pricing
 # changes; unknown models fall back to the most expensive row so budgets stay conservative.

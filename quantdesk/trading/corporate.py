@@ -41,6 +41,7 @@ def apply_split(symbol: str, ratio: Fraction, note: str = "") -> int:
     orders in the symbol (their quantities were sized on the old basis). Returns rows changed."""
     r = float(ratio)
     ts = clock.now()
+    from . import oms
     with db.tx():
         n = db.connect().execute("UPDATE positions SET qty=qty*?, avg_cost=avg_cost/?, updated_at=? WHERE symbol=? AND ABS(qty)>1e-12",
                                  (r, r, ts, symbol)).rowcount
@@ -49,11 +50,11 @@ def apply_split(symbol: str, ratio: Fraction, note: str = "") -> int:
         db.ex("INSERT INTO corporate_actions(ts, symbol, kind, ratio, detail) VALUES(?,?,?,?,?)",
               (ts, symbol, "split", r, db.dumps({"ratio": str(ratio), "note": note, "positions_adjusted": n,
                                                  "after_fill_id": after})))
-    from . import oms
-    for o in oms.open_orders():
-        if o["symbol"] == symbol:
-            oms.close_order(o, "cancelled", f"Cancelled: {symbol} split {ratio} changed the share basis; "
-                                            "the next decision cycle re-sizes it.")
+        # Cached quotes may still be on the old price basis. Wait for a new observation.
+        db.ex("DELETE FROM quotes WHERE symbol=?", (symbol,))
+        for row in db.q("SELECT * FROM orders WHERE symbol=? AND status IN ('intent','submitted','partially_filled')", (symbol,)):
+            oms.close_order(dict(row), "cancelled", f"Cancelled: {symbol} split {ratio} changed the share basis; "
+                                                  "the next decision cycle re-sizes it.")
     return n
 
 

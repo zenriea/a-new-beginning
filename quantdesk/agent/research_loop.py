@@ -91,7 +91,8 @@ def research_cycle(venue: str, analyst=None) -> dict:
                       f"Not enough stored market data to research ({obs['error']}). Waiting for data.",
                       author="rules", dedupe_key=f"noresearch:{venue}:{int(clock.now() // 3600)}")
         return {"status": "no_data"}
-    blinded = observe(venue, allowed[venue], bench, blind_frac=0.75) if rs.get("observation_blinding", True) else obs
+    blinded = observe(venue, allowed[venue], bench, blind_frac=rs["train_frac"] + rs["val_frac"]) \
+        if rs.get("observation_blinding", True) else obs
     costs = settings.get("costs")[venue]
     round_trip = 2 * (costs.get("taker_fee_bps", 0) + costs["backtest_half_spread_bps"] + costs["base_slippage_bps"])
     ctx = {

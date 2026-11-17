@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import re
 import time
 
@@ -84,6 +85,9 @@ def validate(obj, schema: dict, path: str = "$") -> list[str]:
         for k, sub in (schema.get("properties") or {}).items():
             if k in obj:
                 errs += validate(obj[k], sub, f"{path}.{k}")
+        if schema.get("additionalProperties") is False:
+            for k in obj.keys() - (schema.get("properties") or {}).keys():
+                errs.append(f"{path}.{k}: unexpected property")
     elif t == "array":
         if not isinstance(obj, list):
             return [f"{path}: expected array"]
@@ -93,8 +97,8 @@ def validate(obj, schema: dict, path: str = "$") -> list[str]:
         if not isinstance(obj, str):
             errs.append(f"{path}: expected string")
     elif t == "number":
-        if isinstance(obj, bool) or not isinstance(obj, (int, float)):
-            errs.append(f"{path}: expected number")
+        if isinstance(obj, bool) or not isinstance(obj, (int, float)) or not math.isfinite(obj):
+            errs.append(f"{path}: expected finite number")
     elif t == "integer":
         if isinstance(obj, bool) or not (isinstance(obj, int) or (isinstance(obj, float) and obj.is_integer())):
             errs.append(f"{path}: expected integer")

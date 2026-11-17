@@ -58,17 +58,21 @@ class SyntheticProvider(Provider):
 
 @lru_cache(maxsize=64)
 def _path(sym: str, step: int, n: int):
-    rng = np.random.default_rng(_seed(sym) + step)
+    # Independent streams keep every past value fixed when n grows. Reusing one
+    # generator for arrays of n-dependent lengths moves the starting RNG state of
+    # later arrays, silently rewriting history (and even resembling stock splits).
+    lengths_rng, drift_rng, shock_rng, high_rng, low_rng, volume_rng = (
+        np.random.default_rng(seed) for seed in np.random.SeedSequence(_seed(sym) + step).spawn(6))
     vol = 0.5 / math.sqrt(365 * 86400 / step)
-    lengths = rng.integers(50, 400, size=n // 50 + 2)
-    drifts = rng.normal(0.0, vol * 0.03, size=lengths.size)
+    lengths = lengths_rng.integers(50, 400, size=n // 50 + 2)
+    drifts = drift_rng.normal(0.0, vol * 0.03, size=lengths.size)
     drift = np.repeat(drifts, lengths)[:n]
-    shocks = rng.standard_t(5, size=n) / math.sqrt(5 / 3)
+    shocks = shock_rng.standard_t(5, size=n) / math.sqrt(5 / 3)
     r = drift + vol * shocks
     c = (100.0 + (_seed(sym) % 400)) * np.exp(np.cumsum(r))
     o = np.concatenate([[c[0] / math.exp(r[0])], c[:-1]])
-    h = np.maximum(o, c) * np.exp(np.abs(rng.normal(0, vol * 0.4, size=n)))
-    l = np.minimum(o, c) * np.exp(-np.abs(rng.normal(0, vol * 0.4, size=n)))
-    dollar = 5e9 * step / 86400 * rng.lognormal(0.0, 0.4, size=n)
+    h = np.maximum(o, c) * np.exp(np.abs(high_rng.normal(0, vol * 0.4, size=n)))
+    l = np.minimum(o, c) * np.exp(-np.abs(low_rng.normal(0, vol * 0.4, size=n)))
+    dollar = 5e9 * step / 86400 * volume_rng.lognormal(0.0, 0.4, size=n)
     v = dollar / c
     return o, h, l, c, v

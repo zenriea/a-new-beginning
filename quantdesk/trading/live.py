@@ -69,6 +69,9 @@ def _save_states(sid: int, states: dict[str, PosState], bar: int) -> None:
 
 def evaluate_strategy(strat: dict) -> dict:
     sid = strat["id"]
+    current = db.q1("SELECT status FROM strategies WHERE id=?", (sid,))
+    if not current or current["status"] != "active" or db.get_meta(f"flatten_pending:{sid}"):
+        return {"status": "inactive"}
     spec = db.loads(strat["spec"])
     params = spec.get("fixed_params") or {}
     venue = strat["venue"]
@@ -217,12 +220,52 @@ def reconcile_sleeve(strat: dict, bar: int) -> None:
 
 
 def flatten_strategy(strat: dict, reason: str, origin: str = "agent") -> list[int]:
+    """Durable exit request: cancel entries, keep retrying until the sleeve is flat."""
     sid = strat["id"]
+    with db.tx():
+        for row in db.q("SELECT * FROM orders WHERE strategy_id=? "
+                        "AND status IN ('intent','submitted','partially_filled')", (sid,)):
+            oms.close_order(dict(row), "cancelled", "Superseded by flatten request: " + reason)
+        db.set_meta(f"flatten_pending:{sid}", db.dumps({"reason": reason, "origin": origin}))
+        db.ex("UPDATE strategy_state SET in_position=0, entry_price=NULL, entry_bar=NULL, bars_held=0 WHERE strategy_id=?", (sid,))
+        return _submit_flatten(sid, reason, origin)
+
+
+def _submit_flatten(sid: int, reason: str, origin: str) -> list[int]:
     out = []
+    pending = {r["symbol"] for r in db.q(
+        "SELECT symbol FROM orders WHERE strategy_id=? AND side='sell' "
+        "AND status IN ('intent','submitted','partially_filled')", (sid,))}
     for p in ledger.sleeve_positions(sid):
+        if p["symbol"] in pending:
+            continue
         o = oms.create_order(symbol=p["symbol"], side="sell", qty=p["qty"], reason="flatten",
                              rationale=reason, idem_key=f"{sid}:{p['symbol']}:flatten:{int(clock.now() // 60)}",
                              strategy_id=sid, origin=origin)
         out.append(o["id"])
-    db.ex("UPDATE strategy_state SET in_position=0, entry_price=NULL, entry_bar=NULL, bars_held=0 WHERE strategy_id=?", (sid,))
     return out
+
+
+def reconcile_flattening() -> None:
+    """Retry exits without needing another signal bar, including retired strategies."""
+    with db.tx():
+        # Recover retirees from older versions that did not persist an exit request.
+        for s in db.q("SELECT * FROM strategies s WHERE status='retired' "
+                      "AND EXISTS(SELECT 1 FROM positions p WHERE p.strategy_id=s.id AND p.qty>1e-12) "
+                      "AND NOT EXISTS(SELECT 1 FROM meta m WHERE m.key='flatten_pending:' || s.id)"):
+            flatten_strategy(dict(s), "Close remaining holdings of a retired strategy.")
+        for r in db.q("SELECT key, value FROM meta WHERE key LIKE 'flatten_pending:%'"):
+            sid = int(r["key"].split(":", 1)[1])
+            req = db.loads(r["value"])
+            if not ledger.sleeve_positions(sid):
+                db.ex("DELETE FROM meta WHERE key=?", (r["key"],))
+                continue
+            _submit_flatten(sid, req["reason"], req["origin"])
+
+
+def retire_strategy(strat: dict, reason: str, origin: str = "agent") -> list[int]:
+    """Retirement and cancellation are one writer transaction, never a half-retired book."""
+    with db.tx():
+        db.ex("UPDATE strategies SET status='retired', retired_at=?, retire_reason=? WHERE id=?",
+              (clock.now(), reason, strat["id"]))
+        return flatten_strategy(strat, reason, origin)

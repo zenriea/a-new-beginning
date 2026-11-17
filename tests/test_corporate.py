@@ -124,3 +124,37 @@ def test_unexplained_jump_is_flagged_not_applied(env):
     assert ev[0]["kind"] == "unexplained"
     assert ledger.sleeve_positions(sid)[0]["qty"] == pytest.approx(10)
     assert db.q1("SELECT COUNT(*) n FROM journal WHERE kind='risk' AND title LIKE '%unexplained%'")["n"] == 1
+
+
+def test_split_history_and_holdings_rollback_together(env, monkeypatch):
+    from quantdesk import db
+    from quantdesk.marketdata import ingest, store
+    from quantdesk.trading import corporate, ledger
+    prov, _ = _setup(env)
+    sid = make_strategy()
+    _hold(sid, "AAPL", 10, 405)
+    old = store.load_bars("AAPL", "15m")["close"].copy()
+    prov.factor = 4
+    original = corporate.on_history_readjusted
+
+    def fail_after_adjustment(*args):
+        original(*args)
+        raise RuntimeError("crash after split accounting")
+
+    monkeypatch.setattr(corporate, "on_history_readjusted", fail_after_adjustment)
+    with pytest.raises(RuntimeError):
+        ingest.ingest_bars("NASDAQ", ["AAPL"])
+    assert store.load_bars("AAPL", "15m")["close"].tolist() == old.tolist()
+    assert ledger.sleeve_qty(sid, "AAPL") == 10
+    assert db.q1("SELECT COUNT(*) n FROM corporate_actions")["n"] == 0
+
+
+def test_empty_readjustment_cannot_erase_history(env):
+    from quantdesk import clock
+    from quantdesk.marketdata import ingest, store
+    prov, _ = _setup(env)
+    before = store.load_bars("AAPL", "15m")["close"].tolist()
+    prov.upto = -1
+    events = ingest._handle_readjustment(prov, "NASDAQ", "AAPL", "15m", 4, clock.now())
+    assert events[0]["ok"] is False
+    assert store.load_bars("AAPL", "15m")["close"].tolist() == before

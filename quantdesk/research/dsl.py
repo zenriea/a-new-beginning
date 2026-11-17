@@ -58,6 +58,8 @@ def validate(expr: str, params: dict | None = None) -> set[str]:
         if isinstance(node, ast.Constant):
             if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
                 raise DSLError(f"only numeric constants allowed, got {node.value!r}")
+            if not math.isfinite(node.value):
+                raise DSLError("numeric constants must be finite")
             return
         if isinstance(node, ast.Name):
             if node.id in SERIES:
@@ -239,9 +241,9 @@ def _int_arg(node, ctx: Context, fname: str) -> int:
         v = ctx.params[node.id]
     else:
         raise DSLError(f"window argument of {fname}() must be a number or parameter")
-    if not float(v).is_integer() or not (1 <= int(v) <= MAX_WINDOW):
-        if not (fname == "lag" and int(v) == 0):
-            raise DSLError(f"window of {fname}() must be an integer in [1, {MAX_WINDOW}], got {v}")
+    minimum = 0 if fname == "lag" else 1
+    if isinstance(v, bool) or not math.isfinite(v) or not float(v).is_integer() or not minimum <= v <= MAX_WINDOW:
+        raise DSLError(f"window of {fname}() must be an integer in [{minimum}, {MAX_WINDOW}], got {v}")
     return int(v)
 
 
@@ -353,7 +355,7 @@ def _bool(v):
             return v
         with np.errstate(invalid="ignore"):
             return np.nan_to_num(v, nan=0.0) != 0
-    return bool(v)
+    return bool(v) and math.isfinite(v)
 
 
 def evaluate(expr: str, panel: dict, params: dict, periods_per_year: float,

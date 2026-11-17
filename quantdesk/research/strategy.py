@@ -48,8 +48,10 @@ def validate_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos:
     if venue not in VENUES:
         raise SpecError(f"venue must be one of {list(VENUES)}")
     uni = spec.get("universe") or []
-    if not uni or len(uni) > MAX_UNIVERSE:
+    if not isinstance(uni, list) or not uni or len(uni) > MAX_UNIVERSE or any(not isinstance(s, str) for s in uni):
         raise SpecError(f"universe must list 1..{MAX_UNIVERSE} symbols")
+    if len(set(uni)) != len(uni):
+        raise SpecError("universe must not contain duplicate symbols")
     bad = [s for s in uni if s not in allowed_symbols.get(venue, [])]
     if bad:
         raise SpecError(f"symbols not in the operator-approved {venue} universe: {bad}")
@@ -65,8 +67,8 @@ def validate_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos:
         if not isinstance(vals, list) or not vals or len(vals) > 6:
             raise SpecError(f"parameter {k} needs 1..6 candidate values")
         for v in vals:
-            if not isinstance(v, (int, float)) or isinstance(v, bool):
-                raise SpecError(f"parameter {k} values must be numbers")
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
+                raise SpecError(f"parameter {k} values must be finite numbers")
     combos = math.prod(len(v) for v in params.values()) if params else 1
     if combos > max_combos:
         raise SpecError(f"parameter grid has {combos} combinations; limit is {max_combos}")
@@ -87,21 +89,26 @@ def validate_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos:
     if spec.get("rank_by"):
         _check_expr(spec["rank_by"], grid)
         tk = spec.get("top_k")
-        if not isinstance(tk, int) or not (1 <= tk <= len(uni)):
+        if isinstance(tk, bool) or not isinstance(tk, int) or not (1 <= tk <= len(uni)):
             raise SpecError("top_k must be an integer between 1 and len(universe)")
     sz = spec.get("sizing") or {}
+    if not isinstance(sz, dict):
+        raise SpecError("sizing must be an object")
     method = sz.get("method", "fixed")
     if method not in ("fixed", "inverse_vol"):
         raise SpecError("sizing.method must be fixed or inverse_vol")
     for k in ("weight", "max_weight", "target_vol"):
-        if k in sz and not (0 < float(sz[k]) <= 1.0):
+        if k in sz and (isinstance(sz[k], bool) or not isinstance(sz[k], (int, float)) or not (0 < sz[k] <= 1.0)):
             raise SpecError(f"sizing.{k} must be in (0, 1]")
+    lb = sz.get("vol_lookback", 20)
+    if isinstance(lb, bool) or not isinstance(lb, int) or not 2 <= lb <= dsl.MAX_WINDOW:
+        raise SpecError(f"sizing.vol_lookback must be an integer in [2, {dsl.MAX_WINDOW}]")
     for k in ("stop_loss_pct", "take_profit_pct"):
         v = spec.get(k)
-        if v is not None and not (0 < float(v) < 1):
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1):
             raise SpecError(f"{k} must be in (0,1) or null")
     mh = spec.get("max_hold_bars")
-    if mh is not None and (not isinstance(mh, int) or mh < 1):
+    if mh is not None and (isinstance(mh, bool) or not isinstance(mh, int) or mh < 1):
         raise SpecError("max_hold_bars must be a positive integer or null")
     return spec
 

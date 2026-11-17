@@ -145,6 +145,13 @@ CREATE TABLE IF NOT EXISTS corporate_actions (
 CREATE TABLE IF NOT EXISTS agent_status (
   id INTEGER PRIMARY KEY CHECK (id = 1), activity TEXT, detail TEXT, updated_at REAL,
   next_actions TEXT);
+
+CREATE INDEX IF NOT EXISTS fills_order ON fills(order_id, id);
+CREATE INDEX IF NOT EXISTS orders_strategy_status ON orders(strategy_id, status);
+CREATE INDEX IF NOT EXISTS llm_calls_ts ON llm_calls(ts);
+CREATE INDEX IF NOT EXISTS decisions_subject ON decisions(subject_type, subject_id, id);
+CREATE INDEX IF NOT EXISTS experiments_venue_created ON experiments(venue, created_at);
+CREATE INDEX IF NOT EXISTS journal_kind_id ON journal(kind, id);
 """
 
 _local = threading.local()
@@ -171,6 +178,8 @@ def connect() -> sqlite3.Connection:
     conn = getattr(_local, "conn", None)
     if conn is not None and getattr(_local, "path", None) == _db_path:
         return conn
+    if conn is not None:
+        conn.close()
     conn = sqlite3.connect(str(_db_path), timeout=30, isolation_level=None,
                            check_same_thread=False)
     conn.row_factory = sqlite3.Row

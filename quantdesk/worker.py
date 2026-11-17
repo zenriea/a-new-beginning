@@ -118,9 +118,7 @@ def retire_on_timeframe_change() -> list[int]:
             s = dict(s)
             why = (f"{venue} now trades on {v.timeframe} bars; this strategy was tested on the previous bar size, "
                    "so its windows no longer mean what the test measured.")
-            live.flatten_strategy(s, why, origin="system")
-            db.ex("UPDATE strategies SET status='retired', retired_at=?, retire_reason=? WHERE id=?",
-                  (clock.now(), "bar size changed", s["id"]))
+            live.retire_strategy(s, "bar size changed", origin="system")
             journal.write("decision", f"Retired {s['name']} v{s['version']}: bar size changed",
                           why + " Its positions are being closed; research will test new ideas on the new bars.",
                           refs={"strategy_id": s["id"]}, author="system")
@@ -130,9 +128,22 @@ def retire_on_timeframe_change() -> list[int]:
 
 
 # ------------------------------------------------------------------ jobs
+def market_symbols() -> dict[str, list[str]]:
+    """Research admission is not the same as the dependencies of an existing book."""
+    uni = settings.get("universe")
+    symbols = {s for values in uni.values() for s in values}
+    symbols.update(settings.get("benchmarks").values())
+    symbols.update(p["symbol"] for p in ledger.sleeve_positions())
+    symbols.update(r["symbol"] for r in db.q(
+        "SELECT DISTINCT symbol FROM orders WHERE status IN ('intent','submitted','partially_filled')"))
+    for s in db.q("SELECT spec FROM strategies WHERE status IN ('active','incubating')"):
+        symbols.update(db.loads(s["spec"], {}).get("universe", []))
+    return {v: sorted(s for s in symbols if venues.venue_of(s) == v) for v in venues.VENUES}
+
+
 def market_tick() -> None:
     """Quotes -> fills -> marks -> risk monitor."""
-    uni = settings.get("universe")
+    uni = market_symbols()
     now = clock.now()
     for venue, syms in uni.items():
         if not syms:
@@ -174,7 +185,7 @@ def _journal_data_events(events: list[dict], what: str, venue: str) -> None:
 
 
 def bars_tick() -> None:
-    uni = settings.get("universe")
+    uni = market_symbols()
     sch = settings.get("schedule")
     now = clock.now()
     for venue, syms in uni.items():
@@ -190,6 +201,7 @@ def bars_tick() -> None:
 
 def signals_tick() -> None:
     now = clock.now()
+    live.reconcile_flattening()
     live.activate_waiting()
     for s in db.q("SELECT * FROM strategies WHERE status='active'"):
         s = dict(s)

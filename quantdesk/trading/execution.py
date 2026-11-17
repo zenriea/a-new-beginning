@@ -42,7 +42,7 @@ def _price_basis(order: dict, q: dict | None, now: float, lim: dict, cost_cfg: d
         return None, "waiting for a quote observed after the order became eligible"
     age = now - q["ts"]
     bid, ask = q["bid"], q["ask"]
-    if bid and ask and ask >= bid > 0 and age <= lim["max_quote_age_sec"]:
+    if bid and ask and math.isfinite(bid) and math.isfinite(ask) and ask >= bid > 0 and 0 <= age <= lim["max_quote_age_sec"]:
         mid = (bid + ask) / 2
         spread_bps = (ask - bid) / mid * 1e4
         if spread_bps <= lim["max_spread_bps"]:
@@ -50,7 +50,7 @@ def _price_basis(order: dict, q: dict | None, now: float, lim: dict, cost_cfg: d
             return ref, {"bid": bid, "ask": ask, "ts": q["ts"], "basis": f"{q['source']} quote",
                          "spread_bps": round(spread_bps, 2)}
     last, lts = q["last"], q["last_ts"]
-    if last and lts and now - lts <= 60:
+    if last and lts and math.isfinite(last) and last > 0 and 0 <= now - lts <= min(60, lim["max_quote_age_sec"]):
         hs = cost_cfg["backtest_half_spread_bps"]
         ref = last * (1 + hs / 1e4) if order["side"] == "buy" else last * (1 - hs / 1e4)
         return ref, {"bid": bid, "ask": ask, "ts": lts, "basis": f"{q['source']} last trade + modelled {hs}bp half-spread",
@@ -59,6 +59,13 @@ def _price_basis(order: dict, q: dict | None, now: float, lim: dict, cost_cfg: d
 
 
 def process_orders() -> list[dict]:
+    # No network calls here. Keep final checks and booking atomic with operator writes,
+    # so an order cannot be filled from a stale pre-cancellation object.
+    with db.tx():
+        return _process_orders()
+
+
+def _process_orders() -> list[dict]:
     """Try to fill every open order. Returns fill events."""
     now = clock.now()
     agent = settings.get("agent")
@@ -79,6 +86,11 @@ def process_orders() -> list[dict]:
             oms.close_order(o, "cancelled", "Emergency stop is active.")
             continue
         if o["side"] == "buy":
+            st = db.q1("SELECT status FROM strategies WHERE id=?", (o["strategy_id"],))
+            if o["strategy_id"] is not None and (not st or st["status"] != "active"
+                    or db.get_meta(f"flatten_pending:{o['strategy_id']}")):
+                oms.close_order(o, "cancelled", "Strategy is no longer active or is being flattened.")
+                continue
             day_flag = db.get_meta(f"daily_loss_flag:{int(now // 86400)}") == "1"
             if (agent.get("paused") or db.get_meta("drawdown_halt") == "1" or day_flag
                     or db.get_meta("system_halt") == "1"):
@@ -109,6 +121,9 @@ def process_orders() -> list[dict]:
         imp = C.impact_bps(remaining * ref_px, adv, sigma, cost_cfg)
         px = C.apply_slippage(o["side"], ref_px, imp)
         fee = C.fees(venue, o["side"], remaining, px, cost_cfg)
+        if not math.isfinite(px) or px <= 0 or not math.isfinite(fee) or fee < 0:
+            oms.close_order(o, "cancelled", "Cost model produced an invalid fill price or fee; no fill booked.")
+            continue
         if o["side"] == "buy":
             # The initial impact price is retained if resized: this is conservative,
             # and avoids a sizing/impact feedback loop. Include fees in every cap.

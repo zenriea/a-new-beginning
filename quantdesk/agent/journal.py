@@ -40,6 +40,12 @@ def recent(limit: int = 100, after_id: int = 0, kinds: list[str] | None = None) 
     return [db.row_dict(r, ["refs"]) for r in db.q(sql, params)]
 
 
+def since(after_id: int, limit: int = 50) -> list[dict]:
+    """Oldest unseen entries first: bounded stream batches must not skip a backlog."""
+    return [db.row_dict(r, ["refs"]) for r in db.q(
+        "SELECT * FROM journal WHERE id>? ORDER BY id ASC LIMIT ?", (after_id, limit))]
+
+
 def set_status(activity: str, detail: str = "", next_actions: list | None = None) -> None:
     db.ex("INSERT INTO agent_status(id, activity, detail, updated_at, next_actions) VALUES(1,?,?,?,?) "
           "ON CONFLICT(id) DO UPDATE SET activity=excluded.activity, detail=excluded.detail, "

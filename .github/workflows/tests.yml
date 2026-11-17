@@ -36,3 +36,5 @@ jobs:
         run: python -m pytest -q
       - name: Check JavaScript syntax
         run: node --check web/app.js
+      - name: Check UI display-model syntax
+        run: node --check web/ui-model.mjs

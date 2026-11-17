@@ -51,6 +51,16 @@ def test_static_ui_served(client):
     assert "Content-Security-Policy" in r.headers
 
 
+def test_refreshed_ui_assets_and_module_are_served(client):
+    page = client.get("/")
+    assert "20261117-refresh" in page.text
+    assert 'class="sidebar"' in page.text and 'id="equity-ranges"' in page.text
+    for path in ("/static/app.css", "/static/app.js", "/static/ui-model.mjs"):
+        response = client.get(path)
+        assert response.status_code == 200
+    assert "javascript" in client.get("/static/ui-model.mjs").headers["content-type"]
+
+
 def test_gate_presets_require_auth_csrf_and_write_an_audit_record(client):
     from quantdesk import db, settings
     from quantdesk.config import GATE_PRESETS
@@ -87,3 +97,70 @@ def test_legacy_gate_settings_inherit_defaults_and_keep_exploratory_label(client
     assert system["gate_profile"] == "exploratory"
     # Read-time defaults must not rewrite the operator's saved settings.
     assert "require_causal_dsl" not in db.loads(db.q1("SELECT value FROM settings WHERE key='gates'")["value"])
+
+
+@pytest.mark.parametrize("path", ["/api/equity?points=0", "/api/orders?limit=-1",
+                                  "/api/fills?limit=1000000", "/api/candles?symbol=AAPL&limit=0",
+                                  "/api/experiments?limit=-1", "/api/journal?limit=-1"])
+def test_query_bounds(client, path):
+    client.post("/api/login", json={"password": "correct horse"})
+    assert client.get(path).status_code == 422
+
+
+@pytest.mark.parametrize("body", [[], None, "password", {"password": ["wrong type"]}])
+def test_malformed_login_is_a_client_error(client, body):
+    assert client.post("/api/login", json=body).status_code == 422
+
+
+def test_cannot_clear_a_broken_ledger_halt(client):
+    from quantdesk import db
+    db.set_meta("system_halt", "1")
+    db.ex("INSERT INTO cash_ledger(ts, delta, kind) VALUES(0, -100, 'fee')")
+    client.post("/api/login", json={"password": "correct horse"})
+    assert client.post("/api/control/clear_system_halt", headers={"X-QD": "1"}).status_code == 409
+    assert db.get_meta("system_halt") == "1"
+
+
+def test_local_passwordless_api_rejects_foreign_host_and_origin(client, monkeypatch):
+    import dataclasses
+    import quantdesk.api.app as appmod
+    monkeypatch.setattr(appmod, "cfg", dataclasses.replace(appmod.cfg, admin_password=""))
+    assert client.get("/api/state", headers={"Host": "attacker.example"}).status_code == 403
+    assert client.get("/api/state", headers={"Host": "localhost:8000"}).status_code == 200
+    assert client.post("/api/control/pause", headers={"X-QD": "1", "Origin": "https://attacker.example"}).status_code == 403
+
+
+def test_journal_catchup_reads_oldest_unseen_first(client):
+    from quantdesk.agent import journal
+    ids = [journal.write("system", f"entry {i}", "test") for i in range(125)]
+    first = journal.since(0, limit=50)
+    second = journal.since(first[-1]["id"], limit=50)
+    third = journal.since(second[-1]["id"], limit=50)
+    assert [r["id"] for r in first + second + third] == ids
+
+
+def test_historical_detail_routes_are_authenticated_and_do_not_depend_on_list_window(client):
+    from conftest import make_strategy
+    from test_ledger import _order
+    from quantdesk.trading import ledger
+    sid = make_strategy()
+    old = _order(sid, "AAPL", "buy", 1)
+    fid = ledger.apply_fill(old, 1, 100, 0, {})
+    newest = _order(sid, "AAPL", "buy", 1)
+    assert client.get(f"/api/orders/{old['id']}").status_code == 401
+    assert client.get(f"/api/strategies/{sid}").status_code == 401
+    client.post("/api/login", json={"password": "correct horse"})
+    assert client.get("/api/orders?limit=1").json()[0]["id"] == newest["id"]
+    detail = client.get(f"/api/orders/{old['id']}").json()
+    assert detail["id"] == old["id"] and detail["fills"][0]["id"] == fid
+    assert client.get(f"/api/strategies/{sid}").json()["id"] == sid
+    assert client.get("/api/orders/9999").status_code == 404
+    assert client.get("/api/strategies/9999").status_code == 404
+
+
+def test_logout_requires_csrf_and_invalidates_browser_cookie(client):
+    assert client.post("/api/logout", headers={"X-QD": "1"}).status_code == 401
+    client.post("/api/login", json={"password": "correct horse"})
+    assert client.post("/api/logout").status_code == 403
+    assert client.post("/api/logout", headers={"X-QD": "1"}).status_code == 200
+    assert client.get("/api/state").status_code == 401
