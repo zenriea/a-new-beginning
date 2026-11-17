@@ -26,7 +26,14 @@ _backoff: dict[str, tuple[float, float]] = {}  # key -> (retry_at, current_delay
 
 
 def _usable(venue: str, bars: list, now: float) -> list:
-    """Closed bars only; for equities also only regular-session bars (Alpaca returns pre/post-market)."""
+    """Closed, valid bars only; for equities also only regular-session bars (Alpaca returns pre/post-market).
+
+    An invalid bar is dropped on its own. Rejecting the whole download instead would refetch
+    the same bad bar on every refresh and leave the symbol stale for good."""
+    bad = [b for b in bars if not store.valid_bar(b)]
+    if bad:
+        log.warning("dropped %d invalid %s bar(s), first at ts=%s", len(bad), venue, bad[0].ts)
+        bars = [b for b in bars if store.valid_bar(b)]
     bars = [b for b in bars if bar_closed(venue, b.ts, now)]
     if venue == "NASDAQ" and bars:
         keep = in_regular_session([b.ts for b in bars], VENUES[venue].bar_seconds)
