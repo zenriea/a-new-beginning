@@ -244,6 +244,15 @@ class AnalystThread(threading.Thread):
                 run_job("review", review_all)
                 self.busy = False
             db.set_meta("last_review_day", str(today))
+        rejudge = db.get_meta("rejudge_requested") or ""
+        if rejudge:
+            db.set_meta("rejudge_requested", "")
+            from .agent import research_loop
+            self.busy = True
+            try:
+                run_job("rejudge", lambda: research_loop.rejudge_experiment(int(rejudge)))
+            finally:
+                self.busy = False
         # research: each venue on its own clock
         requested = db.get_meta("research_requested") or ""
         if settings.get("agent").get("paused") and not requested:
