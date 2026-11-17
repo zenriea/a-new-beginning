@@ -35,7 +35,12 @@ class LLMError(RuntimeError):
 
 
 # ------------------------------------------------------------------ pricing & budget
+FREE_MODELS: set[str] = set()  # free-tier helper models: cost $0 and never touch the budget
+
+
 def pricing(model: str):
+    if model in FREE_MODELS:
+        return (0.0, 0.0, 0.0, 0.0)
     cfg = load_config()
     if cfg.llm_provider == "openai_compatible":
         return (cfg.llm_price_in, cfg.llm_price_out, cfg.llm_price_in, cfg.llm_price_in)
@@ -153,13 +158,18 @@ _compat_quirks: dict = {}  # learned per base_url: which request options the pro
 class LLM:
     _sleep = staticmethod(time.sleep)
 
-    def __init__(self, client=None, http_post=None):
+    def __init__(self, client=None, http_post=None, route: dict | None = None):
         """``client``: injected Anthropic client (tests). ``http_post``: injected
-        requests.post-compatible callable for the OpenAI-compatible path (tests)."""
+        requests.post-compatible callable for the OpenAI-compatible path (tests).
+        ``route``: a free helper provider {name, base_url, api_key, model}."""
         self.cfg = load_config()
         self._client = client
         self._post = http_post
-        if client is not None:
+        self.route = route
+        if route is not None:
+            self.provider = "openai_compatible"
+            FREE_MODELS.add(route["model"])
+        elif client is not None:
             self.provider = "anthropic"
         elif http_post is not None:
             self.provider = "openai_compatible"
@@ -168,10 +178,12 @@ class LLM:
 
     @property
     def available(self) -> bool:
-        return self._client is not None or self._post is not None or not self.cfg.demo_llm
+        return self.route is not None or self._client is not None or self._post is not None or not self.cfg.demo_llm
 
     @property
     def model(self) -> str:
+        if self.route:
+            return self.route["model"]
         return self.cfg.llm_model or ("claude-opus-5-5" if self.provider == "anthropic" else "unset")
 
     # -- shared bookkeeping
@@ -204,14 +216,15 @@ class LLM:
     def _call_compat(self, purpose, system, user, schema, max_tokens):
         import requests
         post = self._post or requests.post
-        base = self.cfg.llm_base_url
+        base = self.route["base_url"] if self.route else self.cfg.llm_base_url
+        api_key = self.route["api_key"] if self.route else self.cfg.llm_api_key
         quirks = _compat_quirks.setdefault(base, {"format": "json_schema", "tok": "max_tokens"})
         instruction = ("\n\nRespond with ONE JSON object and nothing else. It must match this JSON Schema "
                        "(all listed fields required; use null where allowed):\n" + json.dumps(schema))
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user + instruction}]
         headers = {"Content-Type": "application/json"}
-        if self.cfg.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.cfg.llm_api_key}"
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         repaired = False
         transient = 0
         for _attempt in range(8):
@@ -354,3 +367,71 @@ class LLM:
         if parsed is None:
             raise LLMError(f"{purpose}: {err}")
         return parsed, cid
+
+
+# ------------------------------------------------------------------ multi-model routing
+# Free-tier helpers switch on when their key is in the environment. Model names can be
+# overridden because free model line-ups change often.
+FREE_PRESETS = {
+    "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-2.5-flash"),
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "QD_GROQ_MODEL", "openai/gpt-oss-120b"),
+    "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "openai/gpt-oss-120b:free"),
+}
+# Frequent, long-prompt work goes to free models first; the paid model is the fallback.
+FREE_FIRST = {"hypothesis", "hypothesis_repair", "review", "question"}
+
+
+def free_helpers() -> list[LLM]:
+    from ..config import _env
+    cfg = load_config()
+    primary_base = cfg.llm_base_url if cfg.llm_provider == "openai_compatible" else None
+    out = []
+    for name, (key_env, base, model_env, model) in FREE_PRESETS.items():
+        key = _env(key_env)
+        if key and base != primary_base:
+            out.append(LLM(route={"name": name, "base_url": base, "api_key": key, "model": _env(model_env, model)}))
+    return out
+
+
+class Router:
+    """Same ``call`` interface as LLM, spread over the primary model and free helpers."""
+
+    def __init__(self, primary: LLM, helpers: list[LLM]):
+        self.primary = primary if primary.available else None
+        self.helpers = helpers
+        self.last: LLM | None = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self.primary or self.helpers)
+
+    @property
+    def model(self) -> str:
+        return (self.primary or self.helpers[0]).model
+
+    def _chain(self, purpose: str) -> list[LLM]:
+        p = [self.primary] if self.primary else []
+        return self.helpers + p if purpose in FREE_FIRST else p + self.helpers
+
+    def call(self, purpose, system, user, schema, max_tokens=16000, chain=None):
+        chain = self._chain(purpose) if chain is None else chain
+        err: Exception = LLMError(f"{purpose}: no model available")
+        for llm in chain:
+            try:
+                out = llm.call(purpose, system, user, schema, max_tokens)
+                self.last = llm
+                return out
+            except (LLMError, BudgetExceeded) as e:
+                log.warning("%s via %s failed (%s); trying next model", purpose, llm.model, e)
+                err = e
+        raise err
+
+    def second_opinion(self, purpose, system, user, schema, max_tokens=16000):
+        """A different model's answer, or None when no other model is configured or reachable."""
+        others = [h for h in self.helpers if h is not self.last]
+        if not others:
+            return None
+        try:
+            return self.call(purpose, system, user, schema, max_tokens, chain=others)
+        except (LLMError, BudgetExceeded):
+            return None

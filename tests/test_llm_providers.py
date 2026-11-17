@@ -144,3 +144,29 @@ def test_transient_errors_back_off_and_retry(compat, monkeypatch):
     srv = FakeServer([Resp(503, text="high demand")] * 3)
     with pytest.raises(LLMError, match="503"):
         LLM(http_post=srv).call("q", "s", "u", SCHEMA)
+
+
+def test_router_free_first_fallback_and_second_opinion(compat, monkeypatch):
+    from quantdesk import db
+    from quantdesk.agent import analyst as A
+    from quantdesk.agent.llm import LLM, Router, free_helpers
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    assert [h.route["name"] for h in free_helpers()] == ["groq"]
+    route = lambda n: {"name": n, "base_url": f"https://{n}.example/v1", "api_key": "k", "model": f"{n}-free"}
+    free = FakeServer([Resp(401, text="bad key"), ok('{"answer": "free", "n": 2}', model="b-free")])
+    paid = FakeServer([ok('{"answer": "paid", "n": 1}')])
+    r = Router(LLM(http_post=paid), [LLM(http_post=free, route=route("a")), LLM(http_post=free, route=route("b"))])
+    out, cid = r.call("question", "s", "u", SCHEMA)              # free-first: a fails, b answers
+    assert out["answer"] == "free" and paid.requests == []
+    assert db.q1("SELECT cost_usd FROM llm_calls WHERE id=?", (cid,))["cost_usd"] == 0
+    assert r.call("decision", "s", "u", SCHEMA)[0]["answer"] == "paid"   # paid model first for decisions
+
+    # an "allocate" survives only if a second model agrees
+    monkeypatch.setattr(A.prompts, "decision_prompt", lambda ctx: "u")
+    monkeypatch.setattr(A.prompts, "DECISION_SCHEMA", {"type": "object"})
+    dec = lambda d: ok(json.dumps({"decision": d, "journal": "j"}))
+    r = Router(LLM(http_post=FakeServer([dec("allocate")])), [LLM(http_post=FakeServer([dec("reject")]), route=route("c"))])
+    got, _ = A.LLMAnalyst(r).decide({})
+    assert got["decision"] == "revise" and "Second opinion: c-free said reject" in got["journal"]
+    r = Router(LLM(http_post=FakeServer([dec("allocate")])), [LLM(http_post=FakeServer([dec("allocate")]), route=route("d"))])
+    assert A.LLMAnalyst(r).decide({})[0]["decision"] == "allocate"
