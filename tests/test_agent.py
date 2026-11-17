@@ -111,6 +111,25 @@ def test_rules_analyst_full_cycle_and_qa(env):
     assert all(c.startswith(("experiment:", "journal:", "order:", "strategy:")) for c in a["citations"])
 
 
+def test_rejudge_applies_current_gates_without_new_test(env, monkeypatch):
+    from quantdesk import db
+    from quantdesk.agent import research_loop
+    from quantdesk.agent.research_loop import rejudge_experiment, research_cycle
+    _seed_nasdaq()
+    research_cycle("NASDAQ")
+    e = db.q1("SELECT id, test FROM experiments")
+    n_exp = db.q1("SELECT COUNT(*) n FROM experiments")["n"]
+    # operator loosened the gates after the rejection
+    monkeypatch.setattr(research_loop.G, "evaluate", lambda res, g: {"passed": True, "checks": [], "failed": []})
+    db.ex("DELETE FROM strategies")
+    out = rejudge_experiment(e["id"])
+    assert out["status"] == "done"
+    row = db.q1("SELECT status, test FROM experiments WHERE id=?", (e["id"],))
+    assert row["status"] == "passed" and row["test"] == e["test"]   # stored results untouched
+    assert db.q1("SELECT COUNT(*) n FROM experiments")["n"] == n_exp   # no new trial
+    assert rejudge_experiment(999)["status"] == "not_found"
+
+
 def test_no_idea_is_recorded_as_a_decision(env):
     from quantdesk import db
     from quantdesk.agent.analyst import LLMAnalyst

@@ -200,6 +200,10 @@ def research_cycle(venue: str, analyst=None) -> dict:
                   f"({res['leakage']['n_trials_for_deflation']} trial(s) on this holdout)."
                   + (f" Failed: {', '.join(gres['failed'])}." if gres["failed"] else ""),
                   refs={"experiment_id": eid, "hypothesis_id": hid}, author="rules")
+    return _decide(venue, eid, hid, prop, spec, res, gres, obs, bench, rs, analyst)
+
+
+def _decide(venue, eid, hid, prop, spec, res, gres, obs, bench, rs, analyst) -> dict:
     # ---- Decide (spec is frozen; unblinded context is now allowed)
     journal.set_status("deciding", f"Experiment {eid}")
     lim = settings.get("risk")
@@ -245,6 +249,39 @@ def research_cycle(venue: str, analyst=None) -> dict:
     if decision == "allocate":
         out["strategy_id"] = create_strategy(hid, eid, prop, spec, res, dec, dauthor, dcall)
     return out
+
+
+def rejudge_experiment(eid: int, analyst=None) -> dict:
+    """Re-apply the CURRENT gates to a finished experiment's stored results.
+
+    Nothing is re-backtested and the sealed test window is not opened again, so this
+    adds no deflation trial. Used when the operator loosens gates after a rejection.
+    """
+    e = db.q1("SELECT * FROM experiments WHERE id=?", (eid,))
+    if not e or e["status"] not in ("failed", "passed") or not e["test"]:
+        journal.write("system", f"Experiment {eid} cannot be re-judged", "Only finished experiments with stored test "
+                      "results can be re-judged.", author="system")
+        return {"status": "not_found"}
+    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=?", (eid,)):
+        journal.write("system", f"Experiment {eid} already has a strategy", "Nothing to re-judge.", author="system")
+        return {"status": "exists"}
+    h = dict(db.q1("SELECT * FROM hypotheses WHERE id=?", (e["hypothesis_id"],)))
+    res = {k: db.loads(e[k]) for k in ("windows", "chosen_params", "train", "validation", "test", "challenge", "leakage")}
+    res["strategy_kind"] = e["kind"]
+    spec, venue = db.loads(e["spec"]), e["venue"]
+    gres = G.evaluate(res, settings.get("gates"))
+    db.ex("UPDATE experiments SET gates=?, status=? WHERE id=?",
+          (db.dumps(gres), "passed" if gres["passed"] else "failed", eid))
+    journal.write("test", f"Re-judged experiment {eid} under current gates ({'passed' if gres['passed'] else 'failed'})",
+                  "Stored test results re-checked against the operator's current thresholds; no new backtest, "
+                  "no new holdout look." + (f" Failed: {', '.join(gres['failed'])}." if gres["failed"] else ""),
+                  refs={"experiment_id": eid, "hypothesis_id": h["id"]}, author="rules")
+    if not gres["passed"]:
+        return {"status": "done", "experiment_id": eid, "decision": "reject"}
+    prop = {k: h[k] for k in ("title", "rationale", "prediction", "falsification")}
+    obs = record_observation(venue)
+    return _decide(venue, eid, h["id"], prop, spec, res, gres, obs, settings.get("benchmarks")[venue],
+                   settings.get("research"), analyst or get_analyst())
 
 
 def _save_beliefs(beliefs: list, venue: str, author: str, call_id) -> None:

@@ -482,6 +482,10 @@ async def control(action: str):
                     raise HTTPException(409, "ledger still fails integrity checks; repair the mismatch before clearing")
                 db.set_meta("system_halt", "0")
             journal.write("system", "System halt cleared by operator", "Ledger halt cleared.", author="operator")
+        elif action.startswith("rejudge_") and action[8:].isdigit():
+            db.set_meta("rejudge_requested", action[8:])
+            journal.write("system", f"Operator asked to re-judge experiment {action[8:]}", "Its stored results are "
+                          "re-checked against the current gates within ~15 seconds.", author="operator")
         elif action.startswith("research_"):
             venue = action.split("_", 1)[1].upper()
             if venue not in settings.get("universe"):
