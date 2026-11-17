@@ -7,6 +7,8 @@ tests/test_risk.py enforces that by scanning the agent sources.
 from __future__ import annotations
 
 import copy
+import math
+import re
 
 from . import clock, db
 from .config import DEFAULT_SETTINGS, SETTING_BOUNDS, load_config
@@ -55,28 +57,66 @@ def validate(key: str, value: dict) -> dict:
     current = _merged(key)
     if not isinstance(value, dict):
         raise SettingsError("settings value must be an object")
-    for sub, v in value.items():
-        if isinstance(DEFAULT_SETTINGS[key], dict) and sub not in DEFAULT_SETTINGS[key]:
-            raise SettingsError(f"unknown setting {key}.{sub}")
-        if isinstance(DEFAULT_SETTINGS[key].get(sub), bool) and not isinstance(v, bool):
-            raise SettingsError(f"{key}.{sub} must be a boolean")
-        bounds = SETTING_BOUNDS.get((key, sub))
-        if bounds is not None:
-            if not isinstance(v, (int, float)) or isinstance(v, bool):
-                raise SettingsError(f"{key}.{sub} must be a number")
+    def check(v, template, path):
+        label = ".".join(path)
+        if isinstance(template, dict):
+            if not isinstance(v, dict):
+                raise SettingsError(f"{label} must be an object")
+            out = {}
+            for sub, item in v.items():
+                if sub not in template:
+                    raise SettingsError(f"unknown setting {label}.{sub}")
+                out[sub] = check(item, template[sub], (*path, sub))
+            return out
+        if isinstance(template, bool):
+            if not isinstance(v, bool):
+                raise SettingsError(f"{label} must be a boolean")
+        elif isinstance(template, (int, float)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                raise SettingsError(f"{label} must be a finite number")
+            if isinstance(template, int):
+                if int(v) != v:
+                    raise SettingsError(f"{label} must be an integer")
+                v = int(v)
+            bounds = SETTING_BOUNDS.get(path)
+            if bounds is None:
+                raise SettingsError(f"{label} has no configured bounds")
             lo, hi = _bound(v, bounds[0]), _bound(v, bounds[1])
-            if not (lo <= v <= hi):
-                raise SettingsError(f"{key}.{sub}={v} outside allowed range [{lo}, {hi}]")
+            if not lo <= v <= hi:
+                raise SettingsError(f"{label}={v} outside allowed range [{lo}, {hi}]")
+        elif isinstance(template, list):
+            if not isinstance(v, list) or len(v) > 200 or any(not isinstance(s, str) for s in v):
+                raise SettingsError(f"{label} must be a list of at most 200 symbols")
+            if len(set(v)) != len(v):
+                raise SettingsError(f"{label} must not contain duplicate symbols")
+            for symbol in v:
+                _validate_symbol(symbol, path[-1])
+        elif isinstance(template, str):
+            if not isinstance(v, str):
+                raise SettingsError(f"{label} must be a string")
+            _validate_symbol(v, path[-1] if path[-1] != "account" else None)
+        return v
+
+    cleaned = check(value, DEFAULT_SETTINGS[key], (key,))
     merged = copy.deepcopy(current)
-    _deep_update(merged, value)
+    _deep_update(merged, cleaned)
+    if key == "research" and merged["train_frac"] + merged["val_frac"] > 0.95 + 1e-12:
+        raise SettingsError("train_frac + val_frac must leave at least 5% for the test window")
     return merged
+
+
+def _validate_symbol(symbol: str, venue: str | None) -> None:
+    stock = bool(re.fullmatch(r"[A-Z][A-Z0-9.]{0,19}", symbol))
+    crypto = bool(re.fullmatch(r"[A-Z0-9]{1,20}-USD", symbol))
+    if not (stock if venue == "NASDAQ" else crypto if venue == "CRYPTO" else stock or crypto):
+        raise SettingsError(f"invalid {venue or 'benchmark'} symbol {symbol!r}")
 
 
 def operator_update(key: str, value: dict, actor: str = "operator") -> dict:
     """Persist an operator edit with an audit record. Never called by agent code."""
-    merged = validate(key, value)
     ts = clock.now()
     with db.tx():
+        merged = validate(key, value)  # read/merge/write under the same writer lock
         db.ex("INSERT INTO settings(key, value, updated_at, updated_by) VALUES(?,?,?,?) "
               "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, "
               "updated_by=excluded.updated_by", (key, db.dumps(merged), ts, actor))

@@ -51,6 +51,7 @@ class Snapshot:
     open_buy_by_symbol: dict = field(default_factory=dict)
     open_crypto_buy_notional: float = 0.0
     unpriced_pending: bool = False
+    unpriced_positions: bool = False
 
 
 @dataclass
@@ -99,9 +100,11 @@ def evaluate(req: OrderRequest, s: Snapshot, lim: dict, *, check_order_rate: boo
     if not reducing and not note("pending_buy_priced", not s.unpriced_pending,
                                  "pending buy without a reference price" if s.unpriced_pending else "all pending buys priced"):
         return reject("pending buy without a reference price blocks new risk")
+    if not reducing and not note("holdings_priced", not s.unpriced_positions, "all holdings require a mark"):
+        return reject("unpriced holdings block new risk")
     if not note("market_open", s.market_open, "session open" if s.market_open else "venue closed"):
         return reject(f"{venue} is closed")
-    if not note("quote_fresh", s.quote_ok and s.quote_age is not None and s.quote_age <= lim["max_quote_age_sec"],
+    if not note("quote_fresh", s.quote_ok and s.quote_age is not None and 0 <= s.quote_age <= lim["max_quote_age_sec"],
                 f"quote age {s.quote_age if s.quote_age is None else round(s.quote_age, 1)}s "
                 f"(max {lim['max_quote_age_sec']}s)"):
         return reject("market data stale or unusable")
@@ -232,7 +235,8 @@ def snapshot_for(req: OrderRequest, bars_ok: bool = True, *, exclude_order_id: i
         paused=bool(agent.get("paused")) or db.get_meta("system_halt") == "1",
         emergency_stop=bool(agent.get("emergency_stop")), drawdown_halt=db.get_meta("drawdown_halt") == "1",
         bars_ok=bars_ok, open_buy_notional=open_buys, open_buy_by_symbol=open_by_symbol,
-        open_crypto_buy_notional=open_crypto, unpriced_pending=unpriced_pending)
+        open_crypto_buy_notional=open_crypto, unpriced_pending=unpriced_pending,
+        unpriced_positions=bool(eb["unpriced"]))
 
 
 def check(req: OrderRequest, bars_ok: bool = True, at_submission_time: bool = False) -> Decision:

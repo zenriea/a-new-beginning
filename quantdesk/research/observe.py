@@ -18,8 +18,8 @@ def observe(venue: str, symbols: list[str], benchmark: str, end_ts: int | None =
             blind_frac: float | None = None) -> dict:
     """Summary statistics per symbol and notable changes.
 
-    ``blind_frac``: if set (e.g. 0.75), only the first fraction of stored history is used
-    - this is the blinded research view that cannot overlap any future test window.
+    ``blind_frac``: train + validation fraction. A conservative prefix is selected so
+    shorter universe subsets cannot expose their test windows through this context.
     """
     v = VENUES[venue]
     syms = list(dict.fromkeys(symbols + [benchmark]))
@@ -28,7 +28,20 @@ def observe(venue: str, symbols: list[str], benchmark: str, end_ts: int | None =
     if T < 30:
         return {"venue": venue, "error": f"only {T} bars stored", "symbols": {}, "notable": []}
     if blind_frac:
-        cut = int(T * blind_frac)
+        # Experiments may select a shorter subset of this universe, but always include
+        # the benchmark. For ANY such subset, prefix rows <= full-panel prefix rows,
+        # and suffix rows >= benchmark suffix rows. Bound the worst-case prefix share
+        # rather than blinding a fixed fraction of the full panel (which can expose a
+        # shorter subset's test). Two rows cover the two split-rounding operations;
+        # ignoring warmup only makes this boundary more conservative.
+        benchmark_bars = np.isfinite(panel["close"][:, syms.index(benchmark)])
+        suffix = np.r_[np.cumsum(benchmark_bars[::-1])[::-1], 0]
+        prefix = np.arange(T + 1)
+        safe = prefix <= blind_frac * (prefix + suffix) - 2
+        cut = int(prefix[safe][-1]) if safe.any() else 0
+        if cut < 2:
+            return {"venue": venue, "error": "not enough benchmark history for a blinded context",
+                    "symbols": {}, "notable": [], "blinded": True}
         for k in ("ts", "open", "high", "low", "close", "volume"):
             panel[k] = panel[k][:cut]
         T = cut
@@ -62,7 +75,8 @@ def observe(venue: str, symbols: list[str], benchmark: str, end_ts: int | None =
         if j != bcol:
             a, b = lr[-mid * 3:, j], lr[-mid * 3:, bcol]
             ok = np.isfinite(a) & np.isfinite(b)
-            row["corr_benchmark"] = _f(np.corrcoef(a[ok], b[ok])[0, 1]) if ok.sum() > 10 else None
+            row["corr_benchmark"] = _f(np.corrcoef(a[ok], b[ok])[0, 1]) \
+                if ok.sum() > 10 and np.std(a[ok]) > 0 and np.std(b[ok]) > 0 else None
         out[s] = row
         vr = (row["vol_recent"] or 0) / row["vol_longer"] if row["vol_longer"] else None
         if vr and vr > 1.5:

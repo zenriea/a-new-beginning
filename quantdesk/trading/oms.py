@@ -31,6 +31,15 @@ def _fmt_qty(q: float) -> str:
 def create_order(*, symbol: str, side: str, qty: float, reason: str, rationale: str,
                  idem_key: str, strategy_id: int | None, signal_snapshot: dict | None = None,
                  origin: str = "agent", bars_ok: bool = True) -> dict:
+    # Serialize admission/reservations against fills, cancellations and operator controls.
+    with db.tx():
+        return _create_order(symbol=symbol, side=side, qty=qty, reason=reason, rationale=rationale,
+                             idem_key=idem_key, strategy_id=strategy_id, signal_snapshot=signal_snapshot,
+                             origin=origin, bars_ok=bars_ok)
+
+
+def _create_order(*, symbol, side, qty, reason, rationale, idem_key, strategy_id,
+                  signal_snapshot, origin, bars_ok):
     """Create (or return the existing) order for this idempotency key."""
     venue = venue_of(symbol)
     coid = client_order_id(idem_key)
@@ -56,6 +65,10 @@ def create_order(*, symbol: str, side: str, qty: float, reason: str, rationale: 
     open_now = venues.is_open(venue, now)
     dec = risk.check(risk.OrderRequest(symbol, side, qty, px or 0.0, strategy_id, origin), bars_ok=bars_ok,
                      at_submission_time=not open_now)
+    if side == "buy" and strategy_id is not None:
+        strat = db.q1("SELECT status FROM strategies WHERE id=?", (strategy_id,))
+        if not strat or strat["status"] != "active" or db.get_meta(f"flatten_pending:{strategy_id}"):
+            dec = risk.Decision(False, 0.0, dec.checks, "strategy is not active or is being flattened")
     ex = settings.get("execution")
     if not dec.approved:
         db.ex("UPDATE orders SET status='rejected', risk_check=?, closed_at=?, status_note=? WHERE id=?",

@@ -6,6 +6,8 @@ Cash is the sum of an append-only ``cash_ledger``. Positions are kept per strate
 """
 from __future__ import annotations
 
+import math
+
 from .. import clock, db
 from ..config import load_config
 from ..marketdata import store
@@ -97,9 +99,19 @@ def sleeve_equity(strategy_id: int, allocation: float) -> dict:
 
 def apply_fill(order: dict, qty: float, price: float, fee: float, ref: dict) -> int:
     """Book a (partial) fill atomically: fill row, cash, sleeve position, order progress."""
-    side = order["side"]
+    if not all(math.isfinite(v) for v in (qty, price, fee)) or qty <= 0 or price <= 0 or fee < 0:
+        raise ValueError("fill requires positive finite quantity/price and a nonnegative finite fee")
     ts = clock.now()
     with db.tx():
+        current = db.q1("SELECT * FROM orders WHERE id=?", (order["id"],))
+        if current is None or current["status"] not in ("submitted", "partially_filled"):
+            raise ValueError("cannot fill an order that is not open")
+        order = dict(current)
+        side = order["side"]
+        if side not in ("buy", "sell") or qty > order["qty"] - order["filled_qty"] + EPS:
+            raise ValueError("fill exceeds the remaining order quantity or has an invalid side")
+        if side == "buy" and qty * price + fee > cash() + 1e-6:
+            raise ValueError("fill exceeds available cash (no leverage)")
         fid = db.ex(
             "INSERT INTO fills(order_id, ts, symbol, side, qty, price, fee, ref_bid, ref_ask, ref_ts, price_basis, "
             "spread_bps, slippage_bps, notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",

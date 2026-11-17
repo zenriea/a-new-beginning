@@ -166,3 +166,36 @@ def test_every_grid_value_is_checked_and_dsl_errors_are_spec_errors():
         validate_spec(_spec(entry="close > sma(close, 9000)"), allowed)
     with pytest.raises(SpecError):
         validate_spec(_spec(entry="close >"), allowed)            # syntax error -> repairable, not a crash
+
+
+@pytest.mark.parametrize("expr", ["lag(close, 0.5)", "close > 1e999", "sma(close, 1e999)"])
+def test_dsl_rejects_nonfinite_and_fractional_windows(expr):
+    from quantdesk.research import dsl
+    with pytest.raises(dsl.DSLError):
+        dsl.validate(expr)
+
+
+@pytest.mark.parametrize("patch", [{"universe": ["BTC-USD", "BTC-USD"]},
+                                  {"params": {"n": [float("inf")]}},
+                                  {"sizing": {"vol_lookback": -1}},
+                                  {"sizing": {"weight": True}},
+                                  {"max_hold_bars": True}])
+def test_invalid_specs_are_repairable_errors(patch):
+    from quantdesk.research.strategy import SpecError, validate_spec
+    with pytest.raises(SpecError):
+        validate_spec(_spec(**patch), {"CRYPTO": ["BTC-USD"]})
+
+
+@pytest.mark.parametrize("train,val", [(0.6, 0.15), (0.4, 0.1)])
+def test_blinding_excludes_shorter_subset_holdouts_and_respects_custom_splits(env, train, val):
+    from quantdesk.research.experiment import build_panel, split_windows
+    from quantdesk.research.observe import observe
+    start = 1700000100
+    put_bars("QQQ", [100.0] * 900, start=start)
+    put_bars("AAPL", [100.0] * 1500, start=start)  # extra late bars must not move blinding into QQQ's test
+    put_bars("MSFT", [100.0] * 500, start=start + 300 * 900)
+    obs = observe("NASDAQ", ["QQQ", "AAPL", "MSFT"], "QQQ", blind_frac=train + val)
+    for universe in (["QQQ"], ["AAPL"], ["MSFT"], ["AAPL", "MSFT"]):
+        panel = build_panel("NASDAQ", universe, "QQQ")
+        test_start = split_windows(len(panel["ts"]), 55, train, val)["test"][0]
+        assert obs["as_of"] < panel["ts"][test_start]

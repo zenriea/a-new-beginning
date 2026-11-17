@@ -104,6 +104,11 @@ The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-li
   exposure. Buy exposure and loss limits are checked again at the fee-inclusive fill price,
   excluding only that order's own reservation. A resized fill cancels its remainder.
   Sells stay allowed under loss limits. Kill switches are re-checked at fill time.
+* **Durable exits**: retiring/flattening cancels queued entries before requesting sells. Exit
+  requests survive restarts and retry expired or liquidity-capped remainders, including for
+  retired strategies. Flatten-all pauses new entries and covers retired holdings as well.
+  Removing a symbol from the research universe does not stop data updates needed by existing
+  strategies, positions, orders or benchmarks.
 * **The agent cannot loosen limits.** Settings are written only by `settings.operator_update`,
   called only from the authenticated API, and clamped to hard ceilings in `config.py` (e.g. gross
   exposure ≤ 100 %). A test fails the build if agent, research, trading or market-data code
@@ -176,6 +181,19 @@ A sustained, timestamped forward-paper record is still required.
   *inferred* from re-adjusted price history rather than read from a corporate-actions feed, and only
   standard ratios are applied automatically (anything else is flagged for you).
 * **Cost parameters are assumptions.** Verify the SEC Section 31 rate (it changes) and your fee tier.
+* **Backtest/paper execution differences.** The base stock backtest executes at the next bar's
+  open; free SIP paper signals arrive later. The delay stress is diagnostic, not a fully matched
+  baseline. Backtest sells currently liquidate the full holding rather than applying the paper
+  exchange's per-order ADV cap, and experiments use the backtest's default participation setting.
+  These differences can materially affect results in illiquid symbols.
+* **Strategy reviews.** The recorded `max_live_drawdown_pct` currently compares cumulative
+  sleeve return with the loss threshold, not drawdown from a strategy equity high-water mark.
+  Allocation changes also change the denominator of reported sleeve returns. Do not interpret
+  that review statistic as a cash-flow-adjusted performance series.
+* **AI spending is an estimated cap, not a billing guarantee.** Pre-call checks use token
+  estimates, configured prices and recorded completed calls. Concurrent worker/API calls do
+  not reserve budget against each other; uncertain provider usage, retries and fallback
+  models can make actual charges exceed the estimate. Set a provider-side spending limit too.
 * **Liquidity estimates.** Backtests and paper execution share a causal 20-trading-day ADV/daily-volatility
   estimator, with partial windows allowed after 10 valid observations. Future or unfinished bars
   are excluded. Earlier backtests used a one-day estimator; rerun experiments rather than rewriting
@@ -217,6 +235,39 @@ python -m quantdesk.api.app     # terminal 2: UI at http://127.0.0.1:8000
 ```
 
 For a $0 demo with fake data that is labeled as fake everywhere, set `QD_MARKET_DATA=synthetic`.
+Synthetic paths now preserve historical OHLCV values as more bars arrive. This changes their
+seeded values from earlier versions; use a fresh demo data directory instead of mixing old
+synthetic histories and positions with the new generator. Real market-data histories are unaffected.
+
+### Windows: test the local changes without touching Railway
+
+In the project folder, double-click **`Start Local Preview.cmd`**. Keep its terminal window open.
+It opens **http://127.0.0.1:8127**, runs the API **and worker**, and prepares a small synthetic
+universe with six months of history. The first startup takes longer while that history is generated.
+
+* The preview **does not load `.env`**, use provider keys, call a paid AI model, or access Railway.
+* Its separate database is **`data/local-preview-v1/quantdesk.db`**, never `data/quantdesk.db`.
+* Preview settings and history persist between launches; nothing is reset automatically.
+* Try **Research**, **Market**, **Limits & system**, the gate presets, Pause/Resume and Emergency stop.
+  No trades is a valid outcome: the demo still enforces the ordinary gates and risk checks.
+* Press **Ctrl+C** in the preview terminal to stop the API and its worker. Do not close your
+  production service or change Railway variables for this test.
+
+Double-click **`Run Tests.cmd`** to run the automated regression suite in temporary test databases.
+It leaves the result visible in the terminal. Linux-only sandbox tests are skipped on Windows.
+The suite also runs the dashboard's JavaScript display-model tests when Node.js is installed;
+that check is explicitly skipped when Node.js is unavailable.
+Both launchers use the project's existing `.venv`; development dependencies are installed with
+`.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt` if needed.
+
+The equivalent command for other platforms is `python -m quantdesk.preview`. Use `--no-browser`
+to keep the browser closed, or `--port 8128` if the default port is occupied.
+
+The refreshed dashboard has a workspace navigation rail, account/risk summary cards, an equity
+chart with **1D / 1W / 1M / All** views, and a live analyst journal. Chart ranges filter recorded
+snapshots, not backtest history; a new preview can legitimately have only a short, flat account
+history. Fees and benchmark-relative results are shown below the chart and remain since-inception
+metrics regardless of the selected chart range. Dark/light theme preferences are saved locally.
 
 ### 3. Always-on server (Docker)
 
@@ -309,7 +360,7 @@ The historical verification notes below describe the original build, not a CI ru
 |---|---|
 | Server | ~$5–25/month (any small VPS) |
 | Market data | $0 (Coinbase public; Alpaca free plan). Alpaca's paid plan gives full SIP quotes |
-| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider and model you choose: a few dollars a month for small, cheap models; ~$30–45/month for frontier models at the default schedule; $0 for a local Ollama model or a free tier (within its rate limits). At the default schedule that is about 7 research cycles a day (6 crypto, 1 NASDAQ). A **hard budget** stops new AI calls at `$40/month` or `$4/day` by default (changeable in Limits), using the prices you configure. |
+| AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider, model and schedule; $0 for a local Ollama model or a free tier within its limits. Both venues default to a 2-hour research interval, with up to 12 experiments per venue per day when new data is available. Pre-call **estimated budget checks** use `$40/month` and `$4/day` defaults (changeable in Limits), using the prices you configure. See the spending limitations above; enforce a provider-side cap as well. |
 | Cheaper | A smaller model; research less often (Limits: crypto every 8 h instead of 4 h); or demo mode ($0) |
 
 These AI cost figures are estimates from prompt sizes. No live AI call was made while building

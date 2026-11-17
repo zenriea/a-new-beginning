@@ -1,16 +1,29 @@
 """Bar/quote storage and data-health tracking."""
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from .. import clock, db
 from ..venues import VENUES, venue_of
-from .base import Bar, Quote
+from .base import Bar, DataError, Quote
+
+
+def _validate_bars(bars: list[Bar]) -> None:
+    for b in bars:
+        prices = (b.open, b.high, b.low, b.close)
+        if (not all(math.isfinite(v) and v > 0 for v in prices)
+                or not math.isfinite(b.volume) or b.volume < 0
+                or b.low > min(b.open, b.close) or b.high < max(b.open, b.close)
+                or not isinstance(b.ts, int) or isinstance(b.ts, bool) or b.ts <= 0):
+            raise DataError("invalid OHLCV bar: require finite positive prices, valid range, volume and timestamp")
 
 
 def upsert_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
     if not bars:
         return 0
+    _validate_bars(bars)
     with db.tx() as conn:
         conn.executemany(
             "INSERT INTO bars(symbol, timeframe, ts, open, high, low, close, volume) VALUES(?,?,?,?,?,?,?,?) "
@@ -22,6 +35,7 @@ def upsert_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
 
 def replace_bars(symbol: str, timeframe: str, bars: list[Bar]) -> int:
     """Atomically replace a symbol's stored history (used when the provider re-adjusts it)."""
+    _validate_bars(bars)
     with db.tx() as conn:
         conn.execute("DELETE FROM bars WHERE symbol=? AND timeframe=?", (symbol, timeframe))
         conn.executemany(
@@ -91,6 +105,11 @@ def load_panel(symbols: list[str], timeframe: str, start: int | None = None,
 
 
 def save_quote(venue: str, q: Quote) -> None:
+    values = (q.bid, q.ask, q.bid_size, q.ask_size, q.last)
+    if (not math.isfinite(q.ts) or q.ts <= 0 or q.ts > clock.now() + 5
+            or any(v is not None and (not math.isfinite(v) or v < 0) for v in values)
+            or (q.last_ts is not None and (not math.isfinite(q.last_ts) or q.last_ts > clock.now() + 5 or q.last_ts <= 0))):
+        raise DataError("invalid quote: require finite nonnegative values and nonfuture timestamps")
     db.ex("INSERT INTO quotes(symbol, venue, ts, bid, ask, bid_size, ask_size, last, last_ts, source, received_at) "
           "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET venue=excluded.venue, ts=excluded.ts, "
           "bid=excluded.bid, ask=excluded.ask, bid_size=excluded.bid_size, ask_size=excluded.ask_size, "

@@ -43,7 +43,8 @@ the next live quote (paper). All bars are 15 minutes. Stocks: 26 = 1 session, 13
 late (free data plan), so stock signals act about one bar after the close they are computed on. Parameter grids are searched on the TRAIN window only (max 12 combinations); keep grids small.
 kind "code" is available for logic the language cannot express: a Python function \
 signals(o, h, l, c, v, p) -> (entry_bool_array, exit_bool_array) for one symbol using only an allowlisted \
-subset of numpy as `np`; it runs in a sandbox and is rejected if it looks ahead. Prefer kind "dsl".
+subset of numpy as `np`; it runs in a sandbox with sampled prefix checks for look-ahead. \
+Those checks are not proof of causality; strict gates require kind "dsl". Prefer kind "dsl".
 """
 
 NULL_STR = {"anyOf": [{"type": "string"}, {"type": "null"}]}

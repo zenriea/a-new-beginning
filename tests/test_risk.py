@@ -52,6 +52,9 @@ def test_data_and_session_checks(env):
     assert "closed" in ev(req(), snap(market_open=False)).reason
     assert not ev(req(), snap(quote_ok=False)).approved
     assert not ev(req(), snap(bars_ok=False)).approved
+    assert not ev(req(), snap(quote_age=-30)).approved
+    assert not ev(req(), snap(unpriced_positions=True)).approved
+    assert ev(req("sell"), snap(unpriced_positions=True, sleeve_qty=10)).approved
 
 
 def test_position_limit_resizes(env):

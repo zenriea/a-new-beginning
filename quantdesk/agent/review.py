@@ -126,10 +126,9 @@ def review_strategy(strat: dict, analyst=None) -> dict:
                                                       "lessons": rev.get("lessons", []), "new_allocation": new_alloc}),
                                             author, call_id))
     if action == "retire":
-        live.flatten_strategy(strat, f"Retiring {strat['name']} v{strat['version']}: " + (
+        live.retire_strategy(strat, f"Retiring {strat['name']} v{strat['version']}: " + (
             "; ".join(flags) if flags else "analyst review concluded the thesis no longer holds."))
-        db.ex("UPDATE strategies SET status='retired', retired_at=?, retire_reason=?, last_review_at=? WHERE id=?",
-              (clock.now(), rev["journal"][:500], clock.now(), strat["id"]))
+        db.ex("UPDATE strategies SET last_review_at=? WHERE id=?", (clock.now(), strat["id"]))
         title = f"Retired {strat['name']} v{strat['version']}"
     else:
         db.ex("UPDATE strategies SET allocation=?, last_review_at=? WHERE id=?", (new_alloc, clock.now(), strat["id"]))

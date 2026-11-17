@@ -126,12 +126,21 @@ def ingest_bars(venue: str, symbols: list[str]) -> list[dict]:
                     events.append({"key": f"bars:{s}", "ok": False, "error": str(e), "symbol": s})
             continue
         for s in batch:
-            fresh = _usable(venue, data.get(s, []), now)
-            adj = _detect_readjustment(s, tf, fresh)
-            if adj is not None:
-                events += _handle_readjustment(provider, venue, s, tf, adj, now)
-            else:
-                store.upsert_bars(s, tf, [b for b in fresh if b.ts >= starts[s]])
+            try:
+                fresh = _usable(venue, data.get(s, []), now)
+                adj = _detect_readjustment(s, tf, fresh)
+                if adj is not None:
+                    adjusted = _handle_readjustment(provider, venue, s, tf, adj, now)
+                    events += adjusted
+                    if any(not e["ok"] for e in adjusted):
+                        store.set_status(f"bars:{s}", False, adjusted[0]["error"])
+                        continue
+                else:
+                    store.upsert_bars(s, tf, [b for b in fresh if b.ts >= starts[s]])
+            except DataError as e:
+                if store.set_status(f"bars:{s}", False, str(e)):
+                    events.append({"key": f"bars:{s}", "ok": False, "error": str(e), "symbol": s})
+                continue
             last = store.last_bar_ts(s, tf)
             ok = bars_current(venue, last, now, tolerance_bars=2)
             err = None if ok else f"latest stored {tf} bar for {s} is older than expected"
@@ -205,9 +214,14 @@ def _handle_readjustment(provider, venue, symbol, tf, ratio, now) -> list[dict]:
         return [{"key": f"bars:{symbol}", "ok": False, "symbol": symbol,
                  "error": f"history was re-adjusted but the full re-download failed: {e}"}]
     full = _usable(venue, full, now)
-    store.replace_bars(symbol, tf, full)
+    if not full:
+        return [{"key": f"bars:{symbol}", "ok": False, "symbol": symbol,
+                 "error": "history was re-adjusted but the replacement contained no closed bars"}]
     from ..trading import corporate
-    return [corporate.on_history_readjusted(symbol, venue, ratio, len(full))]
+    # A crash must not commit the new price basis without the matching share adjustment.
+    with db.tx():
+        store.replace_bars(symbol, tf, full)
+        return [corporate.on_history_readjusted(symbol, venue, ratio, len(full))]
 
 
 def ingest_quotes(venue: str, symbols: list[str]) -> list[dict]:
@@ -224,12 +238,16 @@ def ingest_quotes(venue: str, symbols: list[str]) -> list[dict]:
         _fail(f"quotes:{venue}")
     for s in symbols:
         q = quotes.get(s)
+        symbol_error = err
         if q is not None:
-            store.save_quote(venue, q)
-            ok = True
+            try:
+                store.save_quote(venue, q)
+                ok = True
+            except DataError as invalid:
+                ok, symbol_error = False, str(invalid)
         else:
             ok = False
-        e = None if ok else (err or f"no quote returned for {s}")
+        e = None if ok else (symbol_error or f"no quote returned for {s}")
         if store.set_status(f"quote:{s}", ok, e):
             events.append({"key": f"quote:{s}", "ok": ok, "error": e, "symbol": s})
     return events

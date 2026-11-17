@@ -8,6 +8,7 @@ same records. Every entry it writes is labelled author='rules' and shown as "dem
 from __future__ import annotations
 
 from .. import db
+from ..research.strategy import MAX_UNIVERSE
 from . import prompts
 from .llm import LLM
 
@@ -118,7 +119,7 @@ class RulesAnalyst:
                     "parent_experiment_id": None, "spec": None}, None
         t = options[0]
         uni = [s for s in ctx["approved_universe"] if s != ctx["benchmark"]] or ctx["approved_universe"]
-        uni = uni[:8] if venue == "NASDAQ" else uni
+        uni = uni[:8] if venue == "NASDAQ" else uni[:MAX_UNIVERSE]
         obs = ctx.get("market_context", {}).get("symbols", {}).get(ctx["benchmark"], {})
         facts = ", ".join(f"{k} {v:+.1%}" if isinstance(v, float) and k.startswith(("ret", "vs", "from")) else ""
                           for k, v in obs.items() if v is not None)
