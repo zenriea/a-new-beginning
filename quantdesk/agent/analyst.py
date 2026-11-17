@@ -39,7 +39,9 @@ class LLMAnalyst:
 
     def repair(self, ctx: dict, previous: dict, error: str) -> tuple[dict, int]:
         ctx = dict(ctx, previous_attempt=previous, validation_error=error,
-                   instruction="Your previous spec failed validation. Fix exactly this error and resubmit.")
+                   instruction="Your previous spec failed validation. Fix this error without changing the idea "
+                   "unnecessarily. If you cannot make it testable, return decision='no_idea' with an explanation "
+                   "and null spec.")
         return self.llm.call("hypothesis_repair", prompts.SYSTEM, prompts.hypothesis_prompt(ctx), prompts.HYPOTHESIS_SCHEMA)
 
     def decide(self, ctx: dict) -> tuple[dict, int]:

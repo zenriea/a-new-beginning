@@ -51,6 +51,10 @@ Observe ─► Investigate ─► Test ─► Challenge ─► Decide ─► Tra
   (`research/dsl.py`), for example `close > sma(close, slow) and market(close) > market(sma(close, 200))`.
   Saying "nothing worth testing" is a recorded decision. When the language can't express an idea,
   the model may write Python. That code runs in a **sandbox**, described below.
+  Before an experiment is created, proposals must support the mandatory neighbor-robustness check:
+  at least one meaningful rule parameter is required (a single candidate at its original value is
+  enough). Empty or unused DSL parameters and grids with untestable candidates get one AI repair
+  attempt, then are discarded without opening the test window. A repair may also decline the idea.
 * **Test** (`research/experiment.py`): the parameter grid (≤ 12 combinations) is searched on
   **train only**, then confirmed on validation. The spec and chosen parameters are then **frozen and
   persisted**, and only after that is the sealed **test** window evaluated, exactly once. Fills

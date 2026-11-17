@@ -20,7 +20,7 @@ from ..marketdata import store
 from ..venues import VENUES
 from . import backtest as B
 from . import dsl, metrics
-from .strategy import compute_signals, param_grid, spec_hash
+from .strategy import SpecError, compute_signals, param_grid, spec_hash, validate_spec
 from ..trading import costs as C
 
 
@@ -104,6 +104,49 @@ def _perturb(params: dict) -> list[dict]:
             p[k] = nv
             out.append(p)
     return out
+
+
+def validate_research_spec(spec: dict, allowed_symbols: dict[str, list[str]], max_combos: int = 12) -> dict:
+    """Preflight the mandatory neighbor challenge before creating an experiment.
+
+    Parameterless rules remain valid strategy specs, but cannot pass this research
+    pipeline's neighbor gate. Ask the analyst to expose an existing rule constant as
+    a parameter (a single candidate is enough), rather than inventing a passing score.
+    This check reads no market data and does not rewrite the proposed rules.
+    """
+    validate_spec(spec, allowed_symbols, max_combos)
+    params = spec.get("params") or {}
+    if not params:
+        raise SpecError("Research requires at least one rule parameter for the mandatory neighbor_positive_frac "
+                        "check. Expose a meaningful existing lookback or threshold in params; a single candidate "
+                        "at its original value is enough. Empty params generate no neighbors and cannot pass.")
+    grid = param_grid(spec)
+    exprs = [spec[key] for key in ("entry", "exit", "rank_by") if spec.get(key)] \
+        if spec.get("kind", "dsl") == "dsl" else []
+    if exprs:
+        used = set().union(*(dsl.validate(expr, grid[0]) for expr in exprs))
+        unused = sorted(set(params) - used)
+        if unused:
+            raise SpecError(f"Research params are unused in the DSL rules: {', '.join(unused)}. "
+                            "Declare meaningful rule parameters, not dummy neighbor checks.")
+    # Training can select any grid candidate. Check the same perturbations used by
+    # the experiment, including DSL window bounds, without looking at test results.
+    for candidate in grid:
+        try:
+            neighbors = _perturb(candidate)
+        except (ValueError, OverflowError) as e:
+            raise SpecError(f"Cannot generate neighbor perturbations for {candidate}: {e}") from None
+        for neighbor in neighbors:
+            try:
+                for expr in exprs:
+                    dsl.validate(expr, neighbor)
+            except dsl.DSLError:
+                continue
+            break
+        else:
+            raise SpecError(f"No valid neighbor perturbations for train candidate {candidate}. "
+                            "Use a meaningful rule parameter whose nearby values are valid.")
+    return spec
 
 
 def _slim(m: dict) -> dict:

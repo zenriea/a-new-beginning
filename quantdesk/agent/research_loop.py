@@ -14,9 +14,9 @@ import traceback
 from .. import clock, db, settings
 from ..config import load_config
 from ..research import gates as G
-from ..research.experiment import ExperimentError, run_experiment
+from ..research.experiment import ExperimentError, run_experiment, validate_research_spec
 from ..research.observe import observe
-from ..research.strategy import SpecError, describe_rules, spec_hash, validate_spec
+from ..research.strategy import SpecError, describe_rules, spec_hash
 from ..trading import ledger
 from . import journal
 from .analyst import RulesAnalyst, get_analyst, memory, spec_from_llm
@@ -78,6 +78,15 @@ def record_unexpected_failure(venue: str, exc: BaseException) -> None:
                   "and Limits & system > Jobs.", author="system")
 
 
+def _record_no_idea(venue: str, prop: dict, author: str, call_id, observation_id: int) -> dict:
+    journal.write("research", f"{venue}: nothing worth testing right now", prop["why"], author=author,
+                  llm_call_id=call_id, refs={"observation_id": observation_id})
+    db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
+          "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), "no_trade", "venue", None, prop["why"],
+                                    db.dumps({"venue": venue}), author, call_id))
+    return {"status": "no_idea"}
+
+
 def research_cycle(venue: str, analyst=None) -> dict:
     cfg = load_config()
     analyst = analyst or get_analyst()
@@ -121,21 +130,18 @@ def research_cycle(venue: str, analyst=None) -> dict:
         return {"status": "llm_error"}
     author = analyst.author
     if prop["decision"] == "no_idea" or not prop.get("spec"):
-        journal.write("research", f"{venue}: nothing worth testing right now", prop["why"], author=author,
-                      llm_call_id=call_id, refs={"observation_id": obs["observation_id"]})
-        db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
-              "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), "no_trade", "venue", None, prop["why"],
-                                          db.dumps({"venue": venue}), author, call_id))
-        return {"status": "no_idea"}
+        return _record_no_idea(venue, prop, author, call_id, obs["observation_id"])
     spec = spec_from_llm(prop["spec"], venue) if author == "llm" else prop["spec"]
     for attempt in range(2):
         try:
-            validate_spec(spec, allowed, rs["max_param_combos"])
+            validate_research_spec(spec, allowed, rs["max_param_combos"])
             break
         except SpecError as e:
             if attempt == 0 and author == "llm":
                 try:
                     prop, call_id = analyst.repair(ctx, prop, str(e))
+                    if prop["decision"] == "no_idea" or not prop.get("spec"):
+                        return _record_no_idea(venue, prop, author, call_id, obs["observation_id"])
                     spec = spec_from_llm(prop["spec"], venue)
                     continue
                 except (LLMError, BudgetExceeded) as e2:
