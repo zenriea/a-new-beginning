@@ -10,7 +10,7 @@ from __future__ import annotations
 from .. import db
 from ..research.strategy import MAX_UNIVERSE
 from . import prompts
-from .llm import LLM
+from .llm import LLM, Router, free_helpers
 
 
 def spec_from_llm(raw: dict, venue: str) -> dict:
@@ -45,7 +45,16 @@ class LLMAnalyst:
         return self.llm.call("hypothesis_repair", prompts.SYSTEM, prompts.hypothesis_prompt(ctx), prompts.HYPOTHESIS_SCHEMA)
 
     def decide(self, ctx: dict) -> tuple[dict, int]:
-        return self.llm.call("decision", prompts.SYSTEM, prompts.decision_prompt(ctx), prompts.DECISION_SCHEMA)
+        user = prompts.decision_prompt(ctx)
+        dec, cid = self.llm.call("decision", prompts.SYSTEM, user, prompts.DECISION_SCHEMA)
+        # Capital moves only when a second, independent model also says allocate.
+        if dec.get("decision") == "allocate" and hasattr(self.llm, "second_opinion"):
+            check = self.llm.second_opinion("decision_check", prompts.SYSTEM, user, prompts.DECISION_SCHEMA)
+            if check is not None and check[0].get("decision") != "allocate":
+                other = check[0]
+                dec = dict(dec, decision="revise", journal=dec["journal"] + f"\n\n[Second opinion: {self.llm.last.model}"
+                           f" said {other.get('decision')}, so no capital this time] {other.get('journal', '')[:600]}")
+        return dec, cid
 
     def review(self, ctx: dict) -> tuple[dict, int]:
         return self.llm.call("review", prompts.SYSTEM, prompts.review_prompt(ctx), prompts.REVIEW_SCHEMA, max_tokens=8000)
@@ -195,7 +204,7 @@ class RulesAnalyst:
 
 
 def get_analyst():
-    llm = LLM()
+    llm = Router(LLM(), free_helpers())
     return LLMAnalyst(llm) if llm.available else RulesAnalyst()
 
 
