@@ -373,7 +373,7 @@ class LLM:
 # Free-tier helpers switch on when their key is in the environment. Model names can be
 # overridden because free model line-ups change often.
 FREE_PRESETS = {
-    "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-2.5-flash"),
+    "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-3.8-flash"),
     "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "QD_GROQ_MODEL", "openai/gpt-oss-120b"),
     "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "openai/gpt-oss-120b:free"),
 }
