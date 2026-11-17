@@ -1,5 +1,5 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
-import { deskHealth, equityInRange, limitUsage } from "./ui-model.mjs?v=20261117-refresh";
+import { deskHealth, equityInRange, limitUsage } from "./ui-model.mjs?v=20261118-nightdesk";
 
 const $ = (s, el = document) => el.querySelector(s);
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
@@ -50,10 +50,34 @@ async function api(path, opts = {}) {
   }
   return r.json();
 }
-function toast(msg) {
-  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3500);
+// Toasts stack in one live region; errors and results stay longer than confirmations.
+function toast(msg, opts = {}) {
+  const tone = opts.tone || (/fail|error|denied|invalid|must|not |unknown|cannot/i.test(msg) ? "bad" : "info");
+  let stack = $("#toasts");
+  if (!stack) { stack = document.createElement("div"); stack.id = "toasts"; stack.className = "toast-stack"; stack.setAttribute("aria-live", "polite"); document.body.appendChild(stack); }
+  const t = document.createElement("div"); t.className = `toast ${tone}`;
+  t.innerHTML = `<span class="toast-dot" aria-hidden="true"></span><div class="toast-text"><b></b>${opts.detail ? "<small></small>" : ""}</div><button class="toast-x" aria-label="Dismiss">×</button>`;
+  t.querySelector("b").textContent = msg;
+  if (opts.detail) t.querySelector("small").textContent = opts.detail;
+  if (opts.exp) { t.classList.add("clickable"); t.dataset.exp = opts.exp; }
+  const remove = () => { t.classList.add("out"); setTimeout(() => t.remove(), 200); };
+  t.querySelector(".toast-x").onclick = (e) => { e.stopPropagation(); remove(); };
+  stack.appendChild(t);
+  while (stack.children.length > 4) stack.firstChild.remove();
+  setTimeout(remove, opts.ms || (tone === "bad" ? 9000 : opts.detail ? 8000 : 4000));
 }
+// Journal entries worth interrupting the operator for (research outcomes, trades, risk).
+function notifyFromJournal(j) {
+  const t = j.title || "", refs = j.refs || {};
+  const research = j.kind === "research" || j.kind === "decision" || (j.kind === "test" && /^Re-judged/.test(t));
+  const failed = j.kind === "system" && /failed|paused|could not/i.test(t);
+  if (!(research || failed || j.kind === "fill" || j.kind === "risk")) return;
+  const tone = j.kind === "risk" || failed ? "bad" : /^(Allocating|New strategy live)/.test(t) || j.kind === "fill" ? "good" : "info";
+  toast(t, { tone, detail: (j.body || "").slice(0, 160) + ((j.body || "").length > 160 ? "…" : ""), exp: refs.experiment_id });
+}
+const CTL_MSG = { research_nasdaq: ["NASDAQ research started", "Takes about a minute. You'll get a notification with the result."],
+  research_crypto: ["Crypto research started", "Takes about a minute. You'll get a notification with the result."],
+  flatten_all: ["Flatten-all requested", "Positions close at the next usable quotes."] };
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 const outlineIcon = (path) => `<svg viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
 const researchIcon = outlineIcon('<path d="M9 3h6m-5 0v6L4 19a1.4 1.4 0 0 0 1.2 2h13.6a1.4 1.4 0 0 0 1.2-2L14 9V3M7 15h10"/>');
@@ -536,7 +560,12 @@ $("#tab-body").addEventListener("click", async (e) => {
   const ctl = e.target.closest("[data-ctl]");
   if (ctl) {
     if (ctl.dataset.ctl === "flatten_all" && !confirm("Pause new entries, cancel pending orders, and close every position at the next usable quotes?")) return;
-    try { await api(`/api/control/${ctl.dataset.ctl}`, { method: "POST" }); toast("Done"); refresh(); } catch (err) { toast(err.message); }
+    try {
+      ctl.disabled = true;
+      await api(`/api/control/${ctl.dataset.ctl}`, { method: "POST" });
+      const [m, d] = CTL_MSG[ctl.dataset.ctl] || ["Done"];
+      toast(m, { tone: "good", detail: d }); refresh();
+    } catch (err) { toast(err.message); } finally { setTimeout(() => { ctl.disabled = false; }, 3000); }
     return;
   }
   const ret = e.target.closest("[data-retire]");
@@ -599,6 +628,9 @@ async function openExperiment(id) {
   drawer(`Experiment #${e.id}: ${h.title || ""}`, `
     <div class="section"><span class="status ${esc(e.status)}">${esc(e.status)}</span> <span class="muted">· ${esc(e.venue)} · created ${dt(e.created_at)} · frozen ${dt(e.frozen_at)} · by ${authorLabel(h.author)}</span>
       ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">strategy ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.status)})</a>` : ""}</div>
+    ${e.test && !e.strategy && e.status !== "running" ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
+      <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
+      <button class="btn primary" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>` : ""}
     <div class="section"><h4>Hypothesis (recorded before testing)</h4><div class="pre">${rich(h.rationale)}</div>
       <p><b>Prediction:</b> ${rich(h.prediction)}<br><b>Would drop it if:</b> ${rich(h.falsification)}</p></div>
     <div class="section"><h4>Rules</h4><div style="font-size:13px">Entry <code>${esc(spec.entry || "custom code")}</code><br>Exit <code>${esc(spec.exit || "custom code")}</code>
@@ -666,7 +698,18 @@ async function openLLM(id) {
     <div class="section"><h4>Inputs given to the model</h4><pre class="pre" style="font-size:12px">${esc(c.request?.user || "")}</pre></div>
     <div class="section"><h4>Response</h4><pre class="pre" style="font-size:12px">${esc(c.response || "")}</pre></div>`);
 }
-document.addEventListener("click", (e) => {
+document.addEventListener("click", async (e) => {
+  const rj = e.target.closest("[data-rejudge]");
+  if (rj) {
+    if (!confirm(`Re-judge experiment #${rj.dataset.rejudge} under the current gates? Only the gate check and decision run again.`)) return;
+    rj.disabled = true;
+    try {
+      await api(`/api/control/rejudge_${rj.dataset.rejudge}`, { method: "POST" });
+      toast(`Re-judging experiment #${rj.dataset.rejudge}`, { tone: "good", detail: "Starts within ~15 seconds. You'll get a notification with the decision." });
+      if (closeDrawer) closeDrawer();
+    } catch (err) { toast(err.message); rj.disabled = false; }
+    return;
+  }
   const a = e.target.closest("[data-exp],[data-strat],[data-order],[data-llm]");
   if (!a || a.closest("#tab-body [data-llm]") && !a.matches("a")) return;
   if (a.dataset.exp) { e.preventDefault(); openExperiment(a.dataset.exp).catch((err) => toast(err.message)); }
@@ -734,7 +777,9 @@ function connectStream() {
     if (j.id <= state.lastId) return;
     state.lastId = j.id; state.journal.unshift(j); state.journal.length = Math.min(state.journal.length, 1000);
     renderFeed(new Set([j.id]));
-    if (["fill", "decision", "review", "risk"].includes(j.kind)) refresh();
+    notifyFromJournal(j);
+    if (["fill", "decision", "review", "risk", "test"].includes(j.kind)) refresh();
+    if (["test", "decision"].includes(j.kind) && state.tab === "research" && !$("#drawer-root").innerHTML) renderTab();
   });
   es.onopen = () => { $("#live-badge").className = "badge ok"; $("#live-badge").innerHTML = '<span class="dot"></span>live'; };
   es.onerror = () => { $("#live-badge").className = "badge bad"; $("#live-badge").innerHTML = '<span class="dot"></span>reconnecting'; };
