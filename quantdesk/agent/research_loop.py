@@ -274,11 +274,31 @@ GATE_PASS_MIN_PCT = 0.05
 DEFAULT_EXIT_PLAN = "Exit per the tested rules; retire if live drawdown exceeds 1.5x the test drawdown."
 
 
+def bar_size_mismatch(e: dict) -> str | None:
+    """Rule windows are counted in bars, so an experiment run on another bar size (e.g. daily, before
+    the switch to 15-minute bars) tests a different strategy than the one that would trade now.
+    The experiment row has no bar-size column; its test window's calendar span per bar tells."""
+    from ..venues import VENUES
+    v = VENUES.get(e.get("venue"))
+    t = (db.loads(e.get("windows"), {}) or {}).get("test") or {}
+    if not v or not t.get("bars") or not t.get("end") or t["end"] <= t.get("start", 0):
+        return None
+    tested = (t["end"] - t["start"]) / t["bars"]
+    expected = 365.25 * 86400 / v.periods_per_year
+    if tested <= 3 * expected:   # only coarser bars are flagged: demo data has no overnight gaps
+        return None
+    return (f"it was tested on a different bar size (~{tested / 3600:.1f}h of calendar time per bar vs "
+            f"~{expected / 3600:.1f}h for {v.timeframe} bars now), so its rules would mean something else live")
+
+
 def probe_blocker(e: dict, operator: bool = False) -> str | None:
     """Why experiment row ``e`` cannot start a probe (None = it can)."""
     p = settings.get("probe")
     if not e or e["status"] not in ("failed", "passed") or not e["test"]:
         return "only finished experiments with test results can be probed"
+    stale = bar_size_mismatch(e)
+    if stale:
+        return stale
     if db.q1("SELECT 1 FROM strategies WHERE experiment_id=?", (e["id"],)):
         return "this experiment already has a strategy"
     if settings.get("agent").get("emergency_stop"):

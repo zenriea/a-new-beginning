@@ -155,6 +155,19 @@ def extract_json(text: str):
 _compat_quirks: dict = {}  # learned per base_url: which request options the provider rejects
 
 
+# Free helpers that fail in a way that will repeat on the next call are benched instead of being
+# called (and retried) every cycle: exhausted daily quota, a model the provider no longer serves
+# for free, or a prompt above the provider's tokens-per-minute cap.
+HELPER_BENCH_SEC = 6 * 3600
+_benched_until: dict[tuple, float] = {}   # (base_url, model) -> epoch
+_too_large: dict[tuple, int] = {}         # (base_url, model) -> smallest prompt size (chars) that was refused
+
+
+def _daily_quota(text: str) -> bool:
+    t = (text or "").lower()
+    return "quota" in t and ("per day" in t or "perday" in t or "daily" in t)
+
+
 class LLM:
     _sleep = staticmethod(time.sleep)
 
@@ -179,6 +192,19 @@ class LLM:
     @property
     def available(self) -> bool:
         return self.route is not None or self._client is not None or self._post is not None or not self.cfg.demo_llm
+
+    @property
+    def _key(self) -> tuple:
+        return (self.route["base_url"] if self.route else self.cfg.llm_base_url, self.model)
+
+    @property
+    def benched(self) -> bool:
+        return self.route is not None and _benched_until.get(self._key, 0) > clock.now()
+
+    def _bench(self, why: str) -> None:
+        if self.route is not None:
+            _benched_until[self._key] = clock.now() + HELPER_BENCH_SEC
+            log.warning("benching helper %s for %dh: %s", self.model, HELPER_BENCH_SEC // 3600, why[:200])
 
     @property
     def model(self) -> str:
@@ -222,6 +248,11 @@ class LLM:
         instruction = ("\n\nRespond with ONE JSON object and nothing else. It must match this JSON Schema "
                        "(all listed fields required; use null where allowed):\n" + json.dumps(schema))
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user + instruction}]
+        size = len(system) + len(messages[-1]["content"])
+        if self.benched:
+            raise LLMError(f"{purpose}: {self.model} is benched after a persistent failure")
+        if self.route is not None and size >= _too_large.get(self._key, size + 1):
+            raise LLMError(f"{purpose}: prompt too large for {self.model}'s rate limit")
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -244,7 +275,9 @@ class LLM:
             except Exception as e:
                 self._record_end(cid, "error", f"{type(e).__name__}: {e}"[:1000], None, {"input_tokens": 0, "output_tokens": 0}, "")
                 raise LLMError(f"{purpose}: request failed: {type(e).__name__}: {e}") from e
-            if r.status_code in (429, 500, 502, 503, 504) and transient < 2:
+            persistent = ((r.status_code == 429 and _daily_quota(r.text)) or r.status_code == 404
+                          or r.status_code == 413)
+            if r.status_code in (429, 500, 502, 503, 504) and transient < 2 and not persistent:
                 # overloaded / rate-limited / gateway timeout: brief backoff, then retry
                 transient += 1
                 self._record_end(cid, "retry", f"HTTP {r.status_code}, retrying: {r.text[:200]}", None,
@@ -258,6 +291,10 @@ class LLM:
             if r.status_code >= 400:
                 self._record_end(cid, "error", f"HTTP {r.status_code}: {r.text[:500]}", None,
                                  {"input_tokens": 0, "output_tokens": 0}, r.text)
+                if r.status_code == 413 and self.route is not None:
+                    _too_large[self._key] = min(_too_large.get(self._key, size), size)
+                elif persistent:
+                    self._bench(f"HTTP {r.status_code}: {r.text}")
                 raise LLMError(f"{purpose}: HTTP {r.status_code} from {base}: {r.text[:300]}")
             data = r.json()
             choice = (data.get("choices") or [{}])[0]
@@ -375,7 +412,7 @@ class LLM:
 FREE_PRESETS = {
     "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-3.8-flash"),
     "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "QD_GROQ_MODEL", "openai/gpt-oss-120b"),
-    "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "openai/gpt-oss-120b:free"),
+    "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free"),
 }
 # Frequent, long-prompt work goes to free models first; the paid model is the fallback.
 FREE_FIRST = {"hypothesis", "hypothesis_repair", "review", "question"}
