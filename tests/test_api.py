@@ -164,3 +164,20 @@ def test_logout_requires_csrf_and_invalidates_browser_cookie(client):
     assert client.post("/api/logout").status_code == 403
     assert client.post("/api/logout", headers={"X-QD": "1"}).status_code == 200
     assert client.get("/api/state").status_code == 401
+
+
+@pytest.mark.parametrize("pw", ["change-me-to-a-long-passphrase", "short"])
+def test_rejects_published_or_short_admin_password(env, monkeypatch, pw):
+    monkeypatch.setenv("QD_ADMIN_PASSWORD", pw)
+    from quantdesk.config import load_config
+    with pytest.raises(ValueError, match="QD_ADMIN_PASSWORD"):
+        load_config(reload=True)
+
+
+def test_env_example_password_is_blank_and_accepted(env, monkeypatch):
+    from pathlib import Path
+    from quantdesk.config import load_config
+    example = (Path(__file__).resolve().parent.parent / ".env.example").read_text()
+    assert "QD_ADMIN_PASSWORD=\n" in example
+    monkeypatch.setenv("QD_ADMIN_PASSWORD", "a perfectly fine passphrase")
+    assert load_config(reload=True).admin_password == "a perfectly fine passphrase"

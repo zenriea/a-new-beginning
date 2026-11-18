@@ -131,6 +131,25 @@ def _resolve_provider() -> str:
     return "none"
 
 
+MIN_ADMIN_PASSWORD_LEN = 12
+# Values published in this public repo (.env.example, docs). Anyone could log in with them.
+_PUBLISHED_PASSWORDS = {"change-me-to-a-long-passphrase", "<long password for the dashboard>",
+                        "<your own password for the dashboard, at least 12 characters>"}
+
+
+def _check_admin_password(pw: str) -> str:
+    """An empty password is allowed (local-only mode). Anything else must be real."""
+    if not pw:
+        return pw
+    if pw in _PUBLISHED_PASSWORDS:
+        raise ValueError("QD_ADMIN_PASSWORD is still the example value from .env.example; "
+                         "set your own password before starting QuantDesk")
+    if len(pw) < MIN_ADMIN_PASSWORD_LEN:
+        raise ValueError(f"QD_ADMIN_PASSWORD is too short ({len(pw)} characters); "
+                         f"use at least {MIN_ADMIN_PASSWORD_LEN}")
+    return pw
+
+
 def load_config(reload: bool = False, **overrides) -> Config:
     global _CONFIG
     if _CONFIG is not None and not reload and not overrides:
@@ -156,7 +175,7 @@ def load_config(reload: bool = False, **overrides) -> Config:
         alpaca_feed=_env("ALPACA_FEED", "iex"),
         alpaca_hist_feed=_env("ALPACA_HIST_FEED", "sip"),
         market_data_mode=_env("QD_MARKET_DATA", "live"),
-        admin_password=_env("QD_ADMIN_PASSWORD"),
+        admin_password=_check_admin_password(_env("QD_ADMIN_PASSWORD")),
         session_secret=_env("QD_SESSION_SECRET"),
         bind_host=_env("QD_BIND_HOST", "127.0.0.1"),
         bind_port=_env_int("QD_PORT", 8000),
