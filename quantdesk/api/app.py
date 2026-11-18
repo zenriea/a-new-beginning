@@ -188,6 +188,7 @@ def _state() -> dict:
         val = p["qty"] * (px or 0)
         pos_rows.append({
             "strategy_id": p["strategy_id"], "strategy": f"{st['name']} v{st['version']}" if st else "-",
+            "probe": bool(st["probe"]) if st else False,
             "symbol": p["symbol"], "venue": p["venue"], "qty": p["qty"], "avg_cost": p["avg_cost"], "mark": px,
             "mark_as_of": as_of, "mark_basis": basis, "value": val,
             "unrealized": p["qty"] * ((px or p["avg_cost"]) - p["avg_cost"]),
@@ -236,8 +237,9 @@ def _state() -> dict:
         "data": {"problems": bad, "count": len(data_status)},
         "budget": budget_status(),
         "limits": settings.get("risk"),
+        "pipeline": _pipeline(now),
         "strategies": [dict(r) | {"spec": None} for r in db.q("SELECT id, name, version, venue, status, allocation, "
-                                                                 "approved_allocation, created_at FROM strategies "
+                                                                 "approved_allocation, created_at, probe FROM strategies "
                                                                  "WHERE status IN ('active','incubating') ORDER BY id")],
         "beliefs": [db.row_dict(b, ["evidence"]) for b in db.q("SELECT * FROM beliefs WHERE status='active' ORDER BY id DESC LIMIT 10")],
         "counts": {k: db.q1(f"SELECT COUNT(*) n FROM {t}")["n"] for k, t in
@@ -306,8 +308,10 @@ def _rows(sql, params=(), json_fields=()):
 @app.get("/api/experiments", dependencies=[Depends(require_auth)])
 async def experiments(limit: int = Query(100, ge=1, le=500)):
     return await run_in_threadpool(_rows, "SELECT e.id, e.hypothesis_id, e.created_at, e.completed_at, e.venue, e.kind, e.status, "
-                                   "e.chosen_params, e.test, e.gates, e.leakage, e.error, h.title, h.author FROM experiments e "
-                                   "JOIN hypotheses h ON h.id=e.hypothesis_id ORDER BY e.id DESC LIMIT ?", (limit,),
+                                   "e.chosen_params, e.test, e.gates, e.leakage, e.error, h.title, h.author, "
+                                   "s.id AS strategy_id, s.probe AS strategy_probe FROM experiments e "
+                                   "JOIN hypotheses h ON h.id=e.hypothesis_id LEFT JOIN strategies s ON s.experiment_id=e.id "
+                                   "ORDER BY e.id DESC LIMIT ?", (limit,),
                                    ("chosen_params", "test", "gates", "leakage"))
 
 
@@ -325,6 +329,38 @@ async def experiment(eid: int):
         e["strategy"] = db.row_dict(db.q1("SELECT id, name, version, status FROM strategies WHERE experiment_id=?", (eid,)))
         return e
     return await run_in_threadpool(f)
+
+
+def _pipeline(now: float) -> dict:
+    """Why the desk is or is not trading: recent research outcomes and the closest candidates."""
+    from ..agent.research_loop import probe_blocker
+    since = now - 7 * 86400
+    rows = [dict(r) for r in db.q("SELECT e.id, e.venue, e.status, e.test, e.gates, e.created_at, h.title FROM experiments e "
+                                  "JOIN hypotheses h ON h.id=e.hypothesis_id WHERE e.created_at>=? ORDER BY e.id DESC", (since,))]
+    fails: dict[str, int] = {}
+    cands = []
+    for r in rows:
+        g = db.loads(r["gates"], {}) or {}
+        for f in g.get("failed") or []:
+            fails[f] = fails.get(f, 0) + 1
+        t = db.loads(r["test"], {}) or {}
+        if t.get("total_return") is not None:
+            cands.append({"id": r["id"], "title": r["title"], "venue": r["venue"], "status": r["status"],
+                          "test_return": t["total_return"], "sharpe": t.get("sharpe"), "trades": t.get("n_trades"),
+                          "failed": g.get("failed") or [], "n_checks": len(g.get("checks") or []) or 9})
+    cands.sort(key=lambda c: -c["test_return"])
+    for c in cands[:3]:
+        e = db.q1("SELECT * FROM experiments WHERE id=?", (c["id"],))
+        c["probe_blocker"] = probe_blocker(dict(e))
+        c["operator_blocker"] = probe_blocker(dict(e), operator=True)
+    counts = {k: db.q1(f"SELECT COUNT(*) n FROM strategies WHERE status IN ('active','incubating') AND probe={v}")["n"]
+              for k, v in (("strategies", 0), ("probes", 1))}
+    finished = [r for r in rows if r["status"] in ("passed", "failed")]
+    return {"window_days": 7, "experiments": len(rows), "finished": len(finished),
+            "passed": sum(r["status"] == "passed" for r in rows),
+            "profitable": sum(1 for c in cands if c["test_return"] > 0),
+            "gate_failures": sorted(({"gate": k, "n": v} for k, v in fails.items()), key=lambda x: -x["n"]),
+            "candidates": cands[:3], "live": counts, "probe": settings.get("probe")}
 
 
 @app.get("/api/strategies", dependencies=[Depends(require_auth)])
@@ -486,6 +522,16 @@ async def control(action: str):
             db.set_meta("rejudge_requested", action[8:])
             journal.write("system", f"Operator asked to re-judge experiment {action[8:]}", "Its stored results are "
                           "re-checked against the current gates within ~15 seconds.", author="operator")
+        elif action.startswith("probe_") and action[6:].isdigit():
+            from ..agent.research_loop import probe_blocker
+            e = db.q1("SELECT * FROM experiments WHERE id=?", (int(action[6:]),))
+            why = probe_blocker(dict(e) if e else None, operator=True)
+            if why:
+                raise HTTPException(409, why)
+            db.set_meta("probe_requested", action[6:])
+            journal.write("system", f"Operator asked to paper-trade experiment {action[6:]} as a probe",
+                          "The worker starts it within ~15 seconds; it trades from the next bar close.", author="operator",
+                          refs={"experiment_id": int(action[6:])})
         elif action.startswith("research_"):
             venue = action.split("_", 1)[1].upper()
             if venue not in settings.get("universe"):

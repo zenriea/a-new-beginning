@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="/static/app.css?v=20261118-nightdesk">
+  <link rel="stylesheet" href="/static/app.css?v=20261118-pipeline">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0b'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -28,10 +28,11 @@
   <div id="app" class="hidden">
     <a class="skip-link" href="#overview">Skip to dashboard</a>
     <aside class="sidebar" aria-label="Desk navigation">
-      <a class="brand brand-link" href="#overview" data-nav="overview"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l5-5 4 4 7-8"/></svg></span><div>QuantDesk<small>RESEARCH WORKSPACE</small></div></a>
+      <a class="brand brand-link" href="#overview" data-nav="overview"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l5-5 4 4 7-8"/></svg></span><div>QuantDesk<small>PAPER DESK</small></div></a>
       <div class="nav-label">Workspace</div>
       <nav class="desk-nav" aria-label="Workspace">
         <a class="nav-item active" href="#overview" data-nav="overview" aria-current="location"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>Overview</span></a>
+        <a class="nav-item" href="#pipeline" data-nav="pipeline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/></svg><span>Pipeline</span><span class="nav-count" id="nav-live-count">–</span></a>
         <a class="nav-item" href="#records" data-nav="research"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6L4 19a1.4 1.4 0 0 0 1.2 2h13.6a1.4 1.4 0 0 0 1.2-2L14 9V3M7 15h10"/></svg><span>Research</span><span class="nav-count" id="nav-research-count">–</span></a>
         <a class="nav-item" href="#records" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span>Strategies</span></a>
         <a class="nav-item" href="#records" data-nav="orders"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"/></svg><span>Orders &amp; fills</span></a>
@@ -43,15 +44,14 @@
         <a class="nav-item" href="#records" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><span>Limits &amp; system</span></a>
       </nav>
       <div class="sidebar-footer">
-        <div class="environment-label"><span class="environment-dot"></span>Paper environment</div>
-        <p>Real research. Simulated execution.<br>No real money at risk.</p>
-        <div class="sidebar-version">QUANTDESK <span>DESK / 01</span></div>
+        <div class="environment-label"><span class="environment-dot"></span>Paper trading</div>
+        <p>Simulated execution. No real money.</p>
       </div>
     </aside>
 
     <div class="workspace">
       <header class="topbar">
-        <div class="workspace-label"><span class="workspace-mark" aria-hidden="true">Q</span><span>Workspace <span class="breadcrumb-sep">/</span> <b>Paper trading</b></span></div>
+        <div class="desk-health" id="desk-health" role="status"><span class="health-indicator"></span><div><b>Connecting to the desk</b><small>Waiting for the first update</small></div></div>
         <div class="spacer"></div>
         <div class="operator-actions">
           <button class="btn" id="btn-pause">Pause agent</button>
@@ -64,47 +64,47 @@
       <div class="alerts" id="alerts"></div>
       <div class="alert critical hidden" id="connection-alert" role="status"></div>
 
-      <section class="page-intro" id="overview" tabindex="-1" aria-labelledby="page-title">
-        <div><div class="eyebrow">YOUR AUTONOMOUS RESEARCH WORKSPACE</div><h1 id="page-title">Desk overview<span class="title-dot">.</span></h1><p>Every hypothesis tested. Every decision on record.</p></div>
-        <div class="desk-health" id="desk-health" role="status"><span class="health-indicator"></span><div><b>Connecting to the desk</b><small>Waiting for the first update</small></div></div>
-      </section>
-
       <main class="layout" id="dashboard">
-      <div class="col">
+      <div class="col" id="overview" tabindex="-1">
+        <h1 class="sr-only">QuantDesk overview</h1>
         <section class="kpis" id="kpis" aria-label="Performance summary"></section>
 
+        <section class="card pipeline-card" id="pipeline" tabindex="-1" aria-labelledby="pipeline-heading">
+          <div class="card-h"><h2 id="pipeline-heading">Trading pipeline</h2><div class="spacer"></div><span class="badge" id="pipeline-window">last 7 days</span></div>
+          <div class="card-b" id="pipeline-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-h"><h2>Open positions</h2><div class="spacer"></div><span class="badge" id="pos-summary">No open positions</span></div>
+          <div class="card-b tbl-scroll" id="positions"></div>
+        </section>
+
         <section class="card performance-card" aria-labelledby="performance-heading">
-          <div class="card-h"><div><div class="eyebrow">THE BIG PICTURE</div><h2 id="performance-heading">Account performance</h2></div><div class="spacer"></div>
+          <div class="card-h"><h2 id="performance-heading">Account performance</h2><div class="spacer"></div>
             <div class="range-control" id="equity-ranges" role="group" aria-label="Equity chart time range">
               <button type="button" data-range="day" aria-pressed="false">1D</button><button type="button" data-range="week" aria-pressed="false">1W</button><button type="button" data-range="month" aria-pressed="false">1M</button><button type="button" class="active" data-range="all" aria-pressed="true">All</button>
             </div></div>
-          <div class="performance-meta"><span id="equity-since">Waiting for equity snapshots</span><span>NET OF SIMULATED COSTS</span></div>
+          <div class="performance-meta"><span id="equity-since">Waiting for equity snapshots</span><span>Net of simulated costs</span></div>
           <div class="chart-tip" id="equity-tip"></div>
           <div class="chart-wrap" id="equity-chart"></div>
           <div class="chart-range-note hidden" id="equity-range-note" role="status"></div>
           <div class="chart-legend" id="equity-legend"></div>
           <div class="performance-stats" id="performance-stats"></div>
-          <div class="chart-disclaimer">Benchmarks start with the same initial capital at the first mark. Paper performance is not a prediction of live returns.</div>
         </section>
 
         <section class="desk">
           <div class="card">
-            <div class="card-h"><div><div class="eyebrow">IN MOTION</div><h2>Agent activity</h2></div><span class="section-index">01</span></div>
+            <div class="card-h"><h2>Agent activity</h2></div>
             <div class="card-b" id="now"></div>
           </div>
           <div class="card">
-            <div class="card-h"><div><div class="eyebrow">THE CURRENT THESIS</div><h2>Evidence &amp; beliefs</h2></div><span class="section-index">02</span></div>
+            <div class="card-h"><h2>Beliefs</h2><div class="spacer"></div><span class="muted card-note">evidence-backed only</span></div>
             <div class="card-b" id="beliefs"></div>
           </div>
         </section>
 
-        <section class="card">
-          <div class="card-h"><div><div class="eyebrow">PORTFOLIO</div><h2>Open positions</h2></div><div class="spacer"></div><span class="badge" id="pos-summary">No open positions</span></div>
-          <div class="card-b tbl-scroll" id="positions"></div>
-        </section>
-
         <section class="card records-card" id="records" tabindex="-1" aria-label="Research and desk records">
-          <div class="card-h"><div><div class="eyebrow">FROM IDEA TO EXECUTION</div><h2>Inside the desk</h2></div><span class="records-note">An auditable trail, not a black box.</span></div>
+          <div class="card-h"><h2>Records</h2></div>
           <div class="tabs" role="tablist" aria-label="Desk records" id="tabs">
             <button class="tab active" role="tab" id="tab-research" aria-controls="tab-body" aria-selected="true" data-tab="research">Research</button>
             <button class="tab" role="tab" id="tab-strategies" aria-controls="tab-body" aria-selected="false" tabindex="-1" data-tab="strategies">Strategies</button>
@@ -118,7 +118,7 @@
 
       <aside class="journal-col" id="journal" tabindex="-1" aria-labelledby="journal-heading">
         <div class="card">
-          <div class="card-h"><div><div class="eyebrow">THE REASONING, IN REAL TIME</div><h2 id="journal-heading">Analyst journal</h2></div><div class="spacer"></div><span class="badge" id="live-badge"><span class="dot"></span>connecting</span></div>
+          <div class="card-h"><h2 id="journal-heading">Analyst journal</h2><div class="spacer"></div><span class="badge" id="live-badge"><span class="dot"></span>connecting</span></div>
           <div class="filters" id="filters"></div>
           <div class="feed" id="feed" aria-live="polite"></div>
           <div class="ask">
@@ -133,12 +133,11 @@
         </div>
       </aside>
       </main>
-      <footer class="workspace-footer"><span>Built on evidence. Governed by limits.</span><span>Paper trading only <span aria-hidden="true">↗</span></span></footer>
     </div>
   </div>
 
   <div id="drawer-root"></div>
   <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-  <script type="module" src="/static/app.js?v=20261118-nightdesk"></script>
+  <script type="module" src="/static/app.js?v=20261118-pipeline"></script>
 </body>
 </html>

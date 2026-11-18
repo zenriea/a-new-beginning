@@ -1,5 +1,5 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
-import { deskHealth, equityInRange, limitUsage } from "./ui-model.mjs?v=20261118-nightdesk";
+import { deskHealth, equityInRange, limitUsage, tradingVerdict } from "./ui-model.mjs?v=20261118-pipeline";
 
 const $ = (s, el = document) => el.querySelector(s);
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
@@ -72,7 +72,7 @@ function notifyFromJournal(j) {
   const research = j.kind === "research" || j.kind === "decision" || (j.kind === "test" && /^Re-judged/.test(t));
   const failed = j.kind === "system" && /failed|paused|could not/i.test(t);
   if (!(research || failed || j.kind === "fill" || j.kind === "risk")) return;
-  const tone = j.kind === "risk" || failed ? "bad" : /^(Allocating|New strategy live)/.test(t) || j.kind === "fill" ? "good" : "info";
+  const tone = j.kind === "risk" || failed ? "bad" : /^(Allocating|New (strategy|probe) live)/.test(t) || j.kind === "fill" ? "good" : "info";
   toast(t, { tone, detail: (j.body || "").slice(0, 160) + ((j.body || "").length > 160 ? "…" : ""), exp: refs.experiment_id });
 }
 const CTL_MSG = { research_nasdaq: ["NASDAQ research started", "Takes about a minute. You'll get a notification with the result."],
@@ -108,8 +108,9 @@ document.addEventListener("click", (event) => {
   if (!link) return;
   event.preventDefault();
   const key = link.dataset.nav;
-  if (!["overview", "journal"].includes(key)) selectTab(key); else markNavigation(key);
-  const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : "#records");
+  if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key); else if (key !== "pipeline") markNavigation(key);
+  if (key === "pipeline") markNavigation(key);
+  const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : key === "pipeline" ? "#pipeline" : "#records");
   if (target) { target.scrollIntoView({ behavior: "instant", block: "start" }); target.focus({ preventScroll: true }); }
 });
 
@@ -159,16 +160,20 @@ function renderBadges(s) {
   b.push(`<span class="badge ${n.open ? "ok" : ""}"><span class="dot"></span>NASDAQ ${n.open ? "open · closes in " + until(n.closes_at) : "closed · opens in " + (n.opens_at ? until(n.opens_at) : "?")}</span>`);
   b.push(`<span class="badge ok"><span class="dot"></span>Crypto 24/7</span>`);
   const bud = s.budget;
-  b.push(`<span class="badge ${bud.day_remaining <= 0 || bud.month_remaining <= 0 ? "bad" : ""}" title="API spend">API $${bud.month_spent.toFixed(2)} / $${bud.monthly_cap} mo</span>`);
+  b.push(`<span class="badge ${bud.day_remaining <= 0 || bud.month_remaining <= 0 ? "bad" : ""}" title="AI spend this month (daily $${bud.day_spent.toFixed(2)} / $${bud.daily_cap})">AI spend $${bud.month_spent.toFixed(2)} / $${bud.monthly_cap}</span>`);
   $("#badges").innerHTML = b.join("");
   const c = s.controls;
   $("#btn-pause").textContent = c.paused ? "Resume agent" : "Pause agent";
   $("#btn-stop").textContent = c.emergency_stop ? "Clear emergency stop" : "Emergency stop";
   $("#btn-pause").setAttribute("aria-pressed", String(c.paused));
   $("#nav-research-count").textContent = s.counts.experiments.toLocaleString();
+  const live = (s.pipeline?.live.strategies || 0) + (s.pipeline?.live.probes || 0);
+  $("#nav-live-count").textContent = live ? `${live} live` : "idle";
+  $("#nav-live-count").classList.toggle("on", live > 0);
   const health = deskHealth(s);
   $("#desk-health").className = `desk-health ${health.tone}`;
   $("#desk-health").innerHTML = `<span class="health-indicator"></span><div><b>${esc(health.label)}</b><small>Updated ${esc(new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }))}</small></div>`;
+  $("#desk-health").title = health.label;
 }
 function renderAlerts(s) {
   const a = [];
@@ -253,6 +258,7 @@ function renderEquity() {
   $("#equity-tip").textContent = "";
   const note = $("#equity-range-note");
   note.classList.toggle("hidden", rows.length > 0);
+  $("#equity-chart").classList.toggle("collapsed", rows.length === 0);
   note.textContent = !state.equityRows.length ? "No equity snapshots yet. The worker records the account once per minute." :
     "No snapshots in this period. Choose All to see the recorded history.";
   c.chart.timeScale().fitContent();
@@ -274,20 +280,52 @@ $("#equity-ranges").addEventListener("click", (event) => {
 // ---------------------------------------------------------------- desk view
 function renderNow(s) {
   const a = s.agent || {};
-  const exp = s.latest_experiment;
-  const nexts = (a.next_actions || []).slice(0, 5);
-  const live = s.strategies.filter((x) => x.status === "active").length;
-  const waiting = s.strategies.length - live;
+  const nexts = (a.next_actions || []).slice(0, 4);
   $("#now").innerHTML = `
     <div class="now-activity act-${esc(a.activity || "starting")}">${esc(cap(a.activity || "starting"))}</div>
     <div class="now-detail">${esc(a.detail || "")} <span class="muted">· ${ago(a.updated_at)}</span></div>
-    <div class="activity-counts"><span><b>${live}</b> active strateg${live === 1 ? "y" : "ies"}</span>${waiting ? `<span><b>${waiting}</b> waiting for room</span>` : ""}
-      <span><b>${s.counts.experiments}</b> experiments</span><span><b>${s.open_orders.length}</b> open orders</span></div>
-    ${exp ? `<div class="latest-experiment"><div class="eyebrow">LATEST EXPERIMENT</div><a href="#" data-exp="${exp.id}">#${exp.id} ${esc(exp.title)}</a>
-      <div><span class="status ${esc(exp.status)}">${esc(exp.status)}</span></div></div>` : `<div class="muted" style="margin-top:10px">No experiments yet.</div>`}
+    ${s.open_orders.length ? `<div class="now-orders"><b>${s.open_orders.length}</b> open order${s.open_orders.length > 1 ? "s" : ""} waiting for a fill</div>` : ""}
     <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span><span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span></li>`).join("")}</ul>`;
 }
 const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+
+// ---------------------------------------------------------------- pipeline: why the desk is (not) trading
+function renderPipeline(s) {
+  const p = s.pipeline;
+  if (!p) return;
+  const v = tradingVerdict(s);
+  const live = p.live.strategies + p.live.probes;
+  const steps = [
+    ["Tested", p.finished, `${p.experiments} started`],
+    ["Profitable on test", p.profitable, "net of costs"],
+    ["Passed all gates", p.passed, "full allocation"],
+    ["Live", live, `${p.live.probes} probe${p.live.probes === 1 ? "" : "s"} included`],
+    ["Positions", s.positions.length, s.open_orders.length ? `${s.open_orders.length} order${s.open_orders.length > 1 ? "s" : ""} pending` : "open now"],
+  ];
+  const maxFail = Math.max(1, ...p.gate_failures.map((g) => g.n));
+  const probe = p.probe;
+  $("#pipeline-window").textContent = `last ${p.window_days} days`;
+  $("#pipeline-body").innerHTML = `
+    <div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(v.text)}</p></div>
+    <ol class="funnel">${steps.map(([label, n, sub], i) => `<li class="${n > 0 ? "has" : ""}${i === steps.length - 1 && n > 0 ? " goal" : ""}">
+      <span class="funnel-n num">${n}</span><span class="funnel-label">${label}</span><small>${esc(sub)}</small></li>`).join("")}</ol>
+    <div class="pipeline-grid">
+      <div><h3>Closest to trading</h3>
+        ${p.candidates.length ? `<ul class="cands">${p.candidates.map((c) => `<li>
+          <div class="cand-main"><a href="#" data-exp="${c.id}">#${c.id} ${esc(c.title)}</a>
+            <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · ${c.failed.length ? `${c.failed.length}/${c.n_checks} gates failed` : "all gates passed"}</small></div>
+          <span class="cand-ret num ${signCls(c.test_return)}">${pct(c.test_return, 1)}</span>
+          ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` :
+            `<button class="btn small ${c.test_return > 0 ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Auto-probe skipped: " + c.probe_blocker : "Paper-trade this idea now with a small probe allocation")}">Start probe</button>`}</li>`).join("")}</ul>`
+          : `<p class="muted">No finished experiments in this window.</p>`}</div>
+      <div><h3>What blocks ideas</h3>
+        ${p.gate_failures.length ? `<ul class="bars">${p.gate_failures.slice(0, 6).map((g) => `<li><span>${esc(gateLabel(g.gate))}</span>
+          <span class="bar"><i style="width:${(g.n / maxFail * 100).toFixed(0)}%"></i></span><span class="num">${g.n}</span></li>`).join("")}</ul>`
+          : `<p class="muted">No gate failures recorded.</p>`}
+        <p class="probe-rule">${probe.enabled ? `<b>Probes on.</b> An idea that made more than ${pct(probe.min_test_return, 1)} on its sealed test gets ${pct(probe.allocation_pct, 0, false)} of equity for ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day}/venue/day).`
+          : `<b>Probes off.</b> Only ideas that pass every gate trade.`} <a href="#records" data-nav="system">Change</a></p></div>
+    </div>`;
+}
 function evidenceLinks(ev) {
   return (ev || []).map((r) => {
     const [t, id] = String(r).split(":");
@@ -302,7 +340,7 @@ function renderBeliefs(s) {
     $("#beliefs").innerHTML = `<div class="belief-placeholder"><span class="empty-symbol">${researchIcon}</span><div><b>Evidence before conviction.</b><p>No evidence-backed beliefs yet. A thesis only appears here when it cites an experiment, strategy, or trade record. Until then, the desk stays open-minded.</p></div></div>`;
     return;
   }
-  $("#beliefs").innerHTML = s.beliefs.slice(0, 5).map((b) => `<div class="belief">
+  $("#beliefs").innerHTML = s.beliefs.slice(0, 3).map((b) => `<div class="belief">
     <div><span class="conf">${esc(b.confidence)}</span>${rich(b.statement)}</div>
     <div class="evidence muted">Evidence: ${evidenceLinks(b.evidence)} · ${esc(b.venue || "")} · ${authorLabel(b.author)} · ${ago(b.ts)}</div></div>`).join("");
 }
@@ -313,10 +351,9 @@ function renderPositions(s) {
   const p = s.positions;
   $("#pos-summary").textContent = p.length ? `${p.length} position${p.length > 1 ? "s" : ""} · ${money(s.account.gross)}` : "All cash";
   if (!p.length) {
-    $("#positions").innerHTML = emptyState("Sometimes, cash is the position.", s.strategies.length ?
-      "No open positions. Approved strategies are waiting for their entry rules; the normal risk checks still apply." :
-      "No strategy has cleared testing yet. The desk keeps capital in cash until an idea qualifies.",
-      '<a class="btn small" href="#records" data-nav="research">Explore the research <span aria-hidden="true">↗</span></a>');
+    $("#positions").innerHTML = `<div class="empty compact">${s.strategies.length ?
+      "All cash. Live sleeves are waiting for their entry rules on the next bar close." :
+      "All cash. Nothing is live yet; see the pipeline above for why."}</div>`;
     return;
   }
   const rows = p.map((r, i) => {
@@ -324,7 +361,7 @@ function renderPositions(s) {
     const open = openPos.has(key);
     return `<tr class="clickable" data-pos="${esc(key)}">
       <td><b>${esc(r.symbol)}</b><div class="muted" style="font-size:12px">${esc(r.venue)}</div></td>
-      <td>${esc(r.strategy)}</td>
+      <td>${esc(r.strategy)}${r.probe ? ' <span class="probe-chip">probe</span>' : ""}</td>
       <td class="r num">${qty(r.qty)}</td>
       <td class="r num">${px(r.avg_cost)}</td>
       <td class="r num">${px(r.mark)}<div class="muted" style="font-size:11px">${esc((r.mark_basis || "").replace("_", " "))} · ${ago(r.mark_as_of)}</div></td>
@@ -390,7 +427,8 @@ function gatesCell(e) {
   if (e.error && !e.gates) return `<span class="muted">could not run</span>`;
   const failed = e.gates?.failed || [], total = e.gates?.checks?.length || 9;
   if (!failed.length) return `<span class="up">all ${total} passed</span>`;
-  return `<b>${failed.length}/${total} failed</b><div class="chips">${failed.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}</div>`;
+  const shown = failed.slice(0, 2);
+  return `<span class="gate-count">${total - failed.length}/${total}</span><div class="chips">${shown.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}${failed.length > shown.length ? `<span class="gchip more" title="${esc(failed.slice(2).map(gateLabel).join(", "))}">+${failed.length - shown.length}</span>` : ""}</div>`;
 }
 
 async function renderResearch(body, version) {
@@ -400,23 +438,22 @@ async function renderResearch(body, version) {
   const passed = ex.filter((e) => e.status === "passed").length;
   body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
     <span class="summary-count"><span class="up">${passed}</span> passed</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} failed</span></div>
-    <div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>Hypothesis</th><th>Venue</th><th>Status</th><th class="r">Test return</th>
-    <th class="r">Test Sharpe</th><th class="r">Trades</th><th>Gates</th><th>When</th></tr></thead><tbody>
-    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num">${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted" style="font-size:11.5px">${authorLabel(e.author)}</div></td>
-      <td>${esc(e.venue)}</td><td><span class="status ${esc(e.status)}">${esc(e.status)}</span></td>
+    <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr><th>#</th><th>Hypothesis</th><th>Status</th><th class="r">Test return</th>
+    <th class="r">Sharpe</th><th class="r">Trades</th><th>Gates passed</th></tr></thead><tbody>
+    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num">${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted" style="font-size:11.5px">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
+      <td><span class="status ${esc(e.status)}">${esc(e.status)}</span>${e.strategy_id ? `<div class="muted" style="font-size:11.5px;margin-top:4px">${e.strategy_probe ? "probe" : "strategy"} #${e.strategy_id}</div>` : ""}</td>
       <td class="r num ${signCls(e.test?.total_return)}">${pct(e.test?.total_return)}</td><td class="r num">${num(e.test?.sharpe)}</td>
-      <td class="r num">${e.test?.n_trades ?? "–"}</td><td class="gates" style="font-size:12px">${gatesCell(e)}</td>
-       <td class="muted" style="white-space:nowrap">${ago(e.created_at)}</td></tr>`).join("")}</tbody></table></div>
-    <div class="research-note">A rejected idea is a recorded result, not a missing trade. Open an experiment to inspect its hypothesis, sealed test, and acceptance gates.</div>`;
+      <td class="r num">${e.test?.n_trades ?? "–"}</td><td class="gates" style="font-size:12px">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates, or to start it as a probe.</div>`;
 }
 
 async function renderStrategies(body, version) {
   const st = await api("/api/strategies");
   if (version !== state.tabVersion) return;
-  if (!st.length) { body.innerHTML = emptyState("A strategy earns its place.", "No approved strategies yet. An experiment must pass every acceptance gate on its sealed test window before it can enter this portfolio."); return; }
+  if (!st.length) { body.innerHTML = emptyState("Nothing live yet.", "A strategy goes live when an experiment passes every gate. A probe goes live when an idea made money on its sealed test but missed a gate; you can also start one from any experiment."); return; }
   body.innerHTML = `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>Strategy</th><th>Status</th><th class="r">Allocation</th><th class="r">Live return</th>
     <th class="r">Expected (test CAGR)</th><th class="r">Fills</th><th class="r">Avg slippage</th><th></th></tr></thead><tbody>
-    ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b><a href="#" data-strat="${s.id}">${esc(s.name)} v${s.version}</a></b><div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div></td>
+    ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b><a href="#" data-strat="${s.id}">${esc(s.name)} v${s.version}</a></b>${s.probe ? ' <span class="probe-chip">probe</span>' : ""}<div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div></td>
       <td><span class="status ${esc(s.status)}">${esc(s.status)}</span></td>
       <td class="r num">${money(s.allocation)}<div class="muted" style="font-size:11px">approved ${money(s.approved_allocation)}</div></td>
       <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted" style="font-size:11px">${s.live.days_live}d live</div></td>
@@ -499,6 +536,16 @@ const LIMIT_FIELDS = [
   ["gates", "min_neighbor_positive_frac", "Gate: min share of positive neighbours"],
   ["gates", "min_subperiod_positive_frac", "Gate: min share of positive sub-periods"],
   ["gates", "max_top5_concentration", "Gate: max top-5 trade concentration"],
+  ["research", "deflation_window_days", "Deflated PSR: count trials from last (days)"],
+  ["probe", "enabled", "Probes enabled", "bool"], ["probe", "allocation_pct", "Probe size (fraction of equity)"],
+  ["probe", "max_active", "Max probes at once"], ["probe", "per_venue_per_day", "Max new probes / venue / day"],
+  ["probe", "min_test_return", "Probe: min sealed-test return"], ["probe", "lifetime_days", "Probe lifetime (days)"],
+];
+const LIMIT_GROUPS = [
+  ["Risk", "Hard limits the risk engine applies to every order.", ["risk"]],
+  ["Probes", "Small forward-paper trials of ideas that made money on their sealed test but missed a gate.", ["probe"]],
+  ["Acceptance gates", "Every gate must pass for a full allocation.", ["gates", "research"]],
+  ["AI budget & schedule", "", ["budget", "schedule"]],
 ];
 async function renderSystem(body, version) {
   const sys = await api("/api/system");
@@ -513,8 +560,11 @@ async function renderSystem(body, version) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn" data-gate-preset="exploratory">Use exploratory gates</button>
         <button class="btn" data-gate-preset="strict">Use strict gates</button></div>
-      <form id="limits"><div class="form-grid">${LIMIT_FIELDS.map(([g, k, l]) => `<div class="field"><label for="limit-${g}-${k}">${esc(l)}</label>
-        <input id="limit-${g}-${k}" data-g="${g}" data-k="${k}" value="${esc(v(g, k))}" inputmode="decimal" required></div>`).join("")}</div>
+      <form id="limits">${LIMIT_GROUPS.map(([title, note, groups]) => `<fieldset class="limit-group"><legend>${esc(title)}</legend>
+        ${note ? `<p class="muted limit-note">${esc(note)}</p>` : ""}<div class="form-grid">${LIMIT_FIELDS.filter(([g]) => groups.includes(g)).map(([g, k, l, type]) => type === "bool" ?
+        `<div class="field check"><label for="limit-${g}-${k}"><input type="checkbox" id="limit-${g}-${k}" data-g="${g}" data-k="${k}" data-bool="1" ${v(g, k) ? "checked" : ""}> ${esc(l)}</label></div>` :
+        `<div class="field"><label for="limit-${g}-${k}">${esc(cap(l.replace(/^(Gate|Probe): /, "")))}</label>
+        <input id="limit-${g}-${k}" data-g="${g}" data-k="${k}" value="${esc(v(g, k))}" inputmode="decimal" required></div>`).join("")}</div></fieldset>`).join("")}
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn" type="submit">Save limits</button>
         <span class="muted" style="font-size:12px">Hard ceilings: position ≤ ${pct(sys.ceilings.ceiling_max_position_pct, 0, false)}, gross ≤ ${pct(sys.ceilings.ceiling_max_gross_pct, 0, false)} (no leverage),
         order ≤ ${money(sys.ceilings.ceiling_max_order_usd)}, LLM ≤ ${money(sys.ceilings.ceiling_monthly_llm_usd)}/mo.</span></div></form></div>
@@ -539,9 +589,12 @@ async function renderSystem(body, version) {
   $("#limits").addEventListener("submit", async (e) => {
     e.preventDefault();
     const groups = {};
-    const inputs = [...e.target.querySelectorAll("input")];
+    const inputs = [...e.target.querySelectorAll("input:not([data-bool])")];
     if (inputs.some((i) => !i.value.trim() || !Number.isFinite(Number(i.value)))) { toast("Every limit must be a finite number."); return; }
-    e.target.querySelectorAll("input").forEach((i) => {
+    e.target.querySelectorAll("input[data-bool]").forEach((i) => {
+      if (i.checked !== Boolean(v(i.dataset.g, i.dataset.k))) (groups[i.dataset.g] ||= {})[i.dataset.k] = i.checked;
+    });
+    inputs.forEach((i) => {
       const val = Number(i.value); if (Number.isNaN(val)) return;
       if (val !== Number(v(i.dataset.g, i.dataset.k))) (groups[i.dataset.g] ||= {})[i.dataset.k] = val;
     });
@@ -630,7 +683,11 @@ async function openExperiment(id) {
       ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">strategy ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.status)})</a>` : ""}</div>
     ${e.test && !e.strategy && e.status !== "running" ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
-      <button class="btn primary" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>` : ""}
+      <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>
+    <div class="rejudge-box probe-box"><div><b>Paper-trade it as a probe</b>
+      <p>Starts a small, clearly-labelled forward test with ${pct(state.s?.pipeline?.probe.allocation_pct ?? 0.03, 0, false)} of equity for ${state.s?.pipeline?.probe.lifetime_days ?? 14} days.
+      Uses the frozen rules and the normal risk checks. ${(e.test.total_return ?? 0) > 0 ? "It made money on its sealed test." : "<b>It lost money on its sealed test</b>, so expect the same unless conditions changed."}</p></div>
+      <button class="btn primary" data-probe="${e.id}">Start probe</button></div>` : ""}
     <div class="section"><h4>Hypothesis (recorded before testing)</h4><div class="pre">${rich(h.rationale)}</div>
       <p><b>Prediction:</b> ${rich(h.prediction)}<br><b>Would drop it if:</b> ${rich(h.falsification)}</p></div>
     <div class="section"><h4>Rules</h4><div style="font-size:13px">Entry <code>${esc(spec.entry || "custom code")}</code><br>Exit <code>${esc(spec.exit || "custom code")}</code>
@@ -669,7 +726,7 @@ async function openStrategy(id) {
   const s = await api(`/api/strategies/${encodeURIComponent(id)}`);
   const sp = s.spec || {};
   drawer(`Strategy ${s.name} v${s.version}`, `
-    <div class="section"><span class="status ${esc(s.status)}">${esc(s.status)}</span> <span class="muted">· ${esc(s.venue)} · approved ${dt(s.created_at)} · from <a href="#" data-exp="${s.experiment_id}">experiment #${s.experiment_id}</a></span></div>
+    <div class="section"><span class="status ${esc(s.status)}">${esc(s.status)}</span>${s.probe ? ' <span class="probe-chip">probe</span>' : ""} <span class="muted">· ${esc(s.venue)} · approved ${dt(s.created_at)} · from <a href="#" data-exp="${s.experiment_id}">experiment #${s.experiment_id}</a></span></div>
     <div class="section"><h4>Thesis (recorded at approval)</h4><div class="pre">${rich(s.thesis)}</div></div>
     <div class="section"><h4>Exit plan & invalidation</h4><div class="pre">${rich(s.exit_plan)}</div><div class="secondary" style="font-size:13px;margin-top:6px">${esc(JSON.stringify(s.invalidation))}</div></div>
     <div class="section"><h4>Rules (frozen)</h4><div style="font-size:13px">Entry <code>${esc(sp.entry || "code")}</code><br>Exit <code>${esc(sp.exit || "code")}</code><br>
@@ -699,6 +756,19 @@ async function openLLM(id) {
     <div class="section"><h4>Response</h4><pre class="pre" style="font-size:12px">${esc(c.response || "")}</pre></div>`);
 }
 document.addEventListener("click", async (e) => {
+  const pr = e.target.closest("[data-probe]");
+  if (pr) {
+    e.preventDefault(); e.stopPropagation();
+    if (!confirm(`Paper-trade experiment #${pr.dataset.probe} as a probe? It gets a small allocation and the normal risk checks.`)) return;
+    pr.disabled = true;
+    try {
+      await api(`/api/control/probe_${pr.dataset.probe}`, { method: "POST" });
+      toast(`Starting probe for #${pr.dataset.probe}`, { tone: "good", detail: "The worker starts it within ~15 seconds; it trades from the next bar close." });
+      if (closeDrawer) closeDrawer();
+      setTimeout(refresh, 16000);
+    } catch (err) { toast(err.message); pr.disabled = false; }
+    return;
+  }
   const rj = e.target.closest("[data-rejudge]");
   if (rj) {
     if (!confirm(`Re-judge experiment #${rj.dataset.rejudge} under the current gates? Only the gate check and decision run again.`)) return;
@@ -810,7 +880,7 @@ async function refresh() {
   try {
     const s = await api("/api/state"); state.s = s;
     state.lastRefresh = Date.now() / 1000; $("#connection-alert").classList.add("hidden");
-    renderBadges(s); renderAlerts(s); renderKPIs(s); renderNow(s); renderBeliefs(s); renderPositions(s);
+    renderBadges(s); renderAlerts(s); renderKPIs(s); renderPipeline(s); renderNow(s); renderBeliefs(s); renderPositions(s);
   } catch (err) {
     if (err.message !== "login required") {
       $("#desk-health").className = "desk-health bad";

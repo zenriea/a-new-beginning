@@ -37,7 +37,7 @@ def test_partial_room_starts_smaller(env):
     assert s["status"] == "active" and s["allocation"] == 4000 and s["approved_allocation"] == 20000
 
 
-def test_allocate_with_zero_percent_is_a_reject(env, monkeypatch):
+def test_passing_test_with_zero_percent_gets_the_minimum_allocation(env, monkeypatch):
     from quantdesk import db
     from quantdesk.agent import research_loop
     from quantdesk.agent.analyst import RulesAnalyst
@@ -52,8 +52,9 @@ def test_allocate_with_zero_percent_is_a_reject(env, monkeypatch):
         return dict(d, decision="allocate", allocation_pct=0.0), c
     monkeypatch.setattr(RulesAnalyst, "decide", zero)
     out = research_loop.research_cycle("NASDAQ", analyst=RulesAnalyst())
-    assert out["decision"] == "reject"
-    assert db.q1("SELECT COUNT(*) n FROM strategies")["n"] == 0
+    assert out["decision"] == "allocate"   # the gates admit; the analyst only sizes
+    s = db.q1("SELECT * FROM strategies")
+    assert s["approved_allocation"] == 5000 and s["probe"] == 0
 
 
 def test_review_increase_respects_total_allocation_limit(env):

@@ -276,6 +276,21 @@ DEFAULT_SETTINGS: dict = {
         "incubation_fraction": 0.5,  # new strategies start with this share of approved allocation
         "min_live_days_before_increase": 10,
         "observation_blinding": True,  # hypothesis context excludes data the test window could use
+        # Deflated PSR counts earlier experiments whose test window overlaps this one. Counting every
+        # experiment ever run ratchets the bar up forever (after ~100 trials it needs Sharpe 3-4), so
+        # only trials from this many recent days count.
+        "deflation_window_days": 7,
+    },
+    # Probe strategies: small forward-paper trials of ideas that made money on their sealed test but
+    # did not clear every gate. They exist to gather live evidence, are labelled PROBE everywhere,
+    # and retire themselves after lifetime_days.
+    "probe": {
+        "enabled": True,
+        "allocation_pct": 0.03,        # of equity, per probe (no incubation haircut)
+        "max_active": 3,
+        "min_test_return": 0.0,        # sealed-test net return must be above this
+        "per_venue_per_day": 1,
+        "lifetime_days": 14,
     },
     "gates": dict(GATE_PRESETS["exploratory"]),
     "agent": {"paused": False, "emergency_stop": False},
@@ -312,6 +327,12 @@ SETTING_BOUNDS: dict = {
     ("research", "max_param_combos"): (1, 12),
     ("research", "incubation_fraction"): (0.01, 1.0),
     ("research", "min_live_days_before_increase"): (1, 365),
+    ("research", "deflation_window_days"): (1, 3650),
+    ("probe", "allocation_pct"): (0.0, "ceiling_max_strategy_pct"),
+    ("probe", "max_active"): (0, 20),
+    ("probe", "min_test_return"): (-1.0, 10.0),
+    ("probe", "per_venue_per_day"): (0, 24),
+    ("probe", "lifetime_days"): (1, 365),
     ("gates", "min_test_trades"): (1, 1000),
     ("gates", "min_test_sharpe"): (-5.0, 5.0),
     ("gates", "min_val_sharpe"): (-5.0, 5.0),

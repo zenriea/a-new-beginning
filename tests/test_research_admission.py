@@ -124,9 +124,11 @@ def _no_experiments():
 def test_parameterless_proposal_is_repaired_before_an_experiment(env):
     import json
     from quantdesk import db
+    from quantdesk import settings
     from quantdesk.agent.research_loop import research_cycle
     _seed()
-    # A rejection avoids making the test depend on the generated market's performance.
+    # A rejection (and no probe) avoids making the test depend on the generated market's performance.
+    settings.operator_update("probe", {"enabled": False})
     decision = {"decision": "reject", "journal": "Not allocating.", "lessons": [], "allocation_pct": 0,
                 "thesis": "", "exit_plan": "",
                 "invalidation": {"max_live_drawdown_pct": 0.1, "review_after_days": 7,
