@@ -41,9 +41,9 @@ def compat(env, monkeypatch):
     from quantdesk.agent import llm
     from quantdesk.config import load_config
     cfg = load_config(reload=True)
-    llm._compat_quirks.clear()
+    llm._compat_quirks.clear(); llm._benched_until.clear(); llm._too_large.clear()
     yield cfg
-    llm._compat_quirks.clear()
+    llm._compat_quirks.clear(); llm._benched_until.clear(); llm._too_large.clear()
 
 
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["answer", "n"],
@@ -150,8 +150,9 @@ def test_router_free_first_fallback_and_second_opinion(compat, monkeypatch):
     from quantdesk import db
     from quantdesk.agent import analyst as A
     from quantdesk.agent.llm import LLM, Router, free_helpers
-    monkeypatch.setenv("GROQ_API_KEY", "gk")
-    assert [h.route["name"] for h in free_helpers()] == ["groq"]
+    monkeypatch.setenv("GROQ_API_KEY", "gk")                  # Groq's 8k tokens/minute cap is below our prompts
+    monkeypatch.setenv("OPENROUTER_API_KEY", "ok")
+    assert [h.route["name"] for h in free_helpers()] == ["openrouter"]
     route = lambda n: {"name": n, "base_url": f"https://{n}.example/v1", "api_key": "k", "model": f"{n}-free"}
     free = FakeServer([Resp(401, text="bad key"), ok('{"answer": "free", "n": 2}', model="b-free")])
     paid = FakeServer([ok('{"answer": "paid", "n": 1}')])
@@ -171,3 +172,26 @@ def test_router_free_first_fallback_and_second_opinion(compat, monkeypatch):
     assert "Second opinion: c-free said reject" in got["journal"]
     r = Router(LLM(http_post=FakeServer([dec("allocate")])), [LLM(http_post=FakeServer([dec("allocate")]), route=route("d"))])
     assert A.LLMAnalyst(r).decide({})[0]["decision"] == "allocate"
+
+
+def test_helper_with_persistent_failure_is_benched(compat, monkeypatch):
+    """Daily quota, a retired free model or a prompt above the tokens-per-minute cap will fail
+    again on the next call: no retries, and the router skips that helper for a while."""
+    from quantdesk import clock
+    from quantdesk.agent.llm import LLM, LLMError, Router
+    sleeps = []
+    monkeypatch.setattr(LLM, "_sleep", staticmethod(lambda s: sleeps.append(s)))
+    route = lambda n: {"name": n, "base_url": f"https://{n}.example/v1", "api_key": "k", "model": f"{n}-free"}
+    quota = FakeServer([Resp(429, text='{"message": "You exceeded your current quota ... requests per day"}')])
+    gone = FakeServer([Resp(404, text='{"message": "This model is unavailable for free."}')])
+    big = FakeServer([Resp(413, text='{"message": "Request too large ... tokens per minute (TPM)"}')])
+    paid = FakeServer([ok('{"answer": "paid", "n": 1}')] * 2)
+    helpers = [LLM(http_post=quota, route=route("g")), LLM(http_post=gone, route=route("o")),
+               LLM(http_post=big, route=route("q"))]
+    r = Router(LLM(http_post=paid), helpers)
+    assert r.call("question", "s", "u", SCHEMA)[0]["answer"] == "paid"
+    assert sleeps == [] and len(quota.requests) == 1                 # quota errors are not retried
+    assert r.call("question", "s", "u", SCHEMA)[0]["answer"] == "paid"
+    assert len(quota.requests) == len(gone.requests) == len(big.requests) == 1   # benched, not called again
+    monkeypatch.setattr(clock, "now", lambda: __import__("time").time() + 7 * 3600)
+    assert [h.benched for h in helpers] == [False, False, False]     # back after the cool-down

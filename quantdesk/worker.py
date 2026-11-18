@@ -95,7 +95,7 @@ def recover(prev_heartbeat: float | None) -> dict:
                       "The idea can be re-tested as a new experiment.", refs={"experiment_id": e["id"]}, author="system",
                       dedupe_key=f"interrupted:{e['id']}")
     db.ex("DELETE FROM jobs WHERE name='research'")  # pre-0.2 shared research clock, replaced by research:<venue>
-    info["retired_for_bar_size"] = retire_on_timeframe_change()
+    info["retired_for_bar_size"] = retire_on_timeframe_change() + retire_stale_bar_size_strategies()
     chk = ledger.integrity_check()
     info["integrity"] = chk
     if not chk["ok"]:
@@ -124,6 +124,25 @@ def retire_on_timeframe_change() -> list[int]:
                           refs={"strategy_id": s["id"]}, author="system")
             out.append(s["id"])
         db.set_meta(key, v.timeframe)
+    return out
+
+
+def retire_stale_bar_size_strategies() -> list[int]:
+    """Catches strategies the one-off check above missed: ones started after the bar-size change
+    from an experiment that was run before it (e.g. a probe of an old daily-bar experiment)."""
+    from .agent.research_loop import bar_size_mismatch
+    out = []
+    for s in db.q("SELECT s.*, e.windows AS exp_windows FROM strategies s JOIN experiments e ON e.id=s.experiment_id "
+                  "WHERE s.status IN ('active','incubating')"):
+        s = dict(s)
+        why = bar_size_mismatch({"venue": s["venue"], "windows": s.pop("exp_windows")})
+        if not why:
+            continue
+        live.retire_strategy(s, "tested on another bar size", origin="system")
+        journal.write("decision", f"Retired {s['name']} v{s['version']}: tested on another bar size",
+                      f"Experiment {s['experiment_id']} {why}. Its positions are being closed; research will test "
+                      "new ideas on the current bars.", refs={"strategy_id": s["id"]}, author="system")
+        out.append(s["id"])
     return out
 
 

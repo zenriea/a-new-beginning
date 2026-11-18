@@ -6,7 +6,8 @@ import pytest
 from conftest import make_strategy
 
 
-def _experiment(ret=0.05, status="failed", venue="CRYPTO", trades=40, created_at=None, failed=("deflated_psr",)):
+def _experiment(ret=0.05, status="failed", venue="CRYPTO", trades=40, created_at=None, failed=("deflated_psr",),
+                bar_seconds=None):
     from quantdesk import clock, db
     now = clock.now() if created_at is None else created_at
     hid = db.ex("INSERT INTO hypotheses(created_at, venue, title, rationale, prediction, falsification, status, author, "
@@ -15,7 +16,8 @@ def _experiment(ret=0.05, status="failed", venue="CRYPTO", trades=40, created_at
             "exit": "close < 0", "sizing": {"method": "fixed", "weight": 0.5}, "params": {}}
     test = {"total_return": ret, "sharpe": 1.1, "n_trades": trades, "max_drawdown": -0.04}
     gates = {"passed": status == "passed", "checks": [{"name": f, "pass": False} for f in failed], "failed": list(failed)}
-    w = {"test": {"start": int(now) - 86400 * 30, "end": int(now), "bars": 100}}
+    bar_seconds = bar_seconds or (900 if venue == "CRYPTO" else 4800)   # calendar time per 15m bar
+    w = {"test": {"start": int(now) - bar_seconds * 2000, "end": int(now), "bars": 2000}}
     return db.ex("INSERT INTO experiments(hypothesis_id, created_at, venue, kind, spec, spec_hash, status, frozen_at, windows, "
                  "chosen_params, train, validation, test, challenge, gates, leakage, completed_at) "
                  "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -164,3 +166,29 @@ def test_strategy_api_lists_symbols_with_holdings(env):
     assert syms["AAPL"]["qty"] == 10 and syms["AAPL"]["value"] == 1100 and syms["AAPL"]["unrealized"] == 100
     assert syms["MSFT"]["qty"] == 0 and syms["MSFT"]["pending"] is None
     assert c.get("/api/strategies").json()[0]["symbols"][0]["symbol"] == "AAPL"
+
+
+def test_experiment_tested_on_another_bar_size_cannot_probe(env):
+    """An idea tested on daily bars means something else on 15-minute bars (sma(close, 100) = 100 days
+    vs ~4 days), so neither the desk nor the operator may paper-trade it."""
+    from quantdesk import db
+    from quantdesk.agent.research_loop import auto_probe, probe_blocker, start_probe
+    eid = _experiment(ret=0.2, venue="NASDAQ", bar_seconds=125_000)          # daily-bar era experiment
+    e = dict(db.q1("SELECT * FROM experiments WHERE id=?", (eid,)))
+    assert "bar size" in probe_blocker(e) and "bar size" in probe_blocker(e, operator=True)
+    assert auto_probe("NASDAQ", eid) is None and start_probe(eid) is None
+    ok = _experiment(ret=0.2, venue="NASDAQ", bar_seconds=4800)               # 15-minute NASDAQ bars
+    assert probe_blocker(dict(db.q1("SELECT * FROM experiments WHERE id=?", (ok,)))) is None
+
+
+def test_worker_retires_live_strategy_from_another_bar_size(env):
+    from quantdesk import db
+    from quantdesk.agent.research_loop import start_probe
+    from quantdesk.worker import retire_stale_bar_size_strategies
+    eid = _experiment(ret=0.2, venue="NASDAQ", bar_seconds=4800)
+    sid = start_probe(eid)
+    db.ex("UPDATE experiments SET windows=? WHERE id=?",
+          (json.dumps({"test": {"start": 0, "end": 125_000 * 300, "bars": 300}}), eid))
+    assert retire_stale_bar_size_strategies() == [sid]
+    assert db.q1("SELECT status FROM strategies WHERE id=?", (sid,))["status"] == "retired"
+    assert retire_stale_bar_size_strategies() == []
