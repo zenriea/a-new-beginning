@@ -150,8 +150,9 @@ def test_router_free_first_fallback_and_second_opinion(compat, monkeypatch):
     from quantdesk import db
     from quantdesk.agent import analyst as A
     from quantdesk.agent.llm import LLM, Router, free_helpers
-    monkeypatch.setenv("GROQ_API_KEY", "gk")
-    assert [h.route["name"] for h in free_helpers()] == ["groq"]
+    monkeypatch.setenv("GROQ_API_KEY", "gk")                  # Groq's 8k tokens/minute cap is below our prompts
+    monkeypatch.setenv("OPENROUTER_API_KEY", "ok")
+    assert [h.route["name"] for h in free_helpers()] == ["openrouter"]
     route = lambda n: {"name": n, "base_url": f"https://{n}.example/v1", "api_key": "k", "model": f"{n}-free"}
     free = FakeServer([Resp(401, text="bad key"), ok('{"answer": "free", "n": 2}', model="b-free")])
     paid = FakeServer([ok('{"answer": "paid", "n": 1}')])

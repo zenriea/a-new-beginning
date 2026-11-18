@@ -411,7 +411,6 @@ class LLM:
 # overridden because free model line-ups change often.
 FREE_PRESETS = {
     "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-3.8-flash"),
-    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "QD_GROQ_MODEL", "openai/gpt-oss-120b"),
     "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free"),
 }
 # Frequent, long-prompt work goes to free models first; the paid model is the fallback.
