@@ -190,7 +190,7 @@ def activate_waiting() -> list[int]:
     frac = settings.get("research")["incubation_fraction"]
     out = []
     for s in db.q("SELECT * FROM strategies WHERE status='incubating' AND allocation <= 0 ORDER BY id"):
-        start = min(s["approved_allocation"] * frac, allocation_room())
+        start = min(s["approved_allocation"] * (1.0 if s["probe"] else frac), allocation_room())
         if start < lim["min_order_usd"]:
             continue
         now = clock.now()

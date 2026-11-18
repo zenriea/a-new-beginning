@@ -94,3 +94,16 @@ test("All retains every real snapshot without inventing history", () => {
 test("a stale account has an empty recent range rather than relabelled old data", () => {
   assert.deepEqual(equityInRange(rows, "day", now + 2 * 86400), []);
 });
+
+test("trading verdict explains why nothing trades", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const base = () => ({ controls: { emergency_stop: false, paused: false }, worker: { alive: true }, positions: [],
+    pipeline: { finished: 4, live: { strategies: 0, probes: 0 }, gate_failures: [{ gate: "test_sharpe", n: 4 }],
+      candidates: [{ id: 7, test_return: -0.02 }] } });
+  assert.match(tradingVerdict(base()).text, /None of the 4 experiments made money.*test sharpe \(4×\)/);
+  const s = base(); s.pipeline.candidates[0] = { id: 9, test_return: 0.031, probe_blocker: "3 probe(s) already running (limit 3)" };
+  assert.match(tradingVerdict(s).text, /#9 made \+3\.1%.*already running/);
+  s.pipeline.live.probes = 1; assert.equal(tradingVerdict(s).tone, "ok");
+  s.positions = [{}]; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 live sleeve\./);
+  s.controls.emergency_stop = true; assert.equal(tradingVerdict(s).tone, "bad");
+});

@@ -85,7 +85,10 @@ def test_research_cycle_records_in_order_and_enforces_gates(env):
     assert h["created_at"] <= e["created_at"] <= e["frozen_at"] <= e["completed_at"]
     gates = json.loads(e["gates"])
     if not gates["passed"]:
-        assert res["decision"] == "reject" and db.q1("SELECT COUNT(*) n FROM strategies")["n"] == 0
+        # no full allocation; a small probe may start if the sealed test was profitable
+        assert res["decision"] == "reject" and db.q1("SELECT COUNT(*) n FROM strategies WHERE probe=0")["n"] == 0
+        test = json.loads(e["test"])
+        assert bool(res.get("probe_strategy_id")) == (test["total_return"] > 0 and test["n_trades"] >= 8)
     else:
         s = db.q1("SELECT * FROM strategies")
         assert s["approved_allocation"] <= 0.25 * 100000 + 1   # capped by operator limit, not 90%

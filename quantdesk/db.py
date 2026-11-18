@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS strategies (
   allocation REAL NOT NULL, thesis TEXT NOT NULL, exit_plan TEXT NOT NULL,
   expectations TEXT NOT NULL, invalidation TEXT NOT NULL, created_at REAL NOT NULL,
   activated_at REAL, retired_at REAL, retire_reason TEXT, last_signal_bar INTEGER,
-  last_review_at REAL);
+  last_review_at REAL, probe INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE IF NOT EXISTS strategy_state (
   strategy_id INTEGER NOT NULL, symbol TEXT NOT NULL, in_position INTEGER NOT NULL,
@@ -164,11 +164,19 @@ def init(db_path: Path) -> None:
     _db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect()
     conn.executescript(SCHEMA)
+    _migrate(conn)
     cur = conn.execute("SELECT value FROM meta WHERE key='schema_version'")
     row = cur.fetchone()
     if row is None:
         conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive column migrations for databases created by older versions."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(strategies)")}
+    if "probe" not in cols:
+        conn.execute("ALTER TABLE strategies ADD COLUMN probe INTEGER NOT NULL DEFAULT 0")
 
 
 def connect() -> sqlite3.Connection:

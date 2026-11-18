@@ -18,16 +18,17 @@ virtual money.
 | Panel | Shows |
 |---|---|
 | Top bar | PAPER badge, analyst mode (AI model and provider, or **DEMO rules engine**), data mode, worker health, NASDAQ session and countdown, API spend vs. budget, Pause / Emergency stop |
-| KPIs | Equity, P&L **after costs**, excess return vs. QQQ buy-and-hold, drawdown vs. limit, exposure, costs paid |
-| Equity chart | Account vs. QQQ and BTC buy-and-hold of the same $100k |
-| What I'm doing | Current activity, latest experiment, scheduled next actions |
-| What I believe | Current views, each linked to the experiments or trades that support it (beliefs without verifiable evidence are discarded) |
-| Positions | Click a row to see why it entered (written *before* the fill), the exact exit rules, and the exit plan |
-| Research | Every experiment: hypothesis, frozen rules, train/validation/test split, metrics, stress tests, gate checklist, leakage notes, decision, lessons |
-| Strategies | Live strategies: allocation, live return vs. expectation, slippage, reviews |
+| KPIs | Equity, P&L **after costs**, exposure and drawdown vs. their limits |
+| Trading pipeline | One sentence on why the desk is or is not trading, the last 7 days as a funnel (tested → profitable on test → passed gates → live → positions), the ideas closest to trading with a **Start probe** button, and which gates block ideas most often |
+| Positions | Click a row to see why it entered (written *before* the fill), the exact exit rules, and the exit plan; probe sleeves are labelled |
+| Equity chart | Account vs. QQQ and BTC buy-and-hold of the same $100k, plus excess return and fees |
+| Agent activity | Current activity, open orders and scheduled next actions |
+| Beliefs | Current views, each linked to the experiments or trades that support it (beliefs without verifiable evidence are discarded) |
+| Research | Every experiment: hypothesis, frozen rules, train/validation/test split, metrics, stress tests, gate checklist, leakage notes, decision, lessons; re-judge or start a probe from the drawer |
+| Strategies | Live strategies and probes: allocation, live return vs. expectation, slippage, reviews |
 | Orders & fills | Intents (with rationale and risk-engine checks) kept separate from simulated fills (with the quote they hit) |
 | Market | Candles with your fills marked, plus the live quote |
-| Limits & system | Operator-only limits, controls, ledger integrity, sandbox isolation, LLM call audit (prompt and response), jobs, audit log |
+| Limits & system | Operator-only limits grouped as risk, probes, gates and AI budget/schedule, controls, ledger integrity, sandbox isolation, LLM call audit (prompt and response), jobs, audit log |
 | Journal + Ask | Live feed (server-sent events), filterable; questions are answered only from records, with citations |
 
 ## How the agent works
@@ -62,13 +63,20 @@ Observe ─► Investigate ─► Test ─► Challenge ─► Decide ─► Tra
   on participation in average daily volume.
 * **Challenge**: doubled costs, a one-bar execution delay, ±25 % parameter perturbations, four
   pre-test sub-periods, top-5-trade concentration, and a **Deflated Sharpe** (PSR against the
-  expected maximum Sharpe of N zero-skill trials, where N counts earlier experiments whose test
-  windows overlap this one).
-* **Decide**: the gates in `research/gates.py` (operator-set thresholds) must all pass before any
-  capital can be allocated. **Default exploratory gates admit paper experiments; they do not
-  establish a statistically validated edge.** Select strict gates in Limits & system for more
-  selective screening. The analyst can always reject; an allocation request is capped by
-  operator limits. New strategies start at an **incubation** size (50 % of approval).
+  expected maximum Sharpe of N zero-skill trials, where N counts earlier experiments from the last
+  `research.deflation_window_days` (default 7) whose test windows overlap this one; counting every
+  experiment ever run would raise the bar without limit, to a Sharpe of 3-4 after ~100 trials).
+* **Decide**: the gates in `research/gates.py` (operator-set thresholds) decide admission. When
+  every gate passes, the idea is always allocated paper capital; the analyst only sets the size
+  (at least 5 % of equity), and a dissenting second model halves it instead of blocking it.
+  **Default exploratory gates admit paper experiments; they do not establish a statistically
+  validated edge.** Select strict gates in Limits & system for more selective screening. Allocations
+  are capped by operator limits. New strategies start at an **incubation** size (50 % of approval).
+* **Probe**: an idea that missed a gate but made money on its sealed test (net of costs, enough
+  trades) starts a small, clearly-labelled **probe**: 3 % of equity, at most 3 at once and one per
+  venue per day, retired automatically after 14 days. The operator can also start a probe from any
+  finished experiment (Pipeline card or the experiment drawer). Probes exist to collect a forward
+  paper record; they are not evidence of an edge. All probe settings are under Limits & system.
 * **Trade** (`trading/live.py`): on every newly closed bar, the frozen rules run through the
   **same** `compute_signals` and `step()` code as the backtester. Each order becomes an *intent*
   with a rationale built from actual rule values, then passes the independent risk engine, then

@@ -200,7 +200,9 @@ def bars_tick() -> None:
 
 
 def signals_tick() -> None:
+    from .agent.research_loop import expire_probes
     now = clock.now()
+    expire_probes()
     live.reconcile_flattening()
     live.activate_waiting()
     for s in db.q("SELECT * FROM strategies WHERE status='active'"):
@@ -244,10 +246,14 @@ class AnalystThread(threading.Thread):
                 run_job("review", review_all)
                 self.busy = False
             db.set_meta("last_review_day", str(today))
+        from .agent import research_loop
+        probe = db.get_meta("probe_requested") or ""
+        if probe:
+            db.set_meta("probe_requested", "")
+            run_job("probe", lambda: research_loop.start_probe(int(probe), origin="operator"))
         rejudge = db.get_meta("rejudge_requested") or ""
         if rejudge:
             db.set_meta("rejudge_requested", "")
-            from .agent import research_loop
             self.busy = True
             try:
                 run_job("rejudge", lambda: research_loop.rejudge_experiment(int(rejudge)))
@@ -269,8 +275,8 @@ class AnalystThread(threading.Thread):
                 self.busy = False
         live_n = db.q1("SELECT COUNT(*) n FROM strategies WHERE status='active'")["n"]
         detail = (f"Monitoring {live_n} live strateg{'y' if live_n == 1 else 'ies'} and the markets between research cycles"
-                  if live_n else "No strategy has passed every test yet, so nothing is trading. Monitoring the markets "
-                                 "until the next research cycle")
+                  if live_n else "No strategy or probe is live yet. Waiting for an idea that passes the gates or makes "
+                                 "money on its sealed test (probe), until the next research cycle")
         journal.set_status("waiting", detail, next_actions=next_actions())
 
 

@@ -47,13 +47,16 @@ class LLMAnalyst:
     def decide(self, ctx: dict) -> tuple[dict, int]:
         user = prompts.decision_prompt(ctx)
         dec, cid = self.llm.call("decision", prompts.SYSTEM, user, prompts.DECISION_SCHEMA)
-        # Capital moves only when a second, independent model also says allocate.
+        # A second, independent model sizes the allocation: if it disagrees, the stake is halved.
+        # It cannot block an experiment that passed every gate (the gates decide admission).
         if dec.get("decision") == "allocate" and hasattr(self.llm, "second_opinion"):
             check = self.llm.second_opinion("decision_check", prompts.SYSTEM, user, prompts.DECISION_SCHEMA)
             if check is not None and check[0].get("decision") != "allocate":
                 other = check[0]
-                dec = dict(dec, decision="revise", journal=dec["journal"] + f"\n\n[Second opinion: {self.llm.last.model}"
-                           f" said {other.get('decision')}, so no capital this time] {other.get('journal', '')[:600]}")
+                half = float(dec.get("allocation_pct") or 0) / 2
+                dec = dict(dec, allocation_pct=half, journal=dec["journal"] + f"\n\n[Second opinion: {self.llm.last.model}"
+                           f" said {other.get('decision')}, so the allocation is halved to {half:.1%} of equity] "
+                           f"{other.get('journal', '')[:600]}")
         return dec, cid
 
     def review(self, ctx: dict) -> tuple[dict, int]:

@@ -161,12 +161,13 @@ def test_router_free_first_fallback_and_second_opinion(compat, monkeypatch):
     assert db.q1("SELECT cost_usd FROM llm_calls WHERE id=?", (cid,))["cost_usd"] == 0
     assert r.call("decision", "s", "u", SCHEMA)[0]["answer"] == "paid"   # paid model first for decisions
 
-    # an "allocate" survives only if a second model agrees
+    # a dissenting second model halves the stake; it cannot veto an allocation
     monkeypatch.setattr(A.prompts, "decision_prompt", lambda ctx: "u")
     monkeypatch.setattr(A.prompts, "DECISION_SCHEMA", {"type": "object"})
-    dec = lambda d: ok(json.dumps({"decision": d, "journal": "j"}))
+    dec = lambda d: ok(json.dumps({"decision": d, "journal": "j", "allocation_pct": 0.1}))
     r = Router(LLM(http_post=FakeServer([dec("allocate")])), [LLM(http_post=FakeServer([dec("reject")]), route=route("c"))])
     got, _ = A.LLMAnalyst(r).decide({})
-    assert got["decision"] == "revise" and "Second opinion: c-free said reject" in got["journal"]
+    assert got["decision"] == "allocate" and got["allocation_pct"] == 0.05
+    assert "Second opinion: c-free said reject" in got["journal"]
     r = Router(LLM(http_post=FakeServer([dec("allocate")])), [LLM(http_post=FakeServer([dec("allocate")]), route=route("d"))])
     assert A.LLMAnalyst(r).decide({})[0]["decision"] == "allocate"

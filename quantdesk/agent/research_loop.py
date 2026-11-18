@@ -56,8 +56,15 @@ def portfolio_summary() -> dict:
 
 
 def _prior_test_windows(venue: str) -> list[tuple[int, int]]:
+    """Test windows of recent experiments, used to deflate significance for holdout reuse.
+
+    Only experiments from the last ``research.deflation_window_days`` count: counting every
+    experiment ever run makes the deflated-PSR bar rise without limit as the desk keeps working."""
+    days = settings.get("research").get("deflation_window_days", 7)
+    since = clock.now() - days * 86400
     out = []
-    for r in db.q("SELECT windows FROM experiments WHERE venue=? AND frozen_at IS NOT NULL AND test IS NOT NULL", (venue,)):
+    for r in db.q("SELECT windows FROM experiments WHERE venue=? AND frozen_at IS NOT NULL AND test IS NOT NULL "
+                  "AND created_at >= ?", (venue, since)):
         w = db.loads(r["windows"], {})
         if w and "test" in w:
             out.append((w["test"]["start"], w["test"]["end"]))
@@ -226,9 +233,16 @@ def _decide(venue, eid, hid, prop, spec, res, gres, obs, bench, rs, analyst) -> 
     if decision == "allocate" and not gres["passed"]:
         decision = "reject"
         dec["journal"] += "\n\n[Risk/gate engine] Allocation refused: gates failed (" + ", ".join(gres["failed"]) + ")."
-    elif decision == "allocate" and not float(dec.get("allocation_pct") or 0) > 0:
-        decision = "reject"
-        dec["journal"] += "\n\n[Risk/gate engine] Recorded as a rejection: the allocation requested was 0%."
+    elif gres["passed"] and (decision != "allocate" or not float(dec.get("allocation_pct") or 0) > 0):
+        # The gates decide admission; the analyst only sizes. A passing test always gets paper capital.
+        floor = min(GATE_PASS_MIN_PCT, lim["max_strategy_pct"])
+        dec["journal"] += (f"\n\n[Gate engine] Every gate passed, so this idea is admitted to paper trading at "
+                           f"{floor:.0%} of equity (incubation size first). The analyst's view ('{decision}') is "
+                           "recorded above; it sets the size but cannot block a passing test.")
+        dec["allocation_pct"] = floor
+        dec["thesis"] = dec.get("thesis") or prop["rationale"]
+        dec["exit_plan"] = dec.get("exit_plan") or DEFAULT_EXIT_PLAN
+        decision = "allocate"
     did = db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
                 "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), decision, "experiment", eid, dec["journal"],
                                             db.dumps({"lessons": dec.get("lessons", []), "revision_idea": dec.get("revision_idea"),
@@ -248,6 +262,101 @@ def _decide(venue, eid, hid, prop, spec, res, gres, obs, bench, rs, analyst) -> 
     out = {"status": "done", "experiment_id": eid, "decision": decision}
     if decision == "allocate":
         out["strategy_id"] = create_strategy(hid, eid, prop, spec, res, dec, dauthor, dcall)
+    else:
+        sid = auto_probe(venue, eid)
+        if sid:
+            out["probe_strategy_id"] = sid
+    return out
+
+
+# ------------------------------------------------------------------ probes
+GATE_PASS_MIN_PCT = 0.05
+DEFAULT_EXIT_PLAN = "Exit per the tested rules; retire if live drawdown exceeds 1.5x the test drawdown."
+
+
+def probe_blocker(e: dict, operator: bool = False) -> str | None:
+    """Why experiment row ``e`` cannot start a probe (None = it can)."""
+    p = settings.get("probe")
+    if not e or e["status"] not in ("failed", "passed") or not e["test"]:
+        return "only finished experiments with test results can be probed"
+    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=?", (e["id"],)):
+        return "this experiment already has a strategy"
+    if settings.get("agent").get("emergency_stop"):
+        return "emergency stop is active"
+    if operator:
+        return None
+    if not p["enabled"]:
+        return "probes are switched off"
+    t = db.loads(e["test"], {}) or {}
+    if t.get("total_return") is None or t["total_return"] <= p["min_test_return"]:
+        return f"sealed-test return {t.get('total_return') or 0:+.2%} is not above {p['min_test_return']:+.2%}"
+    if (t.get("n_trades") or 0) < settings.get("gates")["min_test_trades"]:
+        return "too few test trades"
+    active = db.q1("SELECT COUNT(*) n FROM strategies WHERE probe=1 AND status IN ('active','incubating')")["n"]
+    if active >= p["max_active"]:
+        return f"{active} probe(s) already running (limit {p['max_active']})"
+    today = db.q1("SELECT COUNT(*) n FROM strategies WHERE probe=1 AND venue=? AND created_at>=?",
+                  (e["venue"], clock.now() - 86400))["n"]
+    if today >= p["per_venue_per_day"]:
+        return f"{e['venue']} already started {today} probe(s) in the last 24 hours"
+    return None
+
+
+def auto_probe(venue: str, eid: int) -> int | None:
+    e = db.q1("SELECT * FROM experiments WHERE id=?", (eid,))
+    if probe_blocker(dict(e) if e else None) is not None:
+        return None
+    return start_probe(eid, origin="rules")
+
+
+def start_probe(eid: int, origin: str = "operator") -> int | None:
+    """Start a small, clearly-labelled forward-paper trial of a finished experiment."""
+    row = db.q1("SELECT * FROM experiments WHERE id=?", (eid,))
+    e = dict(row) if row else None
+    why = probe_blocker(e, operator=(origin == "operator"))
+    if why:
+        journal.write("system", f"Experiment {eid}: probe not started", why[0].upper() + why[1:] + ".", author="system",
+                      refs={"experiment_id": eid})
+        return None
+    p = settings.get("probe")
+    h = dict(db.q1("SELECT * FROM hypotheses WHERE id=?", (e["hypothesis_id"],)))
+    res = {k: db.loads(e[k]) for k in ("windows", "chosen_params", "train", "validation", "test", "challenge", "leakage")}
+    spec = db.loads(e["spec"])
+    gates = db.loads(e["gates"], {}) or {}
+    t = res["test"]
+    who = "You asked" if origin == "operator" else "The desk chose"
+    failed = ", ".join(gates.get("failed") or []) or "none"
+    dec = {"allocation_pct": p["allocation_pct"],
+           "thesis": f"PROBE (forward paper test, not a validated edge). {h['rationale']}",
+           "exit_plan": (f"Exit per the tested rules. Retired automatically after {p['lifetime_days']} days; the daily "
+                         "review can retire it earlier."),
+           "invalidation": {"max_live_drawdown_pct": round(min(0.25, max(0.05, abs(t.get("max_drawdown") or 0.1) * 1.5)), 3),
+                            "review_after_days": p["lifetime_days"], "min_trades_before_judging": 5,
+                            "conditions": "Probe: judged on live results only."}}
+    prop = {k: h[k] for k in ("title", "rationale", "prediction", "falsification")}
+    sid = create_strategy(h["id"], eid, prop, spec, res, dec, "operator" if origin == "operator" else "rules", None,
+                          probe=True)
+    db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
+          "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), "probe", "experiment", eid,
+                                      f"{who} to paper-trade this idea as a probe. Sealed test: {t.get('total_return', 0):+.2%} "
+                                      f"net, Sharpe {t.get('sharpe') or 0:.2f}, {t.get('n_trades')} trades. Gates not passed: "
+                                      f"{failed}.", db.dumps({"strategy_id": sid}),
+                                      "operator" if origin == "operator" else "rules", None))
+    return sid
+
+
+def expire_probes() -> list[int]:
+    """Probes are short trials: retire them when their lifetime ends."""
+    from ..trading.live import retire_strategy
+    days = settings.get("probe")["lifetime_days"]
+    out = []
+    for s in db.q("SELECT * FROM strategies WHERE probe=1 AND status IN ('active','incubating') AND created_at < ?",
+                  (clock.now() - days * 86400,)):
+        retire_strategy(dict(s), "probe period ended", origin="system")
+        journal.write("decision", f"Probe finished: {s['name']} v{s['version']}",
+                      f"The {days}-day probe period ended, so its positions are being closed. Its live record stays in "
+                      "Strategies for comparison with the backtest.", refs={"strategy_id": s["id"]}, author="system")
+        out.append(s["id"])
     return out
 
 
@@ -306,7 +415,7 @@ def _save_beliefs(beliefs: list, venue: str, author: str, call_id) -> None:
         db.ex("UPDATE beliefs SET status='superseded' WHERE id=?", (r["id"],))
 
 
-def create_strategy(hid, eid, prop, spec, res, dec, author, call_id) -> int:
+def create_strategy(hid, eid, prop, spec, res, dec, author, call_id, probe: bool = False) -> int:
     lim = settings.get("risk")
     rs = settings.get("research")
     eq = ledger.equity_breakdown()["equity"]
@@ -314,7 +423,8 @@ def create_strategy(hid, eid, prop, spec, res, dec, author, call_id) -> int:
     approved_pct = min(req_pct, lim["max_strategy_pct"])
     approved = approved_pct * eq
     from ..trading.live import allocation_room
-    start_alloc = min(approved * rs["incubation_fraction"], allocation_room(eq))  # never beyond total-allocation room
+    frac = 1.0 if probe else rs["incubation_fraction"]  # probes are already small: no incubation haircut
+    start_alloc = min(approved * frac, allocation_room(eq))  # never beyond total-allocation room
     if start_alloc < lim["min_order_usd"]:
         start_alloc = 0.0  # waits as 'incubating' until room frees up (live.activate_waiting)
     t = res["test"]
@@ -325,26 +435,27 @@ def create_strategy(hid, eid, prop, spec, res, dec, author, call_id) -> int:
     inval = dec.get("invalidation") or {}
     now = clock.now()
     sid = db.ex("INSERT INTO strategies(hypothesis_id, experiment_id, name, version, venue, spec, spec_hash, status, "
-                "approved_allocation, allocation, thesis, exit_plan, expectations, invalidation, created_at, activated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "approved_allocation, allocation, thesis, exit_plan, expectations, invalidation, created_at, activated_at, "
+                "probe) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (hid, eid, spec["name"], v, spec["venue"], db.dumps(fixed), spec_hash(fixed),
                  "active" if start_alloc > 0 else "incubating", approved, start_alloc, dec.get("thesis") or prop["rationale"],
-                 dec.get("exit_plan") or "", db.dumps(expectations), db.dumps(inval), now, now))
+                 dec.get("exit_plan") or "", db.dumps(expectations), db.dumps(inval), now, now, int(probe)))
     from ..marketdata import freshness
     db.ex("UPDATE strategies SET last_signal_bar=? WHERE id=?", (freshness.expected_last_bar(spec["venue"], now), sid))
     note = ""
     if approved < req_pct * eq - 1:
         note = f" Requested {req_pct:.1%} of equity; operator limits capped approval at ${approved:,.0f}."
-    full = approved * rs["incubation_fraction"]
+    full = approved * frac
+    kind = "probe" if probe else "strategy"
     if start_alloc <= 0:
-        title = f"Strategy approved, waiting for room: {spec['name']} v{v}"
+        title = f"{kind.capitalize()} approved, waiting for room: {spec['name']} v{v}"
         start = (f"No room under the total-allocation limit ({lim['max_total_allocation_pct']:.0%} of equity), so it "
                  "starts trading automatically when other strategies free up capital.")
     else:
-        title = f"New strategy live: {spec['name']} v{v}"
-        start = (f"Trading starts at the incubation size ${start_alloc:,.0f} on the next bar close"
+        title = f"New {kind} live: {spec['name']} v{v}"
+        start = (f"Trading starts with ${start_alloc:,.0f} on the next bar close"
                  + (f" (reduced from ${full:,.0f} by the total-allocation limit)." if start_alloc < full - 1 else
-                    f" ({rs['incubation_fraction']:.0%})."))
+                    "." if probe else f" (incubation size, {rs['incubation_fraction']:.0%})."))
     journal.write("decision", title,
                   f"Approved ${approved:,.0f}. {start}{note}\nThesis: {dec.get('thesis')}\n"
                   f"Exit plan: {dec.get('exit_plan')}\nInvalidation: {inval}",
