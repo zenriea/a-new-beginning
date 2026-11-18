@@ -1,5 +1,5 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
-import { deskHealth, equityInRange, limitUsage, tradingVerdict } from "./ui-model.mjs?v=20261118-symbols";
+import { deskHealth, equityInRange, limitUsage, tradingVerdict } from "./ui-model.mjs?v=20261118-24h";
 
 const $ = (s, el = document) => el.querySelector(s);
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
@@ -15,7 +15,7 @@ const qty = (v) => v == null ? "–" : Number.isInteger(v) ? v.toLocaleString() 
 const px = (v) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: v < 0.01 ? 10 : v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
 const signCls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
 const arrow = (v) => (v > 0 ? "▲ " : v < 0 ? "▼ " : "");
-const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
+const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "–";
 const day = (ts) => ts ? new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "–";
 function ago(ts) {
   if (!ts) return "–";
@@ -172,7 +172,7 @@ function renderBadges(s) {
   $("#nav-live-count").classList.toggle("on", live > 0);
   const health = deskHealth(s);
   $("#desk-health").className = `desk-health ${health.tone}`;
-  $("#desk-health").innerHTML = `<span class="health-indicator"></span><div><b>${esc(health.label)}</b><small>Updated ${esc(new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }))}</small></div>`;
+  $("#desk-health").innerHTML = `<span class="health-indicator"></span><div><b>${esc(health.label)}</b><small>Updated ${esc(new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }))}</small></div>`;
   $("#desk-health").title = health.label;
 }
 function renderAlerts(s) {
