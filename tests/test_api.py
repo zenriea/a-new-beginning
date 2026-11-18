@@ -53,7 +53,7 @@ def test_static_ui_served(client):
 
 def test_refreshed_ui_assets_and_module_are_served(client):
     page = client.get("/")
-    assert "20261118-24h" in page.text
+    assert "20261118-ux" in page.text
     assert 'class="sidebar"' in page.text and 'id="equity-ranges"' in page.text and 'id="pipeline-body"' in page.text
     for path in ("/static/app.css", "/static/app.js", "/static/ui-model.mjs"):
         response = client.get(path)
@@ -181,3 +181,29 @@ def test_env_example_password_is_blank_and_accepted(env, monkeypatch):
     assert "QD_ADMIN_PASSWORD=\n" in example
     monkeypatch.setenv("QD_ADMIN_PASSWORD", "a perfectly fine passphrase")
     assert load_config(reload=True).admin_password == "a perfectly fine passphrase"
+
+
+def test_batch_settings_save_is_all_or_nothing(client):
+    from quantdesk import settings
+    client.post("/api/login", json={"password": "correct horse"})
+    before = settings.get("risk")["max_drawdown_pct"]
+    r = client.post("/api/settings", json={"risk": {"max_drawdown_pct": 0.2}, "gates": {"min_test_trades": 0}},
+                    headers={"X-QD": "1"})
+    assert r.status_code == 400 and "gates.min_test_trades" in r.json()["detail"]
+    assert settings.get("risk")["max_drawdown_pct"] == before          # the valid group was not written
+    r = client.post("/api/settings", json={"risk": {"max_drawdown_pct": 0.2}, "gates": {"min_test_trades": 12}},
+                    headers={"X-QD": "1"})
+    assert r.status_code == 200
+    assert settings.get("risk")["max_drawdown_pct"] == 0.2 and settings.get("gates")["min_test_trades"] == 12
+    assert client.post("/api/settings", json={"agent": {"paused": False}}, headers={"X-QD": "1"}).status_code == 400
+    assert client.post("/api/settings", json={"risk": {"max_drawdown_pct": 0.2}}).status_code == 403   # CSRF header
+
+
+def test_emergency_stop_records_a_receipt_and_bounds_are_published(client):
+    client.post("/api/login", json={"password": "correct horse"})
+    r = client.post("/api/control/emergency_stop", headers={"X-QD": "1"})
+    assert r.status_code == 200 and r.json()["cancelled"] == 0
+    controls = client.get("/api/state").json()["controls"]
+    assert controls["emergency_stop"] is True and controls["emergency_stop_at"] and controls["emergency_cancelled"] == 0
+    bounds = client.get("/api/system").json()["bounds"]
+    assert bounds["risk.max_gross_pct"][1] <= 1.0 and bounds["gates.min_test_trades"] == [1, 1000]

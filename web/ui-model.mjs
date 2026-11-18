@@ -26,16 +26,37 @@ export function deskHealth(s) {
   return { tone: "ok", label: "Desk online · paper mode" };
 }
 
+// ---------------------------------------------------------------- gates
+// One vocabulary for gate names everywhere, including text the server or the analyst wrote.
+export const GATE_LABEL = {
+  validation_sharpe: "Validation Sharpe", test_sharpe: "Test Sharpe", test_trades: "Min trades",
+  test_return_cost_x2: "2× costs", test_sharpe_delay_1bar: "1-bar delay", neighbor_positive_frac: "Nearby params",
+  subperiod_positive_frac: "Sub-periods", top5_concentration: "Top-5 trades", deflated_psr: "Deflated PSR",
+};
+export const gateLabel = (name) => GATE_LABEL[name] || String(name ?? "").replaceAll("_", " ");
+const GATE_KEYS = Object.keys(GATE_LABEL).sort((a, b) => b.length - a.length);
+const GATE_RE = new RegExp(`\\b(${GATE_KEYS.join("|")})\\b`, "g");
+export function friendlyGates(text) {
+  return String(text ?? "").replace(GATE_RE, (key) => GATE_LABEL[key]);
+}
+// Always counted the same way: how many passed, out of how many.
+export function gateCount(total, failed) {
+  return `${Math.max(0, total - failed)} of ${total} passed`;
+}
+
 // One sentence that answers "why is (or isn't) the desk trading right now?".
+// Green is kept for evidence (a strategy that passed every gate); probes get their own tone.
 export function tradingVerdict(s) {
   const c = s.controls, p = s.pipeline || {};
-  const live = (p.live?.strategies || 0) + (p.live?.probes || 0);
+  const strategies = p.live?.strategies || 0, probes = p.live?.probes || 0, live = strategies + probes;
+  const liveTone = strategies ? "ok" : "probe";
   const fmt = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(1) + "%";
   if (c.emergency_stop) return { tone: "bad", text: "Emergency stop is on, so nothing trades." };
   if (!s.worker.alive) return { tone: "bad", text: "The worker is offline, so nothing is researched or traded." };
   if (c.drawdown_halt || c.system_halt) return { tone: "bad", text: "A risk halt blocks new positions; exits still run." };
-  if (s.positions.length) return { tone: "ok", text: `Trading: ${s.positions.length} open position${s.positions.length > 1 ? "s" : ""} across ${live} live sleeve${live === 1 ? "" : "s"}.` };
-  if (live) return { tone: "ok", text: `${live} live (${p.live.probes || 0} probe${p.live.probes === 1 ? "" : "s"}). Waiting for entry signals on the next bar close.` };
+  if (s.positions.length) return { tone: liveTone, text: `Trading: ${s.positions.length} open position${s.positions.length > 1 ? "s" : ""} across ${live} live sleeve${live === 1 ? "" : "s"}.` +
+    (strategies ? "" : " Probes only: forward paper tests, not evidence of an edge.") };
+  if (live) return { tone: liveTone, text: `${live} live (${probes} probe${probes === 1 ? "" : "s"}). Waiting for entry signals on the next bar close.` };
   if (c.paused) return { tone: "warn", text: "The agent is paused: no research and no new positions." };
   if (!p.finished) return { tone: "info", text: "No finished experiment in the last 7 days yet. The first research cycle needs market data." };
   const best = (p.candidates || [])[0];
@@ -45,5 +66,82 @@ export function tradingVerdict(s) {
     return { tone: "info", text: `Best idea #${best.id} made ${fmt(best.test_return)} on test; a probe starts after the next research decision.` };
   }
   return { tone: "warn", text: `None of the ${p.finished} experiment${p.finished === 1 ? "" : "s"} made money on its sealed test (after costs), so nothing qualifies.` +
-    (top ? ` Most common failure: ${top.gate.replaceAll("_", " ")} (${top.n}×).` : "") };
+    (top ? ` Most common failure: ${gateLabel(top.gate)} (${top.n}×).` : "") };
+}
+
+// ---------------------------------------------------------------- operator limits
+// Stored values are fractions; the form shows percentages. `loosens` says which direction relaxes
+// a control: +1 when raising it loosens, -1 when lowering it loosens, 0 when neither is riskier.
+export const LIMIT_FIELDS = [
+  { g: "risk", k: "max_position_pct", label: "Max position", unit: "pct", hint: "of equity, per symbol", loosens: 1 },
+  { g: "risk", k: "max_gross_pct", label: "Max gross exposure", unit: "pct", hint: "of equity", loosens: 1 },
+  { g: "risk", k: "max_crypto_pct", label: "Max crypto exposure", unit: "pct", hint: "of equity", loosens: 1 },
+  { g: "risk", k: "max_strategy_pct", label: "Max per strategy", unit: "pct", hint: "of equity", loosens: 1 },
+  { g: "risk", k: "max_total_allocation_pct", label: "Max total allocated", unit: "pct", hint: "of equity, all strategies", loosens: 1 },
+  { g: "risk", k: "max_order_usd", label: "Max order size", unit: "usd", loosens: 1 },
+  { g: "risk", k: "daily_loss_limit_pct", label: "Daily loss limit", unit: "pct", hint: "of equity", loosens: 1 },
+  { g: "risk", k: "max_drawdown_pct", label: "Max drawdown", unit: "pct", hint: "halts new risk when reached", loosens: 1 },
+  { g: "risk", k: "max_orders_per_hour", label: "Max orders per hour", unit: "int", loosens: 1 },
+  { g: "risk", k: "max_quote_age_sec", label: "Max quote age", unit: "sec", loosens: 1 },
+  { g: "risk", k: "max_participation", label: "Max share of daily volume", unit: "pct", hint: "per order, of average daily volume", loosens: 1 },
+  { g: "risk", k: "max_spread_bps", label: "Max usable spread", unit: "bp", loosens: 1 },
+  { g: "probe", k: "enabled", label: "Probes enabled", unit: "bool", loosens: 1 },
+  { g: "probe", k: "allocation_pct", label: "Probe size", unit: "pct", hint: "of equity", loosens: 1 },
+  { g: "probe", k: "max_active", label: "Max probes at once", unit: "int", loosens: 1 },
+  { g: "probe", k: "per_venue_per_day", label: "Max new probes per venue per day", unit: "int", loosens: 1 },
+  { g: "probe", k: "min_test_return", label: "Min sealed-test return", unit: "pct", loosens: -1 },
+  { g: "probe", k: "lifetime_days", label: "Probe lifetime", unit: "days", loosens: 1 },
+  { g: "gates", k: "min_test_sharpe", label: "Min test Sharpe", unit: "num", loosens: -1 },
+  { g: "gates", k: "min_val_sharpe", label: "Min validation Sharpe", unit: "num", loosens: -1 },
+  { g: "gates", k: "min_test_trades", label: "Min test trades", unit: "int", loosens: -1 },
+  { g: "gates", k: "min_deflated_psr", label: "Min deflated PSR", unit: "num", hint: "probabilistic Sharpe, 0–1", loosens: -1 },
+  { g: "gates", k: "min_cost_stress_return", label: "Min return at 2× costs", unit: "pct", loosens: -1 },
+  { g: "gates", k: "min_delay_stress_sharpe", label: "Min Sharpe with 1-bar delay", unit: "num", loosens: -1 },
+  { g: "gates", k: "min_neighbor_positive_frac", label: "Min share of positive nearby params", unit: "pct", loosens: -1 },
+  { g: "gates", k: "min_subperiod_positive_frac", label: "Min share of positive sub-periods", unit: "pct", loosens: -1 },
+  { g: "gates", k: "max_top5_concentration", label: "Max top-5 trade concentration", unit: "pct", hint: "share of pre-test profit", loosens: 1 },
+  { g: "research", k: "deflation_window_days", label: "Deflated PSR counts trials from the last", unit: "days", loosens: -1 },
+  { g: "budget", k: "monthly_usd", label: "AI budget per month", unit: "usd", loosens: 1 },
+  { g: "budget", k: "daily_usd", label: "AI budget per day", unit: "usd", loosens: 1 },
+  { g: "schedule", k: "crypto_research_hours", label: "Crypto research every", unit: "hours", loosens: 0 },
+  { g: "schedule", k: "nasdaq_research_hours", label: "Stock research every", unit: "hours", loosens: 0 },
+  { g: "schedule", k: "max_research_per_day", label: "Max experiments per venue per day", unit: "int", loosens: 0 },
+  { g: "schedule", k: "review_hour_utc", label: "Daily review hour (UTC)", unit: "hour", loosens: 0 },
+];
+export const UNIT_SUFFIX = { pct: "%", usd: "$", bp: "bp", sec: "s", hours: "h", days: "d", hour: ":00 UTC" };
+const INTEGER_UNITS = new Set(["int", "sec", "hours", "days", "hour"]);
+const clean = (v) => Number(v.toPrecision(12));
+
+export function toDisplay(value, unit) {
+  if (value == null || !Number.isFinite(Number(value))) return "";
+  return String(unit === "pct" ? clean(Number(value) * 100) : clean(Number(value)));
+}
+// Returns { value } or { error } with a message that names the problem.
+export function fromDisplay(text, unit, bounds) {
+  const raw = String(text ?? "").trim().replace(/[%$,\s]/g, "");
+  if (!raw) return { error: "Enter a value." };
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return { error: "Enter a number." };
+  if (INTEGER_UNITS.has(unit) && !Number.isInteger(n)) return { error: "Enter a whole number." };
+  const value = unit === "pct" ? clean(n / 100) : n;
+  if (bounds) {
+    const [lo, hi] = bounds;
+    if (value < lo - 1e-12 || value > hi + 1e-12) return { error: `Allowed range is ${formatLimit(lo, unit)} to ${formatLimit(hi, unit)}.` };
+  }
+  return { value };
+}
+export function formatLimit(value, unit) {
+  if (unit === "bool") return value ? "on" : "off";
+  const d = toDisplay(value, unit);
+  if (d === "") return "–";
+  if (unit === "usd") return "$" + Number(d).toLocaleString("en-US");
+  if (unit === "hour") return `${d.padStart(2, "0")}:00 UTC`;
+  return d + (UNIT_SUFFIX[unit] ? (unit === "pct" ? "%" : " " + UNIT_SUFFIX[unit]) : "");
+}
+export const sameValue = (a, b) => a === b || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b)));
+// "loosens" | "tightens" | "changes" for an edit from `before` to `after`.
+export function changeDirection(field, before, after) {
+  if (field.unit === "bool") return after ? (field.loosens > 0 ? "loosens" : "tightens") : (field.loosens > 0 ? "tightens" : "loosens");
+  if (!field.loosens || sameValue(before, after)) return "changes";
+  return (after > before) === (field.loosens > 0) ? "loosens" : "tightens";
 }
