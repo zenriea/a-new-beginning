@@ -374,9 +374,30 @@ def _strategy_model(s):
     from ..agent.review import live_stats
     d = db.row_dict(s, ["spec", "expectations", "invalidation"])
     d["live"] = live_stats(dict(s))
+    d["symbols"] = _strategy_symbols(s["id"], (d["spec"] or {}).get("universe") or [])
     d["reviews"] = _rows("SELECT * FROM decisions WHERE subject_type='strategy' AND subject_id=? ORDER BY id DESC LIMIT 5",
                          (s["id"],), ("details",))
     return d
+
+
+def _strategy_symbols(sid: int, universe: list[str]) -> list[dict]:
+    """Every symbol a strategy may trade, with what it holds and has pending in each."""
+    held = {p["symbol"]: p for p in ledger.sleeve_positions(sid)}
+    pending: dict[str, str] = {}
+    for o in db.q("SELECT symbol, side FROM orders WHERE strategy_id=? "
+                  "AND status IN ('intent','submitted','partially_filled')", (sid,)):
+        pending[o["symbol"]] = o["side"]
+    out = []
+    for sym in list(universe) + [x for x in held if x not in universe]:
+        p = held.get(sym)
+        row = {"symbol": sym, "venue": venues.venue_of(sym), "qty": p["qty"] if p else 0.0,
+               "avg_cost": p["avg_cost"] if p else None, "mark": None, "value": 0.0, "unrealized": None,
+               "pending": pending.get(sym)}
+        if p:
+            px = store.mark_price(sym)[0] or p["avg_cost"]
+            row.update(mark=px, value=p["qty"] * px, unrealized=p["qty"] * (px - p["avg_cost"]))
+        out.append(row)
+    return out
 
 
 @app.get("/api/strategies/{sid}", dependencies=[Depends(require_auth)])
