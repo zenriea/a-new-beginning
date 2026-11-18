@@ -288,7 +288,8 @@ On any Linux VPS with Docker (2 vCPU / 2–4 GB is enough):
 ```bash
 git clone https://github.com/zenriea/quant-desk && cd quant-desk && cp .env.example .env
 ```
-Edit `.env`: set `QD_ADMIN_PASSWORD`, `QD_SESSION_SECRET`, `ANTHROPIC_API_KEY` and the Alpaca keys. Then:
+Edit `.env`: set `QD_ADMIN_PASSWORD` (at least 12 characters), `QD_SESSION_SECRET`, the Alpaca
+keys, and one AI provider block (or leave them all out to run the $0 demo analyst). Then:
 ```bash
 docker compose up -d --build
 ```
@@ -332,7 +333,7 @@ unprivileged user) but without its own network namespace.
 1. **New Project → Deploy from GitHub repo**, authorize GitHub, pick `zenriea/quant-desk` (`main`).
 2. Open the service → **Variables** and add:
    ```
-   QD_ADMIN_PASSWORD=<long password for the dashboard>
+   QD_ADMIN_PASSWORD=<your own password for the dashboard, at least 12 characters>
    QD_SESSION_SECRET=<random string; e.g. from python3 -c "import secrets;print(secrets.token_hex(32))">
    QD_COOKIE_SECURE=1
    QD_TRUSTED_PROXIES=*
@@ -373,7 +374,7 @@ The historical verification notes below describe the original build, not a CI ru
 | Server | ~$5–25/month (any small VPS) |
 | Market data | $0 (Coinbase public; Alpaca free plan). Alpaca's paid plan gives full SIP quotes |
 | AI analyst | About **2 model calls per research cycle** (hypothesis and decision; ~15–20k input and ~5–10k output tokens), plus daily reviews and your questions. Cost depends entirely on the provider, model and schedule; $0 for a local Ollama model or a free tier within its limits. Both venues default to a 2-hour research interval, with up to 12 experiments per venue per day when new data is available. Pre-call **estimated budget checks** use `$40/month` and `$4/day` defaults (changeable in Limits), using the prices you configure. See the spending limitations above; enforce a provider-side cap as well. |
-| Cheaper | A smaller model; research less often (Limits: crypto every 8 h instead of 4 h); or demo mode ($0) |
+| Cheaper | A smaller model; research less often (Limits: e.g. every 8 h instead of the default 2 h); or demo mode ($0) |
 
 These AI cost figures are estimates from prompt sizes. No live AI call was made while building
 this (see below). The Limits tab shows the real per-call tokens and cost once it
