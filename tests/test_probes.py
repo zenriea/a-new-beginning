@@ -146,7 +146,7 @@ def test_api_pipeline_and_probe_control(env, monkeypatch):
     make_strategy()
     db.ex("UPDATE strategies SET experiment_id=? WHERE id=1", (good,))
     r = c.post(f"/api/control/probe_{good}", headers=h)
-    assert r.status_code == 409 and "already has a strategy" in r.json()["detail"]
+    assert r.status_code == 409 and "as a strategy" in r.json()["detail"]
 
 
 def test_strategy_api_lists_symbols_with_holdings(env):

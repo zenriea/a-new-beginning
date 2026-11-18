@@ -292,8 +292,13 @@ class AnalystThread(threading.Thread):
                 run_research(venue)
             finally:
                 self.busy = False
-        live_n = db.q1("SELECT COUNT(*) n FROM strategies WHERE status='active'")["n"]
-        detail = (f"Monitoring {live_n} live strateg{'y' if live_n == 1 else 'ies'} and the markets between research cycles"
+        rows = db.q("SELECT probe, COUNT(*) n FROM strategies WHERE status IN ('active','incubating') GROUP BY probe")
+        n_probes = sum(r["n"] for r in rows if r["probe"])
+        n_strats = sum(r["n"] for r in rows if not r["probe"])
+        parts = ([f"{n_strats} live strateg{'y' if n_strats == 1 else 'ies'}"] if n_strats else []) + \
+                ([f"{n_probes} probe{'' if n_probes == 1 else 's'} (forward test{'' if n_probes == 1 else 's'})"] if n_probes else [])
+        live_n = n_strats + n_probes
+        detail = (f"Monitoring {' and '.join(parts)} and the markets between research cycles"
                   if live_n else "No strategy or probe is live yet. Waiting for an idea that passes the gates or makes "
                                  "money on its sealed test (probe), until the next research cycle")
         journal.set_status("waiting", detail, next_actions=next_actions())

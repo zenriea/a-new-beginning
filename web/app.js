@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  limitUsage, LIMIT_FIELDS, sameValue, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261118-ux";
+  limitUsage, LIMIT_FIELDS, sameValue, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-ux2";
 
 const $ = (s, el = document) => el.querySelector(s);
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
@@ -64,7 +64,10 @@ function toast(msg, opts = {}) {
   const tone = opts.tone || "info";
   let stack = $("#toasts");
   if (!stack) { stack = document.createElement("div"); stack.id = "toasts"; stack.className = "toast-stack"; stack.setAttribute("aria-live", "polite"); document.body.appendChild(stack); }
+  if (opts.key) stack.querySelectorAll(`.toast[data-key="${opts.key}"]`).forEach((old) => old.remove());
   const t = document.createElement("div"); t.className = `toast ${tone}`;
+  if (opts.key) t.dataset.key = opts.key;
+  if (tone === "bad") t.setAttribute("role", "alert");
   t.innerHTML = `<span class="toast-dot" aria-hidden="true"></span><div class="toast-text"><b></b>${opts.detail ? "<small></small>" : ""}</div><button class="toast-x" aria-label="Dismiss">×</button>`;
   t.querySelector("b").textContent = msg;
   if (opts.detail) t.querySelector("small").textContent = opts.detail;
@@ -103,6 +106,7 @@ const icon = {
 
 // Journal entries worth interrupting the operator for (research outcomes, trades, risk).
 function notifyFromJournal(j) {
+  if (j.author === "operator") return;  // the operator's own action already got its confirmation
   const t = j.title || "", refs = j.refs || {};
   const research = j.kind === "research" || j.kind === "decision" || (j.kind === "test" && /^Re-judged/.test(t));
   const failed = j.kind === "system" && /failed|paused|could not/i.test(t);
@@ -172,6 +176,10 @@ $("#btn-logout").addEventListener("click", async () => {
 // ---------------------------------------------------------------- theme
 function applyTheme(t) {
   if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
+  const dark = t === "dark", btn = $("#btn-theme");
+  btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme"); btn.title = btn.getAttribute("aria-label");
+  btn.innerHTML = dark ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
   Object.values(state.charts).forEach((c) => c && c.theme && c.theme());
 }
 try { applyTheme(localStorage.getItem("qd-theme") || "dark"); } catch { applyTheme("dark"); }  // black is the house theme
@@ -209,6 +217,9 @@ function renderBadges(s) {
   $("#btn-pause").innerHTML = `<span>${c.paused ? "Resume" : "Pause"}<span class="lbl-long"> agent</span></span>`;
   $("#btn-pause").setAttribute("aria-label", c.paused ? "Resume agent" : "Pause agent");
   $("#btn-pause").setAttribute("aria-pressed", String(c.paused));
+  // Resuming does nothing while the stop is on; say so instead of offering it.
+  $("#btn-pause").disabled = Boolean(c.emergency_stop);
+  $("#btn-pause").title = c.emergency_stop ? "Clear the emergency stop first" : "";
   $("#btn-stop").classList.toggle("hidden", Boolean(c.emergency_stop));
   $("#btn-clear-stop").classList.toggle("hidden", !c.emergency_stop);
   $("#nav-research-count").textContent = s.counts.experiments.toLocaleString();
@@ -235,15 +246,15 @@ function renderAlerts(s) {
     const n = c.emergency_cancelled;
     a.push(["critical", icon.stop, `<b>Emergency stop is on ${when}.</b> ${n != null ? `${n} open order${n === 1 ? " was" : "s were"} cancelled. ` : ""}
       No new research, orders or fills. Positions are held, not sold.
-      <div class="alert-actions"><button class="btn small danger" data-ctl="flatten_all">Flatten all positions…</button>
-      <button class="btn small" data-clear-stop>Clear emergency stop…</button></div>`]);
+      Clear it with the button at the top of the page.
+      <div class="alert-actions"><button class="btn small danger" data-ctl="flatten_all">Flatten all positions…</button></div>`]);
   } else if (c.paused) a.push(["warning", icon.pause, "<b>The agent is paused.</b> No new research or positions. Exits, fills and risk monitoring continue."]);
   if (c.drawdown_halt) a.push(["critical", icon.alert, `<b>Max drawdown limit reached.</b> New risk is halted until you reset it in Limits &amp; system.`]);
   if (c.system_halt) a.push(["critical", icon.alert, "<b>Ledger integrity check failed at startup.</b> New buys are blocked. See Limits &amp; system."]);
   if (!s.worker.alive) a.push(["critical", icon.alert, "<b>The background worker is not running,</b> so nothing is being researched or traded. Check the worker service."]);
   if (!s.mode.alpaca_configured && s.mode.market_data !== "synthetic") a.push(["warning", icon.alert, "<b>NASDAQ data is not configured</b> (Alpaca keys missing). NASDAQ research and trading are stopped; crypto continues."]);
   if (s.data.problems.length) a.push(["warning", icon.alert, `<b>Data unavailable or stale:</b> ${s.data.problems.slice(0, 6).map((d) => esc(d.key)).join(", ")}${s.data.problems.length > 6 ? "…" : ""}. Dependent actions are stopped.`]);
-  if (s.mode.llm === "demo") a.push(["info", icon.info, `<b>Demo mode.</b> A deterministic rules engine stands in for the AI analyst; its entries are labelled “Rules engine”. Research, tests and trading are real computations.
+  if (s.mode.llm === "demo" && !demoAcknowledged()) a.push(["info", icon.info, `<button type="button" class="alert-x" data-ack-demo aria-label="Hide the demo notice; the DEMO badge stays">Got it</button><b>Demo mode.</b> A deterministic rules engine stands in for the AI analyst; its entries are labelled “Rules engine”. Research, tests and trading are real computations.
     <details class="alert-more"><summary>Connect an AI provider</summary>Set <code>QD_LLM_PROVIDER</code>, <code>QD_LLM_API_KEY</code> and <code>QD_LLM_MODEL</code> (or <code>ANTHROPIC_API_KEY</code>) in <code>.env</code>, then restart the worker.</details>`]);
   const open = $("#alerts .alert-more")?.open;
   $("#alerts").innerHTML = a.map(([k, i, t]) => `<div class="alert ${k}"><span class="icon">${i}</span><div>${t}</div></div>`).join("");
@@ -256,7 +267,7 @@ $("#btn-pause").addEventListener("click", async () => {
   const pausing = !state.s?.controls.paused;
   try {
     await control(pausing ? "pause" : "resume");
-    toast(pausing ? "Agent paused" : "Agent resumed", { tone: pausing ? "info" : "good",
+    toast(pausing ? "Agent paused" : "Agent resumed", { key: "control", tone: pausing ? "info" : "good",
       detail: pausing ? "No new research or positions. Exits, fills and risk monitoring continue." : "Research and trading schedules are active again." });
     await refresh();
   } catch (err) { fail(err); }
@@ -269,7 +280,7 @@ $("#btn-stop").addEventListener("click", async () => {
   if (!ok) return;
   try {
     const r = await control("emergency_stop");
-    toast("Emergency stop is on", { tone: "bad", ms: 12000,
+    toast("Emergency stop is on", { key: "control", tone: "bad", ms: 12000,
       detail: `${clock24(Date.now() / 1000, true)} · ${r.cancelled ?? 0} open order${r.cancelled === 1 ? "" : "s"} cancelled · positions held.` });
     await refresh();
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -281,16 +292,24 @@ async function clearEmergency() {
   if (!ok) return;
   try {
     await control("clear_emergency");
-    toast("Emergency stop cleared", { detail: "The agent is still paused. Press Resume agent when you're ready." });
+    toast("Emergency stop cleared", { key: "control", detail: "The agent is still paused. Press Resume agent when you're ready." });
     await refresh();
   } catch (err) { fail(err); }
 }
 $("#btn-clear-stop").addEventListener("click", clearEmergency);
-document.addEventListener("click", (e) => { if (e.target.closest("[data-clear-stop]")) clearEmergency(); });
+// The demo notice can be hidden once; the DEMO badge keeps the mode visible.
+function demoAcknowledged() { try { return localStorage.getItem("qd-demo-ack") === "1"; } catch { return false; } }
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-ack-demo]")) return;
+  try { localStorage.setItem("qd-demo-ack", "1"); } catch {}
+  if (state.s) renderAlerts(state.s);
+});
 
 // ---------------------------------------------------------------- KPIs
 function renderKPIs(s) {
   const a = s.account;
+  // With nothing invested the four tiles only say "$0": shrink them to a strip so the verdict leads.
+  $("#kpis").classList.toggle("compact", !a.gross && !s.positions.length && !s.open_orders.length);
   const excess = a.benchmark_return != null ? a.return - a.benchmark_return : null;
   const usage = limitUsage(a.exposure, s.limits.max_gross_pct), drawdown = limitUsage(a.drawdown, s.limits.max_drawdown_pct);
   const track = (value) => `<div class="metric-track ${value >= 100 ? "bad" : value >= 80 ? "warn" : ""}" aria-hidden="true"><span style="width:${value}%"></span></div>`;
@@ -326,8 +345,9 @@ function ensureEquityChart() {
   const chart = LightweightCharts.createChart(el, { ...themedChartOptions(), autoSize: true });
   const mk = (v) => chart.addLineSeries({ color: cssVar(v), lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
   const area = () => ({ lineColor: cssVar("--series-1"), topColor: cssVar("--accent-soft"), bottomColor: "rgba(0,0,0,0)" });
-  const acct = chart.addAreaSeries({ ...area(), lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
-  const c = { chart, acct, bench: mk("--series-2"), btc: mk("--series-3") };
+  const bench = mk("--series-2"), btc = mk("--series-3");  // added first so the account line draws on top
+  const acct = chart.addAreaSeries({ ...area(), lineWidth: 2.5, priceLineVisible: false, lastValueVisible: true });
+  const c = { chart, acct, bench, btc };
   c.theme = () => { chart.applyOptions(themedChartOptions()); c.acct.applyOptions(area()); c.bench.applyOptions({ color: cssVar("--series-2") }); c.btc.applyOptions({ color: cssVar("--series-3") }); };
   chart.subscribeCrosshairMove((p) => {
     if (!p || !p.time) { $("#equity-tip").textContent = ""; return; }
@@ -394,7 +414,7 @@ function renderPipeline(s) {
     ["Tested", p.finished, `${p.experiments} started`],
     ["Profitable on test", p.profitable, "net of costs"],
     ["Passed all gates", p.passed, "full allocation"],
-    ["Live", live, `${p.live.probes} probe${p.live.probes === 1 ? "" : "s"} included`],
+    ["Live", live, p.live.probes ? `${p.live.probes} probe${p.live.probes === 1 ? "" : "s"} included` : "strategies only"],
     ["Positions", s.positions.length, s.open_orders.length ? `${s.open_orders.length} order${s.open_orders.length > 1 ? "s" : ""} pending` : "open now"],
   ];
   const maxFail = Math.max(1, ...p.gate_failures.map((g) => g.n));
@@ -402,7 +422,6 @@ function renderPipeline(s) {
   $("#pipeline-window").textContent = `last ${p.window_days} days`;
   renderCheckin(s, v);
   $("#pipeline-body").innerHTML = `
-    <div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(v.text)}</p></div>
     <ol class="funnel">${steps.map(([label, n, sub], i) => `<li class="${n > 0 ? "has" : ""}${i === steps.length - 1 && n > 0 ? " goal" : ""}">
       <span class="funnel-n num">${n}</span><span class="funnel-label">${label}</span><small>${esc(sub)}</small></li>`).join("")}</ol>
     <div class="pipeline-grid">
@@ -427,6 +446,7 @@ function renderCheckin(s = state.s, v = s && tradingVerdict(s)) {
   if (!s) return;
   const last = state.journal[0];
   const next = (s.agent?.next_actions || [])[0];
+  $("#checkin").className = `checkin ${esc(v.tone)}`;
   $("#checkin").innerHTML = `<div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(v.text)}</p></div>
     <dl class="checkin-rows">
       ${last ? `<div><dt>Latest</dt><dd><a href="#journal" data-nav="journal">${rich(last.title)}</a> <span class="muted num">${ago(last.ts)}</span></dd></div>` : ""}
@@ -553,11 +573,11 @@ async function renderResearch(body, version, quiet) {
   if (!ex.length) { body.innerHTML = emptyState("The next idea starts here.", "No experiments yet. The first research cycle begins once the worker has market data. Every hypothesis will have a frozen test and a recorded decision."); return; }
   const passed = ex.filter((e) => e.status === "passed").length;
   body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
-    <span class="summary-count"><span class="up">${passed}</span> passed gates</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} missed gates</span></div>
+    <span class="summary-count"><span class="${passed ? "up" : ""}">${passed}</span> passed gates</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} missed gates</span></div>
     <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr><th>#</th><th>Hypothesis</th><th>Status</th><th class="r">Test return</th>
     <th class="r">Sharpe</th><th class="r">Trades</th><th>Gates</th></tr></thead><tbody>
     ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
-      <td data-label="Status">${expStatus(e.status)}${e.strategy_id ? `<div class="cell-sub"><span class="${e.strategy_probe ? "probe-chip" : "strategy-chip"}">${e.strategy_probe ? "probe" : "strategy"} #${e.strategy_id}</span></div>` : ""}</td>
+      <td data-label="Status">${expStatus(e.status)}${e.strategy_id ? `<div class="cell-sub"><span class="${e.strategy_probe ? "probe-chip" : "strategy-chip"}">${e.strategy_probe ? `probe #${e.strategy_id} · forward test` : `strategy #${e.strategy_id}`}</span></div>` : ""}</td>
       <td class="r num ${signCls(e.test?.total_return)}" data-label="Test return">${pct(e.test?.total_return)}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
       <td class="r num" data-label="Trades">${e.test?.n_trades ?? "–"}</td><td class="gates" data-label="Gates">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
     <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates, or to start it as a probe.</div>`;
@@ -895,7 +915,9 @@ async function openExperiment(id) {
   const spec = e.spec || {};
   drawer(`Experiment #${e.id}: ${h.title || ""}`, `
     <div class="section">${expStatus(e.status)} <span class="muted">· ${esc(e.venue)} · created ${dt(e.created_at)} · frozen ${dt(e.frozen_at)} · by ${authorLabel(h.author)}</span>
-      ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">strategy ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.status)})</a>` : ""}</div>
+      ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">${e.strategy.probe ? "probe" : "strategy"} ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.probe && e.strategy.status === "active" ? "forward test" : e.strategy.status)})</a>` : ""}</div>
+    ${dec ? `<div class="section"><h4>Decision: ${esc(dec.kind)} (${authorLabel(dec.author)}${dec.llm_call_id ? `, <a href="#" data-llm="${dec.llm_call_id}">inputs</a>` : ""})</h4><div class="pre">${rich(dec.rationale)}</div>
+      ${(dec.details?.lessons || []).length ? `<h4 style="margin-top:10px">Recorded lessons</h4><ul style="padding-left:18px">${dec.details.lessons.map((l) => `<li>${rich(l)}</li>`).join("")}</ul>` : ""}</div>` : ""}
     ${e.test && !e.strategy && e.status !== "running" ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
       <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>
@@ -916,7 +938,9 @@ async function openExperiment(id) {
     ${w ? `<div class="section"><h4>Chronological split (test window sealed until the spec was frozen)</h4>${tl}</div>` : ""}
     ${e.test ? `<div class="section"><h4>Results (net of fees, spread, impact)</h4>${metricsTable([["Train", e.train], ["Validation", e.validation], ["Test", t],
       ["Test ×2 costs", ch.test_cost_x2], ["Test +1 bar delay", ch.test_delay_1bar], [`${t.benchmark_symbol} B&H (test)`, t.benchmark_venue], ["Universe B&H (test)", t.benchmark_universe]])}
-      <div class="muted" style="font-size:12px;margin-top:6px">PSR ${num(t.psr)} · deflated PSR ${num(t.deflated_psr)} vs. expected max Sharpe of ${e.leakage?.n_trials_for_deflation} zero-skill trial(s) (${num(t.sr_star_annualised)} annualised).</div></div>
+      <div class="muted cell-sub" style="margin-top:6px">PSR ${num(t.psr)} · deflated PSR ${num(t.deflated_psr)} vs. expected max Sharpe of ${e.leakage?.n_trials_for_deflation} zero-skill trial(s) (${num(t.sr_star_annualised)} annualised).</div>
+      ${(e.leakage?.n_trials_for_deflation ?? 0) <= 1 ? `<p class="caveat">Deflation counted only ${e.leakage?.n_trials_for_deflation ?? 0} trial, so it barely discounts luck here. Treat deflated PSR as an upper bound.</p>` : ""}
+      ${w && (w.test.end - w.test.start) < 90 * 86400 ? `<p class="caveat">CAGR is annualised from a ${Math.max(1, Math.round((w.test.end - w.test.start) / 86400))}-day test window; short windows exaggerate it. Net return is the measured result.</p>` : ""}</div>
     <div class="section"><h4>Test window: strategy vs. benchmark (growth of $1)</h4><div class="chart-tip" id="exp-tip" style="padding-left:0"></div><div class="chart-wrap" id="exp-chart" style="height:220px"></div>
       <div class="chart-legend" style="padding:0"><span><span class="sw" style="background:var(--series-1)"></span>Strategy (net)</span><span><span class="sw" style="background:var(--series-2)"></span>${esc(t.benchmark_symbol)} buy & hold</span></div></div>
     <div class="section"><h4>Acceptance gates: ${g?.checks ? gateCount(g.checks.length, g.checks.filter((c) => !c.pass).length) : "not evaluated"}</h4>${(g?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? "✓" : "✗"}</span>
@@ -925,9 +949,7 @@ async function openExperiment(id) {
       pre-test sub-periods positive: ${pct(ch.subperiod_positive_frac, 0, false)} · top-5 trades share of pre-test profit: ${ch.top5_concentration_pre_test == null ? "n/a (no profit)" : pct(ch.top5_concentration_pre_test, 0, false)}</div>
       <div class="tbl-scroll" style="margin-top:6px"><table class="tbl"><thead><tr><th>Sub-period</th><th class="r">Return</th><th class="r">Sharpe</th><th class="r">Trades</th></tr></thead><tbody>
       ${(ch.subperiods || []).map((s) => `<tr><td>${day(s.start)} – ${day(s.end)}</td><td class="r num ${signCls(s.total_return)}">${pct(s.total_return)}</td><td class="r num">${num(s.sharpe)}</td><td class="r num">${s.n_trades}</td></tr>`).join("")}</tbody></table></div></div>
-    <div class="section"><h4>Data limitations & possible leakage</h4><ul class="notes secondary" style="font-size:13px;padding-left:18px">${(e.leakage?.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
-    ${dec ? `<div class="section"><h4>Decision: ${esc(dec.kind)} (${authorLabel(dec.author)}${dec.llm_call_id ? `, <a href="#" data-llm="${dec.llm_call_id}">inputs</a>` : ""})</h4><div class="pre">${rich(dec.rationale)}</div>
-      ${(dec.details?.lessons || []).length ? `<h4 style="margin-top:10px">Recorded lessons</h4><ul style="padding-left:18px">${dec.details.lessons.map((l) => `<li>${rich(l)}</li>`).join("")}</ul>` : ""}</div>` : ""}`, `#experiment-${e.id}`);
+    <div class="section"><h4>Data limitations & possible leakage</h4><ul class="notes secondary" style="font-size:13px;padding-left:18px">${(e.leakage?.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}`, `#experiment-${e.id}`);
   if (e.equity_curve?.test?.ts?.length) {
     const chart = LightweightCharts.createChart($("#exp-chart"), { ...themedChartOptions(), autoSize: true });
     const a = chart.addLineSeries({ color: cssVar("--series-1"), lineWidth: 2, priceLineVisible: false });
@@ -1105,6 +1127,18 @@ async function askQuestion(q) {
 }
 
 // ---------------------------------------------------------------- main loop
+// Strips that scroll sideways on phones show a fade on the side that has more items.
+function edgeCue(el) {
+  if (!el) return;
+  const update = () => {
+    el.classList.toggle("more-left", el.scrollLeft > 4);
+    el.classList.toggle("more-right", el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+  el.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", update);
+  update();
+}
+edgeCue($(".sidebar")); edgeCue($("#tabs"));
 // #experiment-2, #strategy-1 and #order-5 open that record's drawer.
 function openFromHash() {
   const m = /^#(experiment|strategy|order)-(\d+)$/.exec(location.hash);

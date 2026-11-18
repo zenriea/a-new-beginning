@@ -105,7 +105,7 @@ test("trading verdict explains why nothing trades", async () => {
   assert.match(tradingVerdict(s).text, /#9 made \+3\.1%.*already running/);
   s.pipeline.live.probes = 1; assert.equal(tradingVerdict(s).tone, "probe");  // probes are not evidence: never success green
   s.pipeline.live.strategies = 1; assert.equal(tradingVerdict(s).tone, "ok"); s.pipeline.live.strategies = 0;
-  s.positions = [{}]; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 live sleeve\./);
+  s.positions = [{}]; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 probe\./);
   s.controls.emergency_stop = true; assert.equal(tradingVerdict(s).tone, "bad");
 });
 
@@ -151,4 +151,37 @@ test("loosening is detected in the direction that adds risk", async () => {
   assert.equal(changeDirection(f("enabled"), false, true), "loosens");
   assert.equal(changeDirection(f("crypto_research_hours"), 2, 8), "changes");
   for (const field of LIMIT_FIELDS) assert.ok([-1, 0, 1].includes(field.loosens), field.k);
+});
+
+test("a paused desk never reads as waiting to trade, in any live state", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const mk = (live, positions) => ({ controls: { paused: true }, worker: { alive: true }, positions,
+    pipeline: { finished: 3, live, candidates: [], gate_failures: [] } });
+  for (const [live, positions] of [[{ strategies: 0, probes: 0 }, []], [{ strategies: 0, probes: 1 }, []],
+    [{ strategies: 2, probes: 1 }, []], [{ strategies: 1, probes: 0 }, [{}, {}]]]) {
+    const v = tradingVerdict(mk(live, positions));
+    assert.equal(v.tone, "warn");
+    assert.match(v.text, /^Paused: no research and no new entries\./);
+    assert.doesNotMatch(v.text, /Waiting for entry|Trading:/);
+  }
+  assert.match(tradingVerdict(mk({ strategies: 0, probes: 1 }, [])).text, /1 probe keeps its sleeve/);
+  assert.match(tradingVerdict(mk({ strategies: 1, probes: 0 }, [{}, {}])).text, /2 open positions are held/);
+});
+
+test("each control state outranks the next: stop, worker, halt, pause", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const s = { controls: { emergency_stop: true, paused: true, drawdown_halt: true }, worker: { alive: false }, positions: [{}],
+    pipeline: { live: { strategies: 1, probes: 0 } } };
+  assert.match(tradingVerdict(s).text, /^Emergency stop/);
+  s.controls.emergency_stop = false; assert.match(tradingVerdict(s).text, /worker is offline/);
+  s.worker.alive = true; assert.match(tradingVerdict(s).text, /risk halt/);
+  s.controls.drawdown_halt = false; assert.match(tradingVerdict(s).text, /^Paused/);
+  s.controls.paused = false; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 strategy\./);
+});
+
+test("live labels count strategies and probes separately", async () => {
+  const { liveLabel } = await import("../web/ui-model.mjs");
+  assert.equal(liveLabel(1, 2), "1 strategy and 2 probes");
+  assert.equal(liveLabel(0, 1), "1 probe");
+  assert.equal(liveLabel(3, 0), "3 strategies");
 });

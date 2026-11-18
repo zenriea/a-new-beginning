@@ -44,6 +44,12 @@ export function gateCount(total, failed) {
   return `${Math.max(0, total - failed)} of ${total} passed`;
 }
 
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+// "1 strategy and 2 probes", never "3 strategies" when some of them are probes.
+export function liveLabel(strategies, probes) {
+  const part = (n, one, many) => n ? `${n} ${n === 1 ? one : many}` : "";
+  return [part(strategies, "strategy", "strategies"), part(probes, "probe", "probes")].filter(Boolean).join(" and ") || "nothing";
+}
 // One sentence that answers "why is (or isn't) the desk trading right now?".
 // Green is kept for evidence (a strategy that passed every gate); probes get their own tone.
 export function tradingVerdict(s) {
@@ -54,10 +60,14 @@ export function tradingVerdict(s) {
   if (c.emergency_stop) return { tone: "bad", text: "Emergency stop is on, so nothing trades." };
   if (!s.worker.alive) return { tone: "bad", text: "The worker is offline, so nothing is researched or traded." };
   if (c.drawdown_halt || c.system_halt) return { tone: "bad", text: "A risk halt blocks new positions; exits still run." };
-  if (s.positions.length) return { tone: liveTone, text: `Trading: ${s.positions.length} open position${s.positions.length > 1 ? "s" : ""} across ${live} live sleeve${live === 1 ? "" : "s"}.` +
-    (strategies ? "" : " Probes only: forward paper tests, not evidence of an edge.") };
-  if (live) return { tone: liveTone, text: `${live} live (${probes} probe${probes === 1 ? "" : "s"}). Waiting for entry signals on the next bar close.` };
-  if (c.paused) return { tone: "warn", text: "The agent is paused: no research and no new positions." };
+  const n = s.positions.length, held = `${n} open position${n === 1 ? "" : "s"}`;
+  // Pause outranks "live": a paused desk must never read as if it is about to trade.
+  if (c.paused) return { tone: "warn", text: `Paused: no research and no new entries.${n ? ` ${held} ${n === 1 ? "is" : "are"} held; exits still run.` :
+    live ? ` ${liveLabel(strategies, probes)} keep${live === 1 ? "s" : ""} ${live === 1 ? "its" : "their"} sleeve; exits still run.` : ""}` };
+  if (n) return { tone: liveTone, text: `Trading: ${held} across ${liveLabel(strategies, probes)}.` +
+    (strategies ? "" : " Probes are forward paper tests, not evidence of an edge.") };
+  if (live) return { tone: liveTone, text: `${cap(liveLabel(strategies, probes))} live. Waiting for entry signals on the next bar close.` +
+    (strategies ? "" : " Forward test only, not evidence of an edge.") };
   if (!p.finished) return { tone: "info", text: "No finished experiment in the last 7 days yet. The first research cycle needs market data." };
   const best = (p.candidates || [])[0];
   const top = (p.gate_failures || [])[0];

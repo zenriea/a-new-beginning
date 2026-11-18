@@ -325,7 +325,7 @@ async def experiment(eid: int):
         e["hypothesis"] = db.row_dict(db.q1("SELECT * FROM hypotheses WHERE id=?", (e["hypothesis_id"],)))
         e["decisions"] = _rows("SELECT * FROM decisions WHERE subject_type='experiment' AND subject_id=? ORDER BY id",
                                (eid,), ("details",))
-        e["strategy"] = db.row_dict(db.q1("SELECT id, name, version, status FROM strategies WHERE experiment_id=?", (eid,)))
+        e["strategy"] = db.row_dict(db.q1("SELECT id, name, version, status, probe FROM strategies WHERE experiment_id=? ORDER BY id DESC", (eid,)))
         return e
     return await run_in_threadpool(f)
 
