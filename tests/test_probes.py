@@ -145,3 +145,22 @@ def test_api_pipeline_and_probe_control(env, monkeypatch):
     db.ex("UPDATE strategies SET experiment_id=? WHERE id=1", (good,))
     r = c.post(f"/api/control/probe_{good}", headers=h)
     assert r.status_code == 409 and "already has a strategy" in r.json()["detail"]
+
+
+def test_strategy_api_lists_symbols_with_holdings(env):
+    import importlib
+    from fastapi.testclient import TestClient
+    from quantdesk import db
+    from quantdesk.config import load_config
+    from conftest import put_quote
+    load_config(reload=True)
+    import quantdesk.api.app as appmod
+    c = TestClient(importlib.reload(appmod).app)
+    sid = make_strategy({"universe": ["AAPL", "MSFT"]})
+    db.ex("INSERT INTO positions(strategy_id, symbol, venue, qty, avg_cost) VALUES(?,?,?,?,?)", (sid, "AAPL", "NASDAQ", 10, 100.0))
+    put_quote("AAPL", 109.9, 110.1)
+    syms = {x["symbol"]: x for x in c.get(f"/api/strategies/{sid}").json()["symbols"]}
+    assert list(syms) == ["AAPL", "MSFT"]
+    assert syms["AAPL"]["qty"] == 10 and syms["AAPL"]["value"] == 1100 and syms["AAPL"]["unrealized"] == 100
+    assert syms["MSFT"]["qty"] == 0 and syms["MSFT"]["pending"] is None
+    assert c.get("/api/strategies").json()[0]["symbols"][0]["symbol"] == "AAPL"

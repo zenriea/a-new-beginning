@@ -1,5 +1,5 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
-import { deskHealth, equityInRange, limitUsage, tradingVerdict } from "./ui-model.mjs?v=20261118-pipeline";
+import { deskHealth, equityInRange, limitUsage, tradingVerdict } from "./ui-model.mjs?v=20261118-symbols";
 
 const $ = (s, el = document) => el.querySelector(s);
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
@@ -451,9 +451,11 @@ async function renderStrategies(body, version) {
   const st = await api("/api/strategies");
   if (version !== state.tabVersion) return;
   if (!st.length) { body.innerHTML = emptyState("Nothing live yet.", "A strategy goes live when an experiment passes every gate. A probe goes live when an idea made money on its sealed test but missed a gate; you can also start one from any experiment."); return; }
-  body.innerHTML = `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>Strategy</th><th>Status</th><th class="r">Allocation</th><th class="r">Live return</th>
+  body.innerHTML = `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>Strategy</th><th>Holding now</th><th>Status</th><th class="r">Allocation</th><th class="r">Live return</th>
     <th class="r">Expected (test CAGR)</th><th class="r">Fills</th><th class="r">Avg slippage</th><th></th></tr></thead><tbody>
-    ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b><a href="#" data-strat="${s.id}">${esc(s.name)} v${s.version}</a></b>${s.probe ? ' <span class="probe-chip">probe</span>' : ""}<div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div></td>
+    ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b><a href="#" data-strat="${s.id}">${esc(s.name)} v${s.version}</a></b>${s.probe ? ' <span class="probe-chip">probe</span>' : ""}<div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div>
+        <div class="sym-list" title="${esc(s.symbols.map((x) => x.symbol).join(", "))}">Trades ${symbolSummary(s.symbols)}</div></td>
+      <td>${holdingCell(s.symbols)}</td>
       <td><span class="status ${esc(s.status)}">${esc(s.status)}</span></td>
       <td class="r num">${money(s.allocation)}<div class="muted" style="font-size:11px">approved ${money(s.approved_allocation)}</div></td>
       <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted" style="font-size:11px">${s.live.days_live}d live</div></td>
@@ -462,6 +464,16 @@ async function renderStrategies(body, version) {
       <td>${s.status === "retired" ? "" : `<button class="btn small" data-retire="${s.id}">Retire</button>`}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
+function symbolSummary(syms, max = 4) {
+  const names = syms.map((x) => x.symbol);
+  return esc(names.slice(0, max).join(", ")) + (names.length > max ? ` <span class="muted">+${names.length - max} more</span>` : "");
+}
+function holdingCell(syms) {
+  const held = syms.filter((x) => x.qty > 0), pend = syms.filter((x) => x.pending);
+  if (!held.length && !pend.length) return `<span class="muted">cash</span>`;
+  return held.map((x) => `<div><b>${esc(x.symbol)}</b> <span class="num muted">${qty(x.qty)} · ${money(x.value)}</span></div>`).join("") +
+    pend.filter((x) => !(x.qty > 0 && x.pending === "buy")).map((x) => `<div class="muted">${esc(x.pending)} ${esc(x.symbol)} pending</div>`).join("");
+}
 async function renderOrders(body, version) {
   const [orders, fills] = await Promise.all([api("/api/orders?limit=100"), api("/api/fills?limit=100")]);
   if (version !== state.tabVersion) return;
@@ -727,10 +739,15 @@ async function openStrategy(id) {
   const sp = s.spec || {};
   drawer(`Strategy ${s.name} v${s.version}`, `
     <div class="section"><span class="status ${esc(s.status)}">${esc(s.status)}</span>${s.probe ? ' <span class="probe-chip">probe</span>' : ""} <span class="muted">· ${esc(s.venue)} · approved ${dt(s.created_at)} · from <a href="#" data-exp="${s.experiment_id}">experiment #${s.experiment_id}</a></span></div>
+    <div class="section"><h4>What it trades (${s.symbols.length} symbol${s.symbols.length === 1 ? "" : "s"})</h4>
+      <div class="sym-grid">${s.symbols.map((x) => `<div class="sym ${x.qty > 0 ? "held" : ""}"><b>${esc(x.symbol)}</b>
+        <span>${x.qty > 0 ? `${qty(x.qty)} @ ${px(x.avg_cost)} · ${money(x.value)} <span class="${signCls(x.unrealized)}">${money(x.unrealized)}</span>` : "not held"}</span>
+        ${x.pending ? `<span class="sym-pend">${esc(x.pending)} order pending</span>` : ""}</div>`).join("")}</div>
+      <div class="muted" style="font-size:12px;margin-top:8px">The rules are checked for every symbol on each 15-minute bar close; it buys whichever symbols signal, sized from its ${money(s.allocation)} sleeve.</div></div>
     <div class="section"><h4>Thesis (recorded at approval)</h4><div class="pre">${rich(s.thesis)}</div></div>
     <div class="section"><h4>Exit plan & invalidation</h4><div class="pre">${rich(s.exit_plan)}</div><div class="secondary" style="font-size:13px;margin-top:6px">${esc(JSON.stringify(s.invalidation))}</div></div>
     <div class="section"><h4>Rules (frozen)</h4><div style="font-size:13px">Entry <code>${esc(sp.entry || "code")}</code><br>Exit <code>${esc(sp.exit || "code")}</code><br>
-      <span class="secondary">params ${esc(JSON.stringify(sp.fixed_params))} · universe ${esc((sp.universe || []).join(", "))}</span></div></div>
+      <span class="secondary">params ${esc(JSON.stringify(sp.fixed_params))}</span></div></div>
     <div class="section"><h4>Live vs expected</h4>${metricsTable([["Test (expected)", s.expectations?.test]])}
       <div class="secondary" style="font-size:13px;margin-top:8px">Live: ${pct(s.live.return)} over ${s.live.days_live} days on ${money(s.allocation)} · realised ${money(s.live.realized, 2)} ·
       unrealised ${money(s.live.unrealized, 2)} · fees ${money(s.live.fees, 2)} · avg slippage ${s.live.avg_slippage_bps ?? "–"} bp · avg spread ${s.live.avg_spread_bps ?? "–"} bp</div></div>
