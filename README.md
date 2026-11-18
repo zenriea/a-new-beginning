@@ -441,3 +441,7 @@ runs.
 * Multi-day unattended operation, the Caddy TLS profile and the systemd units were not run.
 * Railway itself was not used; the single-container mode was tested locally in Docker as Railway runs it
   (root user, volume at `/data`, `PORT`, `run_all`): health, sandbox, worker crash-restart and graceful stop.
+
+## License
+
+MIT; see [LICENSE](LICENSE). This is research and paper-trading software, not financial advice.
