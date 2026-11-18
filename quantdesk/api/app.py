@@ -201,8 +201,6 @@ def _state() -> dict:
         })
     agent_status = db.row_dict(db.q1("SELECT * FROM agent_status WHERE id=1"), ["next_actions"])
     hb = db.q1("SELECT * FROM worker_lock WHERE id=1")
-    researching = db.q1("SELECT e.id, h.title, e.status, e.created_at FROM experiments e JOIN hypotheses h ON "
-                        "h.id=e.hypothesis_id ORDER BY e.id DESC LIMIT 1")
     bench = snap["benchmark_equity"] if snap else None
     data_status = store.status_all()
     uni = settings.get("universe")
@@ -232,7 +230,6 @@ def _state() -> dict:
                     "tracking_since": first["ts"] if first else None, "unpriced": eb["unpriced"]},
         "positions": sorted(pos_rows, key=lambda r: -r["value"]),
         "agent": agent_status,
-        "latest_experiment": dict(researching) if researching else None,
         "sessions": venues.describe_session(now),
         "data": {"problems": bad, "count": len(data_status)},
         "budget": budget_status(),
