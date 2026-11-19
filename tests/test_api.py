@@ -53,7 +53,7 @@ def test_static_ui_served(client):
 
 def test_refreshed_ui_assets_and_module_are_served(client):
     page = client.get("/")
-    assert "20261119-ux2" in page.text
+    assert "20261119-console" in page.text
     assert 'class="sidebar"' in page.text and 'id="equity-ranges"' in page.text and 'id="pipeline-body"' in page.text
     for path in ("/static/app.css", "/static/app.js", "/static/ui-model.mjs"):
         response = client.get(path)
