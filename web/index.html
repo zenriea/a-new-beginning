@@ -20,7 +20,7 @@
       <form id="login-form">
         <input type="password" id="login-pw" aria-label="Operator password" placeholder="Password" autocomplete="current-password" required>
         <button class="btn" type="submit">Sign in</button>
-        <div id="login-err" class="down" style="margin-top:10px"></div>
+        <div id="login-err" class="err" style="margin-top:10px"></div>
       </form>
     </div>
   </div>
@@ -54,13 +54,13 @@
         <div class="desk-health" id="desk-health" role="status"><span class="health-indicator"></span><div><b>Connecting to the desk</b><small>Waiting for the first update</small></div></div>
         <div class="spacer"></div>
         <div class="operator-actions">
+          <button class="btn ghost theme-toggle" id="btn-theme" title="Toggle light/dark theme" aria-label="Toggle light/dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+          <button class="btn ghost hidden" id="btn-logout">Sign out</button>
           <button class="btn" id="btn-pause"><span>Pause<span class="lbl-long"> agent</span></span></button>
           <div class="kill-cell" role="group" aria-label="Emergency stop">
             <button class="btn danger" id="btn-stop" aria-label="Emergency stop"><span class="lbl-long">Emergency stop</span><span class="lbl-short">Stop</span></button>
             <button class="btn hidden" id="btn-clear-stop" aria-label="Clear emergency stop"><span class="lbl-long">Clear emergency stop</span><span class="lbl-short">Clear stop</span></button>
           </div>
-          <button class="btn ghost theme-toggle" id="btn-theme" title="Toggle light/dark theme" aria-label="Toggle light/dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
-          <button class="btn ghost hidden" id="btn-logout">Sign out</button>
         </div>
       </header>
       <div class="statusbar"><div class="badges" id="badges" aria-label="Environment and service status"></div></div>

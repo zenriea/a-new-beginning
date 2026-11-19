@@ -22,7 +22,10 @@ const num = (v, d = 2) => v == null || isNaN(v) ? "–" : Number(v).toLocaleStri
 const qty = (v) => v == null ? "–" : Number.isInteger(v) ? v.toLocaleString() : Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
 const px = (v) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: v < 0.01 ? 10 : v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
 const signCls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
-const arrow = (v) => (v > 0 ? "▲ " : v < 0 ? "▼ " : "");
+// Drawn marks in the rail's stroke style, never text glyphs.
+const svgMark = (d, cls = "") => `<svg class="mark-svg ${cls}" viewBox="0 0 16 16" aria-hidden="true"><path d="${d}"/></svg>`;
+const MARK = { up: svgMark("M8 3.5 13 11H3z", "fill"), down: svgMark("M8 12.5 3 5h10z", "fill"), pass: svgMark("m3.5 8.5 3 3 6-7"), fail: svgMark("m4.5 4.5 7 7m0-7-7 7") };
+const arrow = (v) => (v > 0 ? MARK.up : v < 0 ? MARK.down : "");
 const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "–";
 const day = (ts) => ts ? new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "–";
 function ago(ts) {
@@ -68,7 +71,7 @@ function toast(msg, opts = {}) {
   const t = document.createElement("div"); t.className = `toast ${tone}`;
   if (opts.key) t.dataset.key = opts.key;
   if (tone === "bad") t.setAttribute("role", "alert");
-  t.innerHTML = `<span class="toast-dot" aria-hidden="true"></span><div class="toast-text"><b></b>${opts.detail ? "<small></small>" : ""}</div><button class="toast-x" aria-label="Dismiss">×</button>`;
+  t.innerHTML = `<span class="toast-dot" aria-hidden="true"></span><div class="toast-text"><b></b>${opts.detail ? "<small></small>" : ""}</div><button class="toast-x" aria-label="Dismiss">${MARK.fail}</button>`;
   t.querySelector("b").textContent = msg;
   if (opts.detail) t.querySelector("small").textContent = opts.detail;
   if (opts.exp) { t.classList.add("clickable"); t.dataset.exp = opts.exp; }
@@ -329,7 +332,7 @@ function renderKPIs(s) {
 // ---------------------------------------------------------------- equity chart
 function themedChartOptions() {
   return {
-    layout: { background: { type: "solid", color: cssVar("--surface-1") }, textColor: cssVar("--text-secondary"), fontFamily: getComputedStyle(document.body).fontFamily, fontSize: 12 },
+    layout: { background: { type: "solid", color: cssVar("--surface-1") }, textColor: cssVar("--text-secondary"), fontFamily: cssVar("--mono") || "monospace", fontSize: 12, attributionLogo: false },
     grid: { vertLines: { visible: false }, horzLines: { color: cssVar("--border"), style: 2 } },
     rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false, timeVisible: true },
     crosshair: { mode: 0 },
@@ -343,8 +346,11 @@ function ensureEquityChart() {
   if (state.charts.equity) return state.charts.equity;
   const el = $("#equity-chart");
   const chart = LightweightCharts.createChart(el, { ...themedChartOptions(), autoSize: true });
-  const mk = (v) => chart.addLineSeries({ color: cssVar(v), lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
-  const area = () => ({ lineColor: cssVar("--series-1"), topColor: cssVar("--accent-soft"), bottomColor: "rgba(0,0,0,0)" });
+  // Benchmarks are muted dashed context; only the account carries a last-value label (no label collisions).
+  const mk = (v) => chart.addLineSeries({ color: cssVar(v), lineWidth: 1.5, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+  // The account line is ink; it takes the reserved live cyan only while capital is actually deployed.
+  const area = () => { const live = (state.s?.positions.length || 0) > 0;
+    return { lineColor: cssVar(live ? "--live" : "--text-primary"), topColor: live ? cssVar("--live-soft") : "rgba(0,0,0,0)", bottomColor: "rgba(0,0,0,0)" }; };
   const bench = mk("--series-2"), btc = mk("--series-3");  // added first so the account line draws on top
   const acct = chart.addAreaSeries({ ...area(), lineWidth: 2.5, priceLineVisible: false, lastValueVisible: true });
   const c = { chart, acct, bench, btc };
@@ -378,8 +384,11 @@ function renderEquity() {
     "No snapshots in this period. Choose All to see the recorded history.";
   c.chart.timeScale().fitContent();
   const bs = state.s?.account.benchmark_symbol || "QQQ";
-  $("#equity-legend").innerHTML = [["--series-1", "Account (net of costs)"], ["--series-2", `${bs} buy & hold`], ["--series-3", "BTC-USD buy & hold"]]
-    .map(([v, l]) => `<span><span class="sw" style="background:var(${v})"></span>${esc(l)}</span>`).join("");
+  const live = (state.s?.positions.length || 0) > 0;
+  c.acct.applyOptions({ lineColor: cssVar(live ? "--live" : "--text-primary"), topColor: live ? cssVar("--live-soft") : "rgba(0,0,0,0)" });
+  $("#equity-legend").innerHTML = [[live ? "--live" : "--text-primary", "Account (net of costs)", ""], ["--series-2", `${bs} buy & hold`, "dashed"], ["--series-3", "BTC-USD buy & hold", "dashed"]]
+    .map(([v, l, k]) => `<span><span class="sw ${k}" style="--sw:var(${v})"></span>${esc(l)}</span>`).join("") +
+    `<a class="chart-credit" href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener">Charts: TradingView Lightweight Charts</a>`;
   $("#equity-since").textContent = rows.length ? `${day(rows[0].ts)} — ${day(rows[rows.length - 1].ts)}` : "No recorded marks in this period";
 }
 $("#equity-ranges").addEventListener("click", (event) => {
@@ -551,7 +560,7 @@ async function renderTab({ quiet = false } = {}) {
 function gatesCell(e) {
   if (!e.gates) return `<span class="muted">${e.error ? "could not run" : "not evaluated"}</span>`;
   const failed = e.gates?.failed || [], total = e.gates?.checks?.length || 9;
-  if (!failed.length) return `<span class="up">${gateCount(total, 0)}</span>`;
+  if (!failed.length) return `<span class="pass">${gateCount(total, 0)}</span>`;
   const shown = failed.slice(0, 2), rest = failed.slice(2);
   return `<span class="gate-count">${gateCount(total, failed.length)}</span><div class="chips" aria-label="Failed gates: ${esc(failed.map(gateLabel).join(", "))}">${
     shown.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}${rest.length ? `<span class="gchip more">+${rest.length} more</span>` : ""}</div>`;
@@ -722,7 +731,7 @@ async function renderSystem(body, version) {
         ${state.s.controls.drawdown_halt ? `<button class="btn" data-ctl="reset_drawdown_halt">Reset drawdown halt…</button>` : ""}
         ${state.s.controls.system_halt ? `<button class="btn" data-ctl="clear_system_halt">Clear ledger halt…</button>` : ""}</div></div></div></div>
     <div class="section"><h4>Integrity & isolation</h4><div class="secondary small-text">
-      Ledger rebuilt from fills: <b class="${sys.integrity.ok ? "up" : "down"}">${sys.integrity.ok ? "matches" : "MISMATCH"}</b> (cash ${money(sys.integrity.cash, 2)}).
+      Ledger rebuilt from fills: <b class="${sys.integrity.ok ? "pass" : "err"}">${sys.integrity.ok ? "matches" : "MISMATCH"}</b> (cash ${money(sys.integrity.cash, 2)}).
       Research-code sandbox: ${esc(sys.sandbox.mode)}, env ${esc(sys.sandbox.env)}, network namespace ${sys.sandbox.network_namespace ? "yes" : "no"},
       ${sys.sandbox.mode === "local" && !sys.sandbox.local_supported ? "<b>Python sandbox unavailable: requires Linux/Docker.</b>" : ""}
       ${sys.sandbox.cpu_seconds}s CPU / ${sys.sandbox.memory_mb} MB. LLM: ${esc(sys.llm.demo ? "demo (no key)" : sys.llm.model + " · effort " + sys.llm.effort)},
@@ -942,8 +951,8 @@ async function openExperiment(id) {
       ${(e.leakage?.n_trials_for_deflation ?? 0) <= 1 ? `<p class="caveat">Deflation counted only ${e.leakage?.n_trials_for_deflation ?? 0} trial, so it barely discounts luck here. Treat deflated PSR as an upper bound.</p>` : ""}
       ${w && (w.test.end - w.test.start) < 90 * 86400 ? `<p class="caveat">CAGR is annualised from a ${Math.max(1, Math.round((w.test.end - w.test.start) / 86400))}-day test window; short windows exaggerate it. Net return is the measured result.</p>` : ""}</div>
     <div class="section"><h4>Test window: strategy vs. benchmark (growth of $1)</h4><div class="chart-tip" id="exp-tip" style="padding-left:0"></div><div class="chart-wrap" id="exp-chart" style="height:220px"></div>
-      <div class="chart-legend" style="padding:0"><span><span class="sw" style="background:var(--series-1)"></span>Strategy (net)</span><span><span class="sw" style="background:var(--series-2)"></span>${esc(t.benchmark_symbol)} buy & hold</span></div></div>
-    <div class="section"><h4>Acceptance gates: ${g?.checks ? gateCount(g.checks.length, g.checks.filter((c) => !c.pass).length) : "not evaluated"}</h4>${(g?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? "✓" : "✗"}</span>
+      <div class="chart-legend" style="padding:0"><span><span class="sw" style="--sw:var(--text-primary)"></span>Strategy (net)</span><span><span class="sw dashed" style="--sw:var(--series-2)"></span>${esc(t.benchmark_symbol)} buy & hold</span></div></div>
+    <div class="section"><h4>Acceptance gates: ${g?.checks ? gateCount(g.checks.length, g.checks.filter((c) => !c.pass).length) : "not evaluated"}</h4>${(g?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? MARK.pass : MARK.fail}</span>
       <div><b>${esc(gateLabel(c.name))}</b> <span class="num">${c.value == null ? "n/a" : c.name === "test_trades" ? Math.round(c.value) : num(c.value, 3)} ${esc(c.op)} ${c.name === "test_trades" ? Math.round(c.threshold) : num(c.threshold, 3)}</span><div class="muted cell-sub">${rich(c.why)}</div></div></div>`).join("")}</div>
     <div class="section"><h4>Challenge</h4><div class="secondary" style="font-size:13px">Neighbouring parameters positive: ${pct(ch.neighbor_positive_frac, 0, false)} (median Sharpe ${num(ch.neighbor_median_sharpe)}) ·
       pre-test sub-periods positive: ${pct(ch.subperiod_positive_frac, 0, false)} · top-5 trades share of pre-test profit: ${ch.top5_concentration_pre_test == null ? "n/a (no profit)" : pct(ch.top5_concentration_pre_test, 0, false)}</div>
@@ -952,8 +961,8 @@ async function openExperiment(id) {
     <div class="section"><h4>Data limitations & possible leakage</h4><ul class="notes secondary" style="font-size:13px;padding-left:18px">${(e.leakage?.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}`, `#experiment-${e.id}`);
   if (e.equity_curve?.test?.ts?.length) {
     const chart = LightweightCharts.createChart($("#exp-chart"), { ...themedChartOptions(), autoSize: true });
-    const a = chart.addLineSeries({ color: cssVar("--series-1"), lineWidth: 2, priceLineVisible: false });
-    const b = chart.addLineSeries({ color: cssVar("--series-2"), lineWidth: 2, priceLineVisible: false });
+    const b = chart.addLineSeries({ color: cssVar("--series-2"), lineWidth: 1.5, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    const a = chart.addLineSeries({ color: cssVar("--text-primary"), lineWidth: 2, priceLineVisible: false });
     const toS = (c) => c.ts.map((tt, i) => ({ time: tt, value: c.v[i] })).filter((p, i, arr) => i === 0 || p.time > arr[i - 1].time);
     a.setData(toS(e.equity_curve.test)); b.setData(toS(e.equity_curve.test_benchmark)); chart.timeScale().fitContent();
     chart.subscribeCrosshairMove((p) => { const x = p?.time ? p.seriesData.get(a) : null, y = p?.time ? p.seriesData.get(b) : null;
@@ -988,7 +997,7 @@ async function openOrder(id) {
     <div class="section"><span class="status ${esc(o.status)}">${esc(o.status)}</span> <span class="muted">· ${esc(o.client_order_id)} · origin ${esc(o.origin)}</span></div>
     <div class="section"><h4>Rationale (written ${dt(o.created_at)}, before any fill)</h4><div class="pre">${rich(o.rationale)}</div></div>
     <div class="section"><h4>Risk engine</h4><div class="secondary" style="font-size:13px">${esc(o.risk_check?.reason || o.status_note || "")}</div>
-      ${(o.risk_check?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? "✓" : "✗"}</span><div><b>${esc(c.check)}</b> <span class="muted">${esc(c.detail)}</span></div></div>`).join("")}</div>
+      ${(o.risk_check?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? MARK.pass : MARK.fail}</span><div><b>${esc(c.check)}</b> <span class="muted">${esc(c.detail)}</span></div></div>`).join("")}</div>
     <div class="section"><h4>Execution</h4><div class="secondary" style="font-size:13px">Qty ${qty(o.qty)} · eligible ${dt(o.eligible_at)} · expires ${dt(o.expires_at)} · filled ${qty(o.filled_qty)} @ ${px(o.avg_price)} · fees ${money(o.fees, 2)}</div>
       ${fills.map((f) => `<div style="font-size:13px;margin-top:6px">Fill ${dt(f.ts)}: ${qty(f.qty)} @ ${px(f.price)} (bid ${px(f.ref_bid)} / ask ${px(f.ref_ask)}; ${esc(f.price_basis)}; impact ${num(f.slippage_bps, 1)} bp; fee ${money(f.fee, 2)})</div>`).join("")}</div>`, `#order-${o.id}`);
 }
@@ -1123,7 +1132,7 @@ async function askQuestion(q) {
     }).join(", ");
     $("#answer").innerHTML = `<div class="q">${esc(q)}</div><div class="pre" style="margin-top:4px">${rich(a.answer)}</div>
       <div class="muted" style="font-size:12px;margin-top:6px">${authorLabel(a.author)} · sources: ${cites || "none"}${a.unknowns ? ` · ${esc(a.unknowns)}` : ""}</div>`;
-  } catch (err) { $("#answer").innerHTML = `<div class="down">${esc(err.message)}</div>`; }
+  } catch (err) { $("#answer").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
 // ---------------------------------------------------------------- main loop
