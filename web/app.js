@@ -664,9 +664,11 @@ async function renderMarket(body, version) {
   $("#sym").addEventListener("change", (e) => { state.symbol = e.target.value; renderTab(); });
   if (state.charts.px) { state.charts.px.chart.remove(); state.charts.px = null; }
   const chart = LightweightCharts.createChart($("#px-chart"), { ...themedChartOptions(), autoSize: true });
-  const up = cssVar("--good-mark"), dn = cssVar("--critical-mark");
-  const ser = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderVisible: false, wickUpColor: up, wickDownColor: dn });
-  state.charts.px = { chart, theme: () => chart.applyOptions(themedChartOptions()) };
+  // Direction is not state: up candles are ink, down candles muted grey (the State-Only Colour Rule).
+  const candleColors = () => { const up = cssVar("--text-primary"), dn = cssVar("--text-muted");
+    return { upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn }; };
+  const ser = chart.addCandlestickSeries({ ...candleColors(), borderVisible: false });
+  state.charts.px = { chart, theme: () => { chart.applyOptions(themedChartOptions()); ser.applyOptions(candleColors()); } };
   const [c, fills] = await Promise.all([api(`/api/candles?symbol=${encodeURIComponent(state.symbol)}&limit=500`), api(`/api/fills?symbol=${encodeURIComponent(state.symbol)}&limit=200`)]);
   if (version !== state.tabVersion) return;
   if (!c.bars.length) { $("#px-tip").textContent = "No bars stored for this symbol (data unavailable)."; return; }
