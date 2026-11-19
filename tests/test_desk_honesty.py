@@ -96,3 +96,19 @@ def test_state_reports_last_fill_and_distinct_beliefs(env):
         db.ex("INSERT INTO beliefs(ts, venue, statement, confidence, evidence, status, author) VALUES(?,?,?,?,?,?,?)",
               (clock.now(), "CRYPTO", text, "low", "[]", "active", "llm"))
     assert [b["statement"] for b in c.get("/api/state").json()["beliefs"]] == ["Trend gates on BTC fail on fees."]
+
+
+def test_operator_can_replace_a_venue_universe_and_bad_symbols_are_refused(env):
+    import importlib
+    from fastapi.testclient import TestClient
+    from quantdesk import settings
+    from quantdesk.config import load_config
+    load_config(reload=True)
+    import quantdesk.api.app as appmod
+    c = TestClient(importlib.reload(appmod).app)
+    h = {"X-QD": "1"}
+    crypto = settings.get("universe")["CRYPTO"]
+    assert c.post("/api/settings/universe", json={"NASDAQ": ["QQQ", "AAPL"]}, headers=h).status_code == 200
+    assert settings.get("universe") == {"NASDAQ": ["QQQ", "AAPL"], "CRYPTO": crypto}   # list replaced, other venue kept
+    assert c.post("/api/settings/universe", json={"CRYPTO": ["not a symbol"]}, headers=h).status_code == 400
+    assert settings.get("universe")["CRYPTO"] == crypto

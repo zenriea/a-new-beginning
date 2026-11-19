@@ -366,7 +366,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .ask form { display: flex; gap: 8px; }
 .ask input, .login input { flex: 1; min-width: 0; padding: 10px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--text-primary); font: inherit; font-size: 14px; transition: border-color .15s, box-shadow .15s; }
-.ask input:focus, .login input:focus, .field input:focus, .sel:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.ask input:focus, .login input:focus, .field input:focus, .field textarea:focus, .sel:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .answer { margin-top: 10px; font-size: 13.5px; max-height: 280px; overflow-y: auto; }
 .answer:not(:empty) { background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
 .answer .q { font-weight: 650; }
@@ -421,7 +421,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 /* ------------------------------------------------------------------ settings */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 18px; }
 .field label { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 5px; font-weight: 550; }
-.field input { width: 100%; padding: 8px 11px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--surface-1);
+.field input, .field textarea { width: 100%; padding: 8px 11px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--surface-1);
   color: var(--text-primary); font-family: var(--mono); font-size: 13.5px; transition: border-color .15s, box-shadow .15s; }
 .field .hint { font-size: 12px; color: var(--text-muted); }
 .sel { padding: 7px 10px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-primary); font: inherit; }
@@ -951,3 +951,4 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 6px; font: 600 12px v
 .layout[data-view="journal"] #overview { display: none; }
 .layout:not([data-view="overview"]) { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1260px) { .layout[data-view="overview"] .journal-col { display: none; } }
+.field textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
