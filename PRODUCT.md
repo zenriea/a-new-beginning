@@ -35,7 +35,7 @@ The AI proposes, but deterministic machinery decides: a frozen spec before the o
 - Operator-only actions behind authentication with CSRF: limits and gates (clamped to hard ceilings in `config.py`), probes, re-judge, pause, emergency stop, flatten.
 - Default exploratory gates admit paper experiments but **do not establish a statistically validated edge**; strict gates are available. Probes collect forward records and are not evidence of an edge. The UI must keep these distinctions visible.
 - Costs are always shown: P&L is after simulated costs; AI spend is shown against a budget.
-- Stack: Python API (`quantdesk/api/app.py`) serving a static vanilla HTML/CSS/JS frontend (`web/`), vendored Lightweight Charts, Geist / Geist Mono from Google Fonts. Light and dark themes exist, with the preference saved locally.
+- Stack: Python API (`quantdesk/api/app.py`) serving a static vanilla HTML/CSS/JS frontend (`web/`), vendored Lightweight Charts, Hanken Grotesk and JetBrains Mono from Google Fonts (visual system in DESIGN.md). Light and dark themes exist, with the preference saved locally.
 - Times shown in 24-hour format.
 - Terminology: intent vs. fill, sleeve, probe, incubation, sealed test window, gates, venue (NASDAQ / crypto), benchmark (QQQ, BTC-USD).
 

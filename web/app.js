@@ -353,11 +353,11 @@ function ensureEquityChart() {
   const el = $("#equity-chart");
   const chart = LightweightCharts.createChart(el, { ...themedChartOptions(), autoSize: true });
   // Benchmarks are muted dashed context; only the account carries a last-value label (no label collisions).
-  const mk = (v) => chart.addLineSeries({ color: cssVar(v), lineWidth: 1.5, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+  const mk = (v, style) => chart.addLineSeries({ color: cssVar(v), lineWidth: 1.5, lineStyle: style, priceLineVisible: false, lastValueVisible: false });
   // The account line is ink; it takes the reserved live cyan only while capital is actually deployed.
   const area = () => { const live = (state.s?.positions.length || 0) > 0;
     return { lineColor: cssVar(live ? "--live" : "--text-primary"), topColor: live ? cssVar("--live-soft") : "rgba(0,0,0,0)", bottomColor: "rgba(0,0,0,0)" }; };
-  const bench = mk("--series-2"), btc = mk("--series-3");  // added first so the account line draws on top
+  const bench = mk("--series-2", 2), btc = mk("--series-3", 1);  // dashed QQQ, dotted BTC  // added first so the account line draws on top
   const acct = chart.addAreaSeries({ ...area(), lineWidth: 2.5, priceLineVisible: false, lastValueVisible: true });
   const c = { chart, acct, bench, btc };
   c.theme = () => { chart.applyOptions(themedChartOptions()); c.acct.applyOptions(area()); c.bench.applyOptions({ color: cssVar("--series-2") }); c.btc.applyOptions({ color: cssVar("--series-3") }); };
@@ -392,12 +392,14 @@ function renderEquity() {
   // leave room so the first time label is not clipped at the left edge
   requestAnimationFrame(() => {
     const ts = c.chart.timeScale(), range = ts.getVisibleLogicalRange();
-    if (range) ts.setVisibleLogicalRange({ from: range.from - Math.max(1, (range.to - range.from) * .03), to: range.to + Math.max(1, (range.to - range.from) * .03) });
+    // pad by pixels, not a share of the range, so narrow phones keep the first label whole
+    const perPx = (range?.to - range?.from) / Math.max(1, $("#equity-chart").clientWidth - 70);
+    if (range) ts.setVisibleLogicalRange({ from: range.from - Math.max(1, perPx * 30), to: range.to + Math.max(1, perPx * 18) });
   });
   const bs = state.s?.account.benchmark_symbol || "QQQ";
   const live = (state.s?.positions.length || 0) > 0;
   c.acct.applyOptions({ lineColor: cssVar(live ? "--live" : "--text-primary"), topColor: live ? cssVar("--live-soft") : "rgba(0,0,0,0)" });
-  $("#equity-legend").innerHTML = [[live ? "--live" : "--text-primary", "Account (net of costs)", ""], ["--series-2", `${bs} buy & hold`, "dashed"], ["--series-3", "BTC-USD buy & hold", "dashed"]]
+  $("#equity-legend").innerHTML = [[live ? "--live" : "--text-primary", "Account (net of costs)", ""], ["--series-2", `${bs} buy & hold`, "dashed"], ["--series-3", "BTC-USD buy & hold", "dotted"]]
     .map(([v, l, k]) => `<span><span class="sw ${k}" style="--sw:var(${v})"></span>${esc(l)}</span>`).join("") +
     `<a class="chart-credit" href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener">Charts: TradingView Lightweight Charts</a>`;
   $("#equity-since").textContent = rows.length ? `${day(rows[0].ts)} — ${day(rows[rows.length - 1].ts)}` : "No recorded marks in this period";
@@ -617,7 +619,7 @@ async function renderStrategies(body, version, quiet) {
       <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted cell-sub">${s.live.days_live}d live</div></td>
       <td class="r num">${pct(s.expectations?.test?.cagr)}</td><td class="r num">${s.live.fills}</td>
       <td class="r num">${s.live.avg_slippage_bps == null ? "–" : num(s.live.avg_slippage_bps, 1) + " bp"}</td>
-      <td>${s.status === "retired" ? "" : `<button class="btn small" data-retire="${s.id}">Retire</button>`}</td></tr>`).join("")}</tbody></table></div>`;
+      <td>${s.status === "retired" ? "" : `<button class="btn small danger" data-retire="${s.id}">Retire…</button>`}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function symbolSummary(syms, max = 4) {
@@ -1160,8 +1162,9 @@ function edgeCue(el) {
 }
 edgeCue($(".sidebar")); edgeCue($("#tabs"));
 // Figures inside prose (counts, money, times, percentages) render in the mono face; words stay in the UI face.
-const FIGURE = /(^|[\s(·/,:])([−+-]?[#$]?\d[\d,.:]*(?:%| ?bp|[hmsd×])?)(?=$|[\s),·/;.:]|,\s)/g;
-const SKIP = "code, pre, script, style, svg, input, textarea, select, .num, .kpi .value, .funnel-n, .entry-title, .verdict, h2, h3, h4";
+// Tokens touching a slash ("24/7") are names, not measurements, and stay in the UI face.
+const FIGURE = /(^|[\s(·,:])([−+-]?[#$]?\d[\d,.:]*(?:%| ?bp|[hmsd×])?)(?=$|[\s),·;.:]|,\s)/g;
+const SKIP = "code, pre, script, style, svg, input, textarea, select, .num, .badge, .kpi .value, .funnel-n, .entry-title, .verdict, h2, h3, h4";
 function monoFigures(root) {
   if (!root || root.nodeType !== 1 || root.closest?.(SKIP)) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) =>
