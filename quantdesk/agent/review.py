@@ -34,7 +34,9 @@ def live_stats(strat: dict) -> dict:
     ret = (se["equity"] / strat["allocation"] - 1) if strat["allocation"] else 0.0
     slip = db.q1("SELECT AVG(f.slippage_bps) s, AVG(f.spread_bps) sp FROM fills f JOIN orders o ON o.id=f.order_id "
                  "WHERE o.strategy_id=?", (sid,))
+    peak = ledger.sleeve_peak(sid, strat["allocation"], se["equity"])
     return {"days_live": round(days, 2), "equity": round(se["equity"], 2), "return": ret,
+            "drawdown": (se["equity"] - peak) / peak if peak > 0 else 0.0,
             "realized": round(se["realized"], 2), "unrealized": round(se["unrealized"], 2),
             "fees": round(fills["fees"], 2), "fills": fills["n"], "closed_trades": len({s["order_id"] for s in sells}),
             "avg_slippage_bps": round(slip["s"], 2) if slip["s"] is not None else None,
@@ -80,8 +82,8 @@ def review_strategy(strat: dict, analyst=None) -> dict:
     inval = db.loads(strat["invalidation"], {}) or {}
     flags = []
     max_dd = inval.get("max_live_drawdown_pct")
-    if max_dd and st["return"] <= -abs(max_dd):
-        flags.append(f"live drawdown {st['return']:.1%} breached the recorded limit -{abs(max_dd):.1%}")
+    if max_dd and st["drawdown"] <= -abs(max_dd):
+        flags.append(f"live drawdown {st['drawdown']:.1%} breached the recorded limit -{abs(max_dd):.1%}")
     if band and st["closed_trades"] >= (inval.get("min_trades_before_judging") or 5) and st["return"] < band["low_2_5sd"]:
         flags.append(f"live return {st['return']:+.2%} is below the expectation band low {band['low_2_5sd']:+.2%}")
     try:
@@ -131,7 +133,9 @@ def review_strategy(strat: dict, analyst=None) -> dict:
         db.ex("UPDATE strategies SET last_review_at=? WHERE id=?", (clock.now(), strat["id"]))
         title = f"Retired {strat['name']} v{strat['version']}"
     else:
-        db.ex("UPDATE strategies SET allocation=?, last_review_at=? WHERE id=?", (new_alloc, clock.now(), strat["id"]))
+        with db.tx():
+            ledger.mark_sleeve_peak(strat["id"], strat["allocation"], new_alloc)
+            db.ex("UPDATE strategies SET allocation=?, last_review_at=? WHERE id=?", (new_alloc, clock.now(), strat["id"]))
         title = {"continue": f"Review: keeping {strat['name']} v{strat['version']}",
                  "reduce": f"Reduced exposure: {strat['name']} v{strat['version']}",
                  "increase": f"Increased allocation: {strat['name']} v{strat['version']}"}[action]
