@@ -73,6 +73,7 @@ class Config:
     market_data_mode: str  # "live" or "synthetic"
     # --- web ---
     admin_password: str
+    viewer_password: str  # optional second password: a read-only view for people you show results to
     session_secret: str
     bind_host: str
     bind_port: int
@@ -150,6 +151,19 @@ def _check_admin_password(pw: str) -> str:
     return pw
 
 
+def _check_viewer_password(pw: str, admin: str) -> str:
+    """Optional. Same strength rules as the operator password, and never the same value."""
+    if not pw:
+        return pw
+    if not admin:
+        raise ValueError("QD_VIEWER_PASSWORD needs QD_ADMIN_PASSWORD; without it the desk is local-only")
+    if pw in _PUBLISHED_PASSWORDS or len(pw) < MIN_ADMIN_PASSWORD_LEN:
+        raise ValueError(f"QD_VIEWER_PASSWORD must be your own value of at least {MIN_ADMIN_PASSWORD_LEN} characters")
+    if pw == admin:
+        raise ValueError("QD_VIEWER_PASSWORD must differ from QD_ADMIN_PASSWORD")
+    return pw
+
+
 def load_config(reload: bool = False, **overrides) -> Config:
     global _CONFIG
     if _CONFIG is not None and not reload and not overrides:
@@ -176,6 +190,7 @@ def load_config(reload: bool = False, **overrides) -> Config:
         alpaca_hist_feed=_env("ALPACA_HIST_FEED", "sip"),
         market_data_mode=_env("QD_MARKET_DATA", "live"),
         admin_password=_check_admin_password(_env("QD_ADMIN_PASSWORD")),
+        viewer_password=_check_viewer_password(_env("QD_VIEWER_PASSWORD"), _env("QD_ADMIN_PASSWORD")),
         session_secret=_env("QD_SESSION_SECRET"),
         bind_host=_env("QD_BIND_HOST", "127.0.0.1"),
         bind_port=_env_int("QD_PORT", 8000),

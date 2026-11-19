@@ -1,10 +1,12 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  limitUsage, LIMIT_FIELDS, sameValue, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-console";
+  limitUsage, LIMIT_FIELDS, sameValue, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-seams";
 
 const $ = (s, el = document) => el.querySelector(s);
+// Viewers (read-only share) see results, never controls, prompts or limits.
+const isOperator = () => state.role !== "viewer";
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
-  timers: [], booting: false, tabVersion: 0, lastRefresh: null, equityRows: [], equityRange: "all", equityDecimals: 0, tabKey: null };
+  timers: [], booting: false, role: "operator", researchSort: { key: "id", dir: -1 }, researchRows: null, tabVersion: 0, lastRefresh: null, equityRows: [], equityRange: "all", equityDecimals: 0, tabKey: null };
 
 // ---------------------------------------------------------------- helpers
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -136,9 +138,18 @@ function markNavigation(key) {
     if (active) item.setAttribute("aria-current", "location"); else item.removeAttribute("aria-current");
   });
 }
-function selectTab(key) {
+// Every records tab has its own address (#limits opens Limits & system), so a tab can be bookmarked or sent.
+const TAB_HASH = { research: "research", strategies: "strategies", orders: "orders", market: "market", system: "limits" };
+const HASH_TAB = Object.fromEntries(Object.entries(TAB_HASH).map(([k, v]) => [v, k]));
+function setHash(hash) {
+  const url = hash ? `#${hash}` : location.pathname + location.search;
+  if (location.hash !== (hash ? `#${hash}` : "")) history.replaceState(null, "", url);
+}
+function selectTab(key, { hash = true } = {}) {
+  if (key === "system" && !isOperator()) key = "research";
   const tab = $(`#tabs [data-tab="${key}"]`);
   if (!tab) return;
+  if (hash) setHash(TAB_HASH[key]);
   document.querySelectorAll("#tabs .tab").forEach((item) => {
     const active = item === tab;
     item.classList.toggle("active", active); item.setAttribute("aria-selected", String(active)); item.tabIndex = active ? 0 : -1;
@@ -150,12 +161,14 @@ document.addEventListener("click", (event) => {
   const link = event.target.closest("[data-nav]");
   if (!link) return;
   event.preventDefault();
-  const key = link.dataset.nav;
-  if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key); else if (key !== "pipeline") markNavigation(key);
-  if (key === "pipeline") markNavigation(key);
+  goTo(link.dataset.nav);
+});
+function goTo(key) {
+  if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key);
+  else { markNavigation(key); setHash(key === "overview" ? "" : key); }
   const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : key === "pipeline" ? "#pipeline" : "#records");
   if (target) { target.scrollIntoView({ behavior: "instant", block: "start" }); target.focus({ preventScroll: true }); }
-});
+}
 
 // ---------------------------------------------------------------- auth
 function stopUpdates() {
@@ -203,6 +216,7 @@ function renderBadges(s) {
   const badge = (cls, text, { quiet = false, dot = true, title = "" } = {}) =>
     b.push(`<span class="badge ${cls}${quiet ? " quiet" : ""}"${title ? ` title="${esc(title)}"` : ""}>${dot ? '<span class="dot"></span>' : ""}${text}</span>`);
   badge("paper", "PAPER · no real money", { dot: false });
+  if (!isOperator()) badge("viewer", "VIEW ONLY · results, no controls", { dot: false, title: "Read-only view. Signed in with the viewer password." });
   if (s.mode.llm === "demo") badge("warn", "DEMO analyst · no AI configured");
   else badge("ok", `AI: ${esc(s.mode.llm.split(" (")[0])}`, { quiet: true, title: `AI analyst: ${s.mode.llm}` });
   if (s.mode.market_data === "synthetic") badge("warn", "SYNTHETIC market data");
@@ -249,16 +263,16 @@ function renderAlerts(s) {
     const n = c.emergency_cancelled;
     a.push(["critical", icon.stop, `<b>Emergency stop is on ${when}.</b> ${n != null ? `${n} open order${n === 1 ? " was" : "s were"} cancelled. ` : ""}
       No new research, orders or fills. Positions are held, not sold.
-      Clear it with the button at the top of the page.
-      <div class="alert-actions"><button class="btn small danger" data-ctl="flatten_all">Flatten all positions…</button></div>`]);
+      ${isOperator() ? `Clear it with the button at the top of the page.
+      <div class="alert-actions"><button class="btn small danger" data-ctl="flatten_all">Flatten all positions…</button></div>` : ""}`]);
   } else if (c.paused) a.push(["warning", icon.pause, "<b>The agent is paused.</b> No new research or positions. Exits, fills and risk monitoring continue."]);
-  if (c.drawdown_halt) a.push(["critical", icon.alert, `<b>Max drawdown limit reached.</b> New risk is halted until you reset it in Limits &amp; system.`]);
-  if (c.system_halt) a.push(["critical", icon.alert, "<b>Ledger integrity check failed at startup.</b> New buys are blocked. See Limits &amp; system."]);
+  if (c.drawdown_halt) a.push(["critical", icon.alert, `<b>Max drawdown limit reached.</b> New risk is halted until ${isOperator() ? `you reset it in <a href="#limits" data-nav="system">Limits &amp; system</a>` : "the operator resets it"}.`]);
+  if (c.system_halt) a.push(["critical", icon.alert, `<b>Ledger integrity check failed at startup.</b> New buys are blocked.${isOperator() ? ' See <a href="#limits" data-nav="system">Limits &amp; system</a>.' : ""}`]);
   if (!s.worker.alive) a.push(["critical", icon.alert, "<b>The background worker is not running,</b> so nothing is being researched or traded. Check the worker service."]);
   if (!s.mode.alpaca_configured && s.mode.market_data !== "synthetic") a.push(["warning", icon.alert, "<b>NASDAQ data is not configured</b> (Alpaca keys missing). NASDAQ research and trading are stopped; crypto continues."]);
   if (s.data.problems.length) a.push(["warning", icon.alert, `<b>Data unavailable or stale:</b> ${s.data.problems.slice(0, 6).map((d) => esc(d.key)).join(", ")}${s.data.problems.length > 6 ? "…" : ""}. Dependent actions are stopped.`]);
   if (s.mode.llm === "demo" && !demoAcknowledged()) a.push(["info", icon.info, `<button type="button" class="alert-x" data-ack-demo aria-label="Hide the demo notice; the DEMO badge stays">Got it</button><b>Demo mode.</b> A deterministic rules engine stands in for the AI analyst; its entries are labelled “Rules engine”. Research, tests and trading are real computations.
-    <details class="alert-more"><summary>Connect an AI provider</summary>Set <code>QD_LLM_PROVIDER</code>, <code>QD_LLM_API_KEY</code> and <code>QD_LLM_MODEL</code> (or <code>ANTHROPIC_API_KEY</code>) in <code>.env</code>, then restart the worker.</details>`]);
+    ${isOperator() ? `<details class="alert-more"><summary>Connect an AI provider</summary>Set <code>QD_LLM_PROVIDER</code>, <code>QD_LLM_API_KEY</code> and <code>QD_LLM_MODEL</code> (or <code>ANTHROPIC_API_KEY</code>) in <code>.env</code>, then restart the worker.</details>` : ""}`]);
   const open = $("#alerts .alert-more")?.open;
   $("#alerts").innerHTML = a.map(([k, i, t]) => `<div class="alert ${k}"><span class="icon">${i}</span><div>${t}</div></div>`).join("");
   if (open && $("#alerts .alert-more")) $("#alerts .alert-more").open = true;
@@ -452,7 +466,7 @@ function renderPipeline(s) {
           <div class="cand-main"><a href="#" data-exp="${c.id}">#${c.id} ${esc(c.title)}</a>
             <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}</small></div>
           <span class="cand-ret num ${signCls(c.test_return)}">${pct(c.test_return, 1)}</span>
-          ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` :
+          ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
             `<button class="btn small ${c.test_return > 0 ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Auto-probe skipped: " + c.probe_blocker : "Paper-trade this idea now with a small probe allocation")}">Start probe…</button>`}</li>`).join("")}</ul>`
           : `<p class="muted">No finished experiments in this window.</p>`}</div>
       <div><h3>What blocks ideas</h3>
@@ -460,7 +474,7 @@ function renderPipeline(s) {
           <span class="bar"><i style="width:${(g.n / maxFail * 100).toFixed(0)}%"></i></span><span class="num">${g.n}</span></li>`).join("")}</ul>`
           : `<p class="muted">No gate failures recorded.</p>`}
         <p class="probe-rule">${probe.enabled ? `<b>Probes on.</b> An idea that made more than ${pct(probe.min_test_return, 1)} on its sealed test gets ${pct(probe.allocation_pct, 0, false)} of equity for ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day}/venue/day).`
-          : `<b>Probes off.</b> Only ideas that pass every gate trade.`} <a href="#records" data-nav="system">Change</a></p></div>
+          : `<b>Probes off.</b> Only ideas that pass every gate trade.`}${isOperator() ? ` <a href="#limits" data-nav="system">Change</a>` : ""}</p></div>
     </div>`;
 }
 // Phone check-in: is it trading, why, what happened last, what happens next. Shown above the KPIs on narrow screens.
@@ -524,8 +538,8 @@ function renderPositions(s) {
         ${r.entry_order_id ? `<div style="margin-top:6px"><a href="#" data-order="${r.entry_order_id}">order #${r.entry_order_id}</a></div>` : ""}</div>
       <div><h4>What would make me exit</h4><ul style="margin:0;padding-left:18px">${r.exit_conditions.map((x) => `<li>${rich(x)}</li>`).join("")}</ul>
         <h4 style="margin-top:10px">Exit plan</h4><div class="pre">${rich(r.exit_plan || "–")}</div>
-        <div style="margin-top:8px"><button class="btn small" data-askpos="${esc(r.symbol)}">Ask about ${esc(r.symbol)}</button>
-        <a href="#" data-strat="${r.strategy_id}" style="margin-left:8px">strategy record</a></div></div>
+        <div style="margin-top:8px">${isOperator() ? `<button class="btn small" data-askpos="${esc(r.symbol)}" style="margin-right:8px">Ask about ${esc(r.symbol)}</button>` : ""}
+        <a href="#" data-strat="${r.strategy_id}">strategy record</a></div></div>
     </div></td></tr>` : ""}`;
   }).join("");
   $("#positions").innerHTML = `<table class="tbl"><thead><tr><th>Symbol</th><th>Strategy</th><th class="r">Qty</th><th class="r">Avg cost</th>
@@ -589,22 +603,43 @@ function unchanged(data, version, quiet) {
   return false;
 }
 
+// Research columns sort in place from the loaded rows; missing values always sink to the bottom.
+const RESEARCH_SORT = {
+  id: (e) => e.id, title: (e) => (e.title || "").toLowerCase(), status: (e) => e.status,
+  ret: (e) => e.test?.total_return, sharpe: (e) => e.test?.sharpe, trades: (e) => e.test?.n_trades,
+  gates: (e) => e.gates ? (e.gates.checks?.length || 9) - (e.gates.failed?.length || 0) : null,
+};
+function sortedResearch(rows) {
+  const { key, dir } = state.researchSort, get = RESEARCH_SORT[key];
+  return [...rows].sort((x, y) => {
+    const a = get(x), b = get(y);
+    if (a == null || b == null) return a == null && b == null ? y.id - x.id : a == null ? 1 : -1;
+    const c = typeof a === "string" ? a.localeCompare(b) : a - b;
+    return (c || y.id - x.id) * (c ? dir : 1);
+  });
+}
 async function renderResearch(body, version, quiet) {
   const ex = await api("/api/experiments");
   if (version !== state.tabVersion || unchanged(ex, version, quiet)) return;
+  state.researchRows = ex;
+  drawResearch(body);
+}
+function drawResearch(body = $("#tab-body")) {
+  const ex = state.researchRows || [];
   if (!ex.length) { body.innerHTML = emptyState("The next idea starts here.", "No experiments yet. The first research cycle begins once the worker has market data. Every hypothesis will have a frozen test and a recorded decision."); return; }
   const passed = ex.filter((e) => e.status === "passed").length;
+  const { key, dir } = state.researchSort;
+  const th = (k, label, cls = "") => `<th class="${cls}" aria-sort="${k === key ? (dir > 0 ? "ascending" : "descending") : "none"}"><button type="button" class="sort" data-sort="${k}">${label}<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${k !== key ? "M2 4l3-3 3 3M2 6l3 3 3-3" : dir > 0 ? "M2 6l3-3 3 3" : "M2 4l3 3 3-3"}"/></svg></button></th>`;
   body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
     <span class="summary-count"><span class="${passed ? "up" : ""}">${passed}</span> passed gates</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} missed gates</span></div>
-    <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr><th>#</th><th>Hypothesis</th><th>Status</th><th class="r">Test return</th>
-    <th class="r">Sharpe</th><th class="r">Trades</th><th>Gates</th></tr></thead><tbody>
-    ${ex.map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
+    <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr>${th("id", "#")}${th("title", "Hypothesis")}${th("status", "Status")}${th("ret", "Test return", "r")}
+    ${th("sharpe", "Sharpe", "r")}${th("trades", "Trades", "r")}${th("gates", "Gates")}</tr></thead><tbody>
+    ${sortedResearch(ex).map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
       <td data-label="Status">${expStatus(e.status)}${e.strategy_id ? `<div class="cell-sub"><span class="${e.strategy_probe ? "probe-chip" : "strategy-chip"}">${e.strategy_probe ? `probe #${e.strategy_id} · forward test` : `strategy #${e.strategy_id}`}</span></div>` : ""}</td>
       <td class="r num ${signCls(e.test?.total_return)}" data-label="Test return">${pct(e.test?.total_return)}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
       <td class="r num" data-label="Trades">${e.test?.n_trades ?? "–"}</td><td class="gates" data-label="Gates">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
-    <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates, or to start it as a probe.</div>`;
+    <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates${isOperator() ? ", or to start it as a probe" : ""}.</div>`;
 }
-
 async function renderStrategies(body, version, quiet) {
   const st = await api("/api/strategies");
   if (version !== state.tabVersion || unchanged(st, version, quiet)) return;
@@ -619,7 +654,7 @@ async function renderStrategies(body, version, quiet) {
       <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted cell-sub">${s.live.days_live}d live</div></td>
       <td class="r num">${pct(s.expectations?.test?.cagr)}</td><td class="r num">${s.live.fills}</td>
       <td class="r num">${s.live.avg_slippage_bps == null ? "–" : num(s.live.avg_slippage_bps, 1) + " bp"}</td>
-      <td>${s.status === "retired" ? "" : `<button class="btn small danger" data-retire="${s.id}">Retire…</button>`}</td></tr>`).join("")}</tbody></table></div>`;
+      <td>${s.status === "retired" || !isOperator() ? "" : `<button class="btn small danger" data-retire="${s.id}">Retire…</button>`}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function symbolSummary(syms, max = 4) {
@@ -664,9 +699,11 @@ async function renderMarket(body, version) {
   $("#sym").addEventListener("change", (e) => { state.symbol = e.target.value; renderTab(); });
   if (state.charts.px) { state.charts.px.chart.remove(); state.charts.px = null; }
   const chart = LightweightCharts.createChart($("#px-chart"), { ...themedChartOptions(), autoSize: true });
-  const up = cssVar("--good-mark"), dn = cssVar("--critical-mark");
-  const ser = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderVisible: false, wickUpColor: up, wickDownColor: dn });
-  state.charts.px = { chart, theme: () => chart.applyOptions(themedChartOptions()) };
+  // Direction is not state: up candles are ink, down candles muted grey (the State-Only Colour Rule).
+  const candleColors = () => { const up = cssVar("--text-primary"), dn = cssVar("--text-muted");
+    return { upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn }; };
+  const ser = chart.addCandlestickSeries({ ...candleColors(), borderVisible: false });
+  state.charts.px = { chart, theme: () => { chart.applyOptions(themedChartOptions()); ser.applyOptions(candleColors()); } };
   const [c, fills] = await Promise.all([api(`/api/candles?symbol=${encodeURIComponent(state.symbol)}&limit=500`), api(`/api/fills?symbol=${encodeURIComponent(state.symbol)}&limit=200`)]);
   if (version !== state.tabVersion) return;
   if (!c.bars.length) { $("#px-tip").textContent = "No bars stored for this symbol (data unavailable)."; return; }
@@ -857,6 +894,14 @@ document.addEventListener("click", async (e) => {
   } catch (err) { fail(err); } finally { setTimeout(() => { ctl.disabled = false; }, 3000); }
 });
 $("#tab-body").addEventListener("click", async (e) => {
+  const sort = e.target.closest("[data-sort]");
+  if (sort) {
+    const k = sort.dataset.sort, cur = state.researchSort;
+    // numbers start high-first, names A to Z; a second click reverses
+    state.researchSort = { key: k, dir: cur.key === k ? -cur.dir : ["title", "status"].includes(k) ? 1 : -1 };
+    drawResearch(); $(`#tab-body [data-sort="${k}"]`)?.focus();
+    return;
+  }
   const preset = e.target.closest("[data-gate-preset]");
   if (preset) {
     const name = preset.dataset.gatePreset, values = state.sys?.gate_presets?.[name] || {};
@@ -889,12 +934,13 @@ let closeDrawer = null;
 function drawer(title, html, hash = "") {
   if (closeDrawer) closeDrawer({ keepHash: true });
   const previousFocus = document.activeElement;
+  const previousHash = /^#(experiment|strategy|order)-\d+$/.test(location.hash) ? "" : location.hash;
   $("#drawer-root").innerHTML = `<div class="drawer-bg"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="drawer-h"><h3>${esc(title)}</h3>
     <button class="btn small" id="drawer-close">Close</button></div><div class="drawer-b">${html}</div></div>`;
   // Each record drawer has its own address (#experiment-2), so it can be bookmarked or sent.
   if (hash && location.hash !== hash) history.replaceState(null, "", hash);
   const close = ({ keepHash = false } = {}) => {
-    if (!keepHash && location.hash) history.replaceState(null, "", location.pathname + location.search);
+    if (!keepHash && location.hash !== previousHash) history.replaceState(null, "", previousHash || location.pathname + location.search);
     if (state.charts.exp) { state.charts.exp.chart.remove(); state.charts.exp = null; }
     document.removeEventListener("keydown", onKey);
     $("#drawer-root").innerHTML = ""; $("#app").inert = false; closeDrawer = null;
@@ -938,9 +984,9 @@ async function openExperiment(id) {
   drawer(`Experiment #${e.id}: ${h.title || ""}`, `
     <div class="section">${expStatus(e.status)} <span class="muted">· ${esc(e.venue)} · created ${dt(e.created_at)} · frozen ${dt(e.frozen_at)} · by ${authorLabel(h.author)}</span>
       ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">${e.strategy.probe ? "probe" : "strategy"} ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.probe && e.strategy.status === "active" ? "forward test" : e.strategy.status)})</a>` : ""}</div>
-    ${dec ? `<div class="section"><h4>Decision: ${esc(dec.kind)} (${authorLabel(dec.author)}${dec.llm_call_id ? `, <a href="#" data-llm="${dec.llm_call_id}">inputs</a>` : ""})</h4><div class="pre">${rich(dec.rationale)}</div>
+    ${dec ? `<div class="section"><h4>Decision: ${esc(dec.kind)} (${authorLabel(dec.author)}${dec.llm_call_id && isOperator() ? `, <a href="#" data-llm="${dec.llm_call_id}">inputs</a>` : ""})</h4><div class="pre">${rich(dec.rationale)}</div>
       ${(dec.details?.lessons || []).length ? `<h4 style="margin-top:10px">Recorded lessons</h4><ul style="padding-left:18px">${dec.details.lessons.map((l) => `<li>${rich(l)}</li>`).join("")}</ul>` : ""}</div>` : ""}
-    ${e.test && !e.strategy && e.status !== "running" ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
+    ${e.test && !e.strategy && e.status !== "running" && isOperator() ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
       <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>
     <div class="rejudge-box probe-box"><div><b>Paper-trade it as a probe</b>
@@ -1083,23 +1129,38 @@ $("#filters").addEventListener("click", async (e) => {
     } catch (err) { console.error(err); }
   }
 });
+// The journal reads as a log: one aligned time column, a short kind label, then the entry.
+const KIND_SHORT = { observation: "OBS", research: "RES", hypothesis: "HYP", test: "TEST", decision: "DEC", intent: "INT",
+  order: "ORD", fill: "FILL", review: "REV", risk: "RISK", data: "DATA", system: "SYS" };
+const KIND_FULL = { intent: "intent, not a fill" };
+const dayKey = (ts) => new Date(ts * 1000).toDateString();
 function entryHTML(j, fresh) {
   const refs = j.refs || {};
   const links = [];
   if (refs.experiment_id) links.push(`<a href="#" data-exp="${refs.experiment_id}">experiment #${refs.experiment_id}</a>`);
   if (refs.strategy_id) links.push(`<a href="#" data-strat="${refs.strategy_id}">strategy #${refs.strategy_id}</a>`);
   if (refs.order_id) links.push(`<a href="#" data-order="${refs.order_id}">order #${refs.order_id}</a>`);
-  if (j.llm_call_id) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
+  if (j.llm_call_id && isOperator()) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
   const long = (j.body || "").length > 420;
-  return `<div class="entry k-${esc(j.kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}"><div class="entry-meta"><span class="kind ${esc(j.kind)}">${esc(j.kind === "intent" ? "intent · not a fill" : j.kind)}</span>
-    <span class="author">${authorLabel(j.author)}</span><span title="${esc(new Date(j.ts * 1000).toISOString())}">${dt(j.ts)}</span></div>
-    <div class="entry-title">${rich(j.title)}</div><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
-    <div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div></div>`;
+  const short = KIND_SHORT[j.kind] || String(j.kind || "").slice(0, 4).toUpperCase();
+  const full = KIND_FULL[j.kind] || j.kind;
+  return `<div class="entry k-${esc(j.kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
+    <time class="entry-time" datetime="${esc(new Date(j.ts * 1000).toISOString())}" title="${esc(dt(j.ts))}">${esc(clock24(j.ts))}</time>
+    <span class="kind ${esc(j.kind)}" title="${esc(full)}"><span aria-hidden="true">${esc(short)}</span><span class="sr-only">${esc(full)}</span></span>
+    <div class="entry-title">${rich(j.title)}</div>
+    <div class="entry-main"><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
+      <div class="entry-meta"><span class="author">${authorLabel(j.author)}</span>${j.kind === "intent" ? '<span class="muted">intent, not a fill</span>' : ""}</div>
+      ${long || links.length ? `<div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div>` : ""}</div></div>`;
 }
 function renderFeed(freshIds = new Set()) {
   const kinds = activeKinds();
-  const items = state.journal.filter((j) => !state.filter.size || kinds.has(j.kind));
-  $("#feed").innerHTML = items.length ? items.slice(0, 300).map((j) => entryHTML(j, freshIds.has(j.id))).join("") : `<div class="empty">No journal entries${state.filter.size ? " for this filter" : ""} yet.</div>`;
+  const items = state.journal.filter((j) => !state.filter.size || kinds.has(j.kind)).slice(0, 300);
+  let lastDay = null;
+  $("#feed").innerHTML = items.length ? items.map((j) => {
+    const d = dayKey(j.ts), head = d !== lastDay ? `<div class="log-day" role="separator">${esc(day(j.ts))}</div>` : "";
+    lastDay = d;
+    return head + entryHTML(j, freshIds.has(j.id));
+  }).join("") : `<div class="empty">No journal entries${state.filter.size ? " for this filter" : ""} yet.</div>`;
 }
 $("#feed").addEventListener("click", (e) => {
   const m = e.target.closest("[data-more]"); if (!m) return; e.preventDefault();
@@ -1161,6 +1222,9 @@ function edgeCue(el) {
   update();
 }
 edgeCue($(".sidebar")); edgeCue($("#tabs"));
+// The journal pane sticks flush under the top bar, whose height changes with its content and the viewport.
+new ResizeObserver(([e]) => document.documentElement.style.setProperty("--topbar-h", `${Math.round(e.target.getBoundingClientRect().height)}px`))
+  .observe($(".topbar"));
 // Figures inside prose (counts, money, times, percentages) render in the mono face; words stay in the UI face.
 // Tokens touching a slash ("24/7") are names, not measurements, and stay in the UI face.
 const FIGURE = /(^|[\s(·,:])([−+-]?[#$]?\d[\d,.:]*(?:%| ?bp|[hmsd×])?)(?=$|[\s),·;.:]|,\s)/g;
@@ -1180,11 +1244,54 @@ new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n
   .observe(document.body, { childList: true, subtree: true });
 // #experiment-2, #strategy-1 and #order-5 open that record's drawer.
 function openFromHash() {
+  const tab = HASH_TAB[location.hash.slice(1)];
+  if (tab) { goTo(tab); return; }
   const m = /^#(experiment|strategy|order)-(\d+)$/.exec(location.hash);
   if (!m) return;
   ({ experiment: openExperiment, strategy: openStrategy, order: openOrder })[m[1]](m[2]).catch(fail);
 }
 window.addEventListener("hashchange", openFromHash);
+
+// ---------------------------------------------------------------- keyboard shortcuts
+// Single keys, ignored while typing or with a modifier held. Deliberately no key for Emergency stop,
+// and P only pauses (the safe direction); resuming stays a click.
+const TAB_KEYS = ["research", "strategies", "orders", "market", "system"];
+const shortcutList = () => [
+  ["?", "Show this list"], ["/", isOperator() ? "Ask the desk" : null], ["O", "Overview"], ["J", "Analyst journal"],
+  [`1–${isOperator() ? 5 : 4}`, `Records tabs: ${TAB_KEYS.filter((k) => k !== "system" || isOperator()).map((k) => $(`#tabs [data-tab="${k}"]`).textContent).join(", ")}`],
+  ["P", isOperator() ? "Pause the agent (resume with the button)" : null], ["T", "Switch light / dark theme"], ["Esc", "Close a drawer or dialog"],
+].filter(([, what]) => what);
+function showShortcuts() {
+  if ($(".confirm-dialog.keys")) return;
+  const d = document.createElement("dialog");
+  d.className = "confirm-dialog keys";
+  d.setAttribute("aria-labelledby", "keys-title");
+  d.innerHTML = `<form method="dialog"><h2 id="keys-title">Keyboard shortcuts</h2><dl class="key-list">${shortcutList().map(([k, what]) =>
+    `<div><dt><kbd>${esc(k)}</kbd></dt><dd>${esc(what)}</dd></div>`).join("")}</dl>
+    <p class="muted key-note">Emergency stop has no shortcut, so a stray key can never halt trading.</p>
+    <div class="confirm-actions"><button class="btn" value="cancel">Close</button></div></form>`;
+  d.addEventListener("close", () => d.remove());
+  document.body.appendChild(d); d.showModal(); d.querySelector("button").focus();
+}
+$("#btn-keys").addEventListener("click", showShortcuts);
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || $("#app").classList.contains("hidden")) return;
+  const t = e.target;
+  if (t.closest?.("input, textarea, select, [contenteditable='true']") || document.querySelector("dialog[open]") || closeDrawer) return;
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const tabs = TAB_KEYS.filter((x) => x !== "system" || isOperator());
+  if (k === "?") showShortcuts();
+  else if (k === "/" && isOperator()) { $("#ask-input").focus(); $("#ask-input").scrollIntoView({ block: "nearest" }); }
+  else if (k === "o") goTo("overview");
+  else if (k === "j") goTo("journal");
+  else if (/^[1-5]$/.test(k) && tabs[+k - 1]) goTo(tabs[+k - 1]);
+  else if (k === "t") $("#btn-theme").click();
+  else if (k === "p" && isOperator()) {
+    if (state.s?.controls.paused) toast("The agent is already paused", { key: "control", detail: "Resume it with the Resume agent button." });
+    else if (!$("#btn-pause").disabled) $("#btn-pause").click();
+  } else return;
+  e.preventDefault();
+});
 async function refresh() {
   try {
     const s = await api("/api/state"); state.s = s;
@@ -1207,6 +1314,9 @@ async function boot() {
   const sess = await fetch("/api/session").then((r) => r.json()).catch(() => ({ authenticated: false }));
   if (!sess.authenticated) { showLogin(); return; }
   $("#btn-logout").classList.toggle("hidden", !sess.password_required);
+  state.role = sess.role === "viewer" ? "viewer" : "operator";
+  document.documentElement.dataset.role = state.role;
+  if (!isOperator() && state.tab === "system") state.tab = "research";
   $("#login-view").classList.add("hidden");
   $("#app").classList.remove("hidden");
   renderFilters();

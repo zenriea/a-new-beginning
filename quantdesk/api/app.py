@@ -5,6 +5,8 @@ Security
     Secure when QD_COOKIE_SECURE=1). Without QD_ADMIN_PASSWORD only loopback clients are
     served.
   * State-changing requests must carry header ``X-QD: 1`` (blocks cross-site forms).
+  * Optional QD_VIEWER_PASSWORD signs in a read-only viewer: results only, no controls,
+    limits, audit log or model prompts.
   * Login attempts are rate limited. Secrets never leave the server.
 """
 from __future__ import annotations
@@ -48,39 +50,62 @@ _attempts: dict[str, list[float]] = defaultdict(list)
 
 
 # ------------------------------------------------------------------ auth
-def _sign(exp: int) -> str:
-    mac = hmac.new(_secret, str(exp).encode(), hashlib.sha256).hexdigest()
-    return f"{exp}.{mac}"
+OPERATOR, VIEWER = "operator", "viewer"
+
+
+def _sign(exp: int, role: str = OPERATOR) -> str:
+    payload = str(exp) if role == OPERATOR else f"{exp}-{role}"
+    mac = hmac.new(_secret, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{mac}"
+
+
+def _role(token: str | None) -> str | None:
+    """The signed role of a session cookie, or None when it is missing, forged or expired."""
+    if not token or len(token) > 160 or "." not in token:
+        return None
+    payload = token.split(".", 1)[0]
+    exp, _, role = payload.partition("-")
+    role = role or OPERATOR
+    if role not in (OPERATOR, VIEWER) or not exp.isdigit() or int(exp) < time.time():
+        return None
+    return role if hmac.compare_digest(_sign(int(exp), role), token) else None
 
 
 def _valid(token: str | None) -> bool:
-    if not token or len(token) > 128 or "." not in token:
-        return False
-    exp, mac = token.split(".", 1)
-    if not exp.isdigit() or int(exp) < time.time():
-        return False
-    return hmac.compare_digest(_sign(int(exp)), token)
+    return _role(token) is not None
 
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "?"
 
 
-def require_auth(request: Request):
+def require_auth(request: Request) -> str:
     if not cfg.admin_password:
         if (_client_ip(request) not in ("127.0.0.1", "::1", "testclient")
                 or request.url.hostname not in ("127.0.0.1", "::1", "localhost", "testserver")):
             raise HTTPException(403, "QD_ADMIN_PASSWORD is not set: remote access disabled")
-        return
-    if not _valid(request.cookies.get("qd_session")):
+        return OPERATOR
+    role = _role(request.cookies.get("qd_session"))
+    if role is None:
         raise HTTPException(401, "login required")
+    return role
 
 
-def require_write(request: Request):
-    require_auth(request)
+def require_operator(request: Request):
+    """Reads that only the operator sees: limits, audit log, jobs and model prompts."""
+    if require_auth(request) != OPERATOR:
+        raise HTTPException(403, "read-only view")
+
+
+def _require_csrf(request: Request):
     if request.headers.get("x-qd") != "1":
         raise HTTPException(403, "missing X-QD header")
     _require_same_origin(request)
+
+
+def require_write(request: Request):
+    require_operator(request)
+    _require_csrf(request)
 
 
 def _require_same_origin(request: Request):
@@ -125,16 +150,22 @@ async def login(body: LoginBody, request: Request, response: Response):
     pw = body.password
     if not cfg.admin_password:
         raise HTTPException(400, "no password configured; local access only")
-    if not hmac.compare_digest(hashlib.sha256(pw.encode()).digest(), hashlib.sha256(cfg.admin_password.encode()).digest()):
+    digest = hashlib.sha256(pw.encode()).digest()
+    is_operator = hmac.compare_digest(digest, hashlib.sha256(cfg.admin_password.encode()).digest())
+    # both comparisons always run, so timing does not reveal which password matched
+    is_viewer = bool(cfg.viewer_password) & hmac.compare_digest(digest, hashlib.sha256(cfg.viewer_password.encode()).digest())
+    if not (is_operator or is_viewer):
         await asyncio.sleep(1.0)
         raise HTTPException(401, "wrong password")
-    response.set_cookie("qd_session", _sign(int(now + SESSION_TTL)), max_age=SESSION_TTL, httponly=True,
+    role = OPERATOR if is_operator else VIEWER
+    response.set_cookie("qd_session", _sign(int(now + SESSION_TTL), role), max_age=SESSION_TTL, httponly=True,
                         samesite="strict", secure=cfg.cookie_secure, path="/")
-    db.ex("INSERT INTO audit_log(ts, actor, action, detail) VALUES(?,?,?,?)", (clock.now(), "operator", "login", db.dumps({"ip": ip})))
-    return {"ok": True}
+    db.ex("INSERT INTO audit_log(ts, actor, action, detail) VALUES(?,?,?,?)",
+          (clock.now(), role, "login", db.dumps({"ip": ip})))
+    return {"ok": True, "role": role}
 
 
-@app.post("/api/logout", dependencies=[Depends(require_write)])
+@app.post("/api/logout", dependencies=[Depends(require_auth), Depends(_require_csrf)])
 async def logout(response: Response):
     response.delete_cookie("qd_session", path="/")
     return {"ok": True}
@@ -143,8 +174,8 @@ async def logout(response: Response):
 @app.get("/api/session")
 async def session(request: Request):
     try:
-        require_auth(request)
-        return {"authenticated": True, "password_required": bool(cfg.admin_password)}
+        role = require_auth(request)
+        return {"authenticated": True, "password_required": bool(cfg.admin_password), "role": role}
     except HTTPException:
         return {"authenticated": False, "password_required": bool(cfg.admin_password)}
 
@@ -450,13 +481,13 @@ async def universe():
     return settings.get("universe")
 
 
-@app.get("/api/llm_calls", dependencies=[Depends(require_auth)])
+@app.get("/api/llm_calls", dependencies=[Depends(require_operator)])
 async def llm_calls(limit: int = Query(50, ge=1, le=500)):
     return await run_in_threadpool(_rows, "SELECT id, ts, purpose, model, served_model, input_tokens, output_tokens, "
                                    "cache_read_tokens, cost_usd, status, error FROM llm_calls ORDER BY id DESC LIMIT ?", (limit,))
 
 
-@app.get("/api/llm_calls/{cid}", dependencies=[Depends(require_auth)])
+@app.get("/api/llm_calls/{cid}", dependencies=[Depends(require_operator)])
 async def llm_call(cid: int):
     r = await run_in_threadpool(db.q1, "SELECT * FROM llm_calls WHERE id=?", (cid,))
     if not r:
@@ -466,7 +497,7 @@ async def llm_call(cid: int):
     return d
 
 
-@app.get("/api/system", dependencies=[Depends(require_auth)])
+@app.get("/api/system", dependencies=[Depends(require_operator)])
 async def system():
     def f():
         return {"settings": settings.all_settings(), "defaults": DEFAULT_SETTINGS,

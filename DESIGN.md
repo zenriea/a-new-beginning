@@ -21,6 +21,8 @@ colors:
   destructive-red: "#ff7b72"
   destructive-red-mark: "#f85149"
   on-danger: "#ffffff"
+  on-warning: "#1a1300"
+  grid-dot: "rgba(230, 237, 243, .07)"
   number-violet: "#c678dd"
   benchmark-grey: "#9aa4b2"
   benchmark-grey-dim: "#6b7686"
@@ -157,14 +159,14 @@ components:
 
 **Creative North Star: "The Night-Shift Console"**
 
-QuantDesk is a working console, not a showcase. Graphite panels sit on a near-black ground, divided by 1px hairline seams; there is almost no decoration, and colour is borrowed from code syntax and spent only on state. The operator reads one verdict line, then the live and probe state, then figures that always carry their costs and limits beside them. Density is high and calm: small tracked-capital panel titles, mono figures in fixed columns, tags rather than pills.
+QuantDesk is a working console, not a showcase. Graphite panels touch edge to edge like an editor's panes, divided only by 1px hairline seams, over a near-black ground with a faint dot grid; there is almost no other decoration, and colour is borrowed from code syntax and spent only on state. The operator reads one verdict line, then the live and probe state, then figures that always carry their costs and limits beside them. Density is high and calm: small tracked-capital panel titles, mono figures in fixed columns, tags rather than pills.
 
 The system is dark-first (the house theme is dark by default) with a full "daylight" variant that keeps the same seams, roles and hierarchy on pale grey ground. Depth comes from tonal steps between ground, panel and raised panel, never from resting shadows. The one theatrical gesture is the kill cell: the emergency stop stands alone behind a seam at the very end of the top bar, set apart by empty space, drawn as a dashed red outline that fills only when deliberately hovered or focused. Every other destructive control (Flatten all, Retire) wears the same dashed outline.
 
 It rejects the soft SaaS dashboard: glow backgrounds, gradient tiles, pill-shaped everything and shadowed round cards.
 
 **Key Characteristics:**
-- Graphite tonal layering with 1px seams instead of shadows.
+- Graphite tonal layering with 1px seams instead of shadows; panels touch, with no gaps between them.
 - Syntax-derived state colour; neutral ink for everything that is not state, gains and losses included.
 - Green only for passed evidence; routine "all is well" is Keyword Blue.
 - One reserved cyan for capital that is live right now.
@@ -177,7 +179,7 @@ It rejects the soft SaaS dashboard: glow backgrounds, gradient tiles, pill-shape
 A graphite neutral ladder carries the page; saturated syntax hues appear only where something has a state.
 
 ### Primary
-- **Keyword Blue** (keyword-blue): actions, links, focus rings, active nav and tab, and every routine "fine" signal: the healthy-desk indicator, healthy status-tag dots, the environment dot, the agent's "working" pulse, success toasts, hypothesis, research, decision and review entries in the journal, buy markers on price charts, and the sealed test segment of the train/validation/test bar. **Keyword Blue Bright** (keyword-blue-bright) is its hover step on primary buttons.
+- **Keyword Blue** (keyword-blue): actions, links, focus rings, active nav and tab, and every routine "fine" signal: the healthy-desk indicator, healthy status-tag dots, the environment dot, the agent's "working" pulse, success toasts, filled order statuses, held symbols in a strategy's symbol grid, hypothesis, research, decision and review entries in the journal, buy markers on price charts, and the sealed test segment of the train/validation/test bar. **Keyword Blue Bright** (keyword-blue-bright) is its hover step on primary buttons.
 
 ### Secondary
 - **Live Cyan** (live-cyan): capital that is live right now, and nothing else. It draws the account equity line (with a faint area fill) only while positions are open, the "Live" funnel cell, and the live count in the rail. A 13% tint (live-soft) backs the live funnel cell.
@@ -186,11 +188,11 @@ A graphite neutral ladder carries the page; saturated syntax hues appear only wh
 ### Tertiary (state)
 - **String Green** (string-green, mark string-green-mark): passed evidence and nothing else. The passed-gates count and a ledger that reconciles (the one green text style), passed gate marks, passed and active status tags, strategy chips, and the check-in verdict when a strategy that passed every gate is live.
 - **Warning Amber** (warning-amber, mark warning-amber-mark): demo and synthetic modes, running or pending work, limit changes that loosen, honesty caveats.
-- **Destructive Red** (destructive-red, mark destructive-red-mark): failed gates, risk entries, errors, halted desk, and destructive controls. Each state hue has a text value and a brighter or deeper "mark" value for dots, bars and fills, plus a 9 to 14% tint for backgrounds. **On Danger** (on-danger) is the text and icon colour on a filled red surface (hovered danger button, confirm button, critical alert icon) in both themes.
+- **Destructive Red** (destructive-red, mark destructive-red-mark): failed gates, risk entries, errors, halted desk, and destructive controls. Each state hue has a text value and a brighter or deeper "mark" value for dots, bars and fills, plus a 9 to 14% tint for backgrounds. **On Danger** (on-danger) is the text and icon colour on a filled red surface (hovered danger button, confirm button, critical alert icon) in both themes; **On Warning** (on-warning) is the same for the filled amber warning alert icon.
 - **Benchmarks:** muted greys, never a hue. Benchmark Grey (benchmark-grey) draws the equity benchmark (QQQ by default) dashed, and sell markers on price charts; Benchmark Grey Dim (benchmark-grey-dim) draws the BTC-USD benchmark dotted, and the dots of intent, order and fill entries in the journal.
 
 ### Neutral
-- **Graphite Ground** (graphite-ground): page, rail and top bar background.
+- **Graphite Ground** (graphite-ground): page, rail and top bar background, carrying a faint 16px dot grid (grid-dot: ink at 7% dark, 11% daylight) fixed to the viewport so the rail, bar and page line up. It is the only texture; panels stay flat on top of it.
 - **Panel** (panel): cards, inputs, drawers, dialogs.
 - **Panel Raised** (panel-raised): hover fills, tags, segmented-control wells, detail rows.
 - **Panel Pressed** (panel-pressed): active button, empty metric tracks, the train segment.
@@ -202,9 +204,9 @@ The daylight theme redefines the same token names (ground #f4f5f7, panel #ffffff
 ### Named Rules
 **The Reserved Ink Rule.** Live Cyan marks capital that is live right now and nothing else. If no sleeve is live, no cyan appears on the screen.
 
-**The State-Only Colour Rule.** Direction is carried by sign and drawn SVG marks, not colour: positive and negative returns and P&L both render in Ink. Hue is spent on state (passed, probe, warning, failed, live), never on decoration.
+**The State-Only Colour Rule.** Direction is carried by sign and drawn SVG marks, not colour: positive and negative returns and P&L both render in Ink, and price candles are Ink when up and Ink Muted when down. Hue is spent on state (passed, probe, warning, failed, live), never on decoration.
 
-**The Green Is Evidence Rule.** Green means a gate was passed, nothing weaker. Healthy services, recorded decisions and successful saves are Keyword Blue; the PAPER tag is neutral ink.
+**The Green Is Evidence Rule.** Green means a gate was passed, nothing weaker. Healthy services, recorded decisions, successful saves, filled orders and held symbols are Keyword Blue; the PAPER tag is neutral ink.
 
 **The Probe Is Not Proof Rule.** Probes are violet everywhere they appear. They never take green.
 
@@ -232,7 +234,7 @@ Both load from Google Fonts as variable weight ranges (400 to 700), so the 550 a
 
 ## Layout
 
-A fixed 232px left rail, a sticky 64px top bar (desk health at the left; then, at the right, the theme toggle, Pause, and the kill cell, which always ends the bar), a status strip of mode tags, then a two-column grid: a fluid main column and a 380px journal column (340px between 1261 and 1480px) that sticks below the top bar at full viewport height. Content caps at 1920px. Gutters are 32px on desktop and 16px on phones; columns and stacked panels are separated by 24px (16px on phones).
+A fixed 232px left rail, a sticky 64px top bar (desk health at the left; then, at the right, the theme toggle, Pause, and the kill cell, which always ends the bar), a status strip of mode tags, then a two-column grid: a fluid main column and a 380px journal column (340px between 1261 and 1480px) that sticks below the top bar at full viewport height. Content caps at 1920px. Gutters are 32px on desktop and 16px on phones for the top bar, status strip and alerts. The panel grid itself is full-bleed and seamed: the main column, the journal pane and every stacked panel touch, divided by 1px seams (a seam along the top and bottom of the grid, one between the columns, one under each panel; side-by-side panels such as the account tiles and the agent/beliefs pair divide the same way). The journal pane sticks flush under the top bar, whose height is measured at runtime.
 
 Spacing steps on 4px: 4, 8, 12, 16, 20, 24, 32. Panel headers are 48px tall with 20px side padding; panel bodies pad 18px 20px 20px.
 
@@ -251,7 +253,7 @@ Flat by default. Resting surfaces have no shadow (the shadow token is `none`); d
 
 ## Shapes
 
-Three tight radii and nothing rounder: 4px for tags, statuses, counts and filter chips; 5px for buttons, inputs, nav items and small wells; 6px for panels, alerts, dialogs and the funnel. Focus outlines are 2px Keyword Blue, offset 2px, at 4px radius. Only indicator dots are circles. Strips of related cells (the account strip, the funnel, the timeline bar) share one outer border and divide internally by seams, clipped to the outer radius. Dashed strokes are a meaning, not a decoration: destructive controls, intents (not yet fills) in the journal, the dashed and dotted benchmark lines, and empty-state frames.
+Three tight radii and nothing rounder: 4px for tags, statuses, counts, filter chips, inline code, keycaps and the square alert icons and gate marks; 5px for buttons, inputs, nav items and small wells; 6px for alerts, dialogs, the funnel and inner groups. Panels in the seamed grid are square, since they touch. Focus outlines are 2px Keyword Blue, offset 2px, at 4px radius. Only indicator dots are circles. Strips of related cells (the account strip, the funnel, the timeline bar) share one outer border and divide internally by seams, clipped to the outer radius. Dashed strokes are a meaning, not a decoration: destructive controls, intents (not yet fills) in the journal, the dashed and dotted benchmark lines, and empty-state frames.
 
 ## Components
 
@@ -273,10 +275,10 @@ Tags, not pills.
 - **Filter chips:** outlined; the selected chip takes a blue tint and blue text.
 
 ### Cards / Containers
-- **Corner Style:** 6px.
+- **Corner Style:** square inside the seamed grid; 6px for free-standing surfaces (sign-in, dialogs).
 - **Background:** Panel on Graphite Ground.
 - **Shadow Strategy:** none; see Elevation & Depth.
-- **Border:** 1px Seam; headers divide from bodies by a seam.
+- **Border:** none of their own in the grid; they share 1px seams with their neighbours. Headers divide from bodies by a seam.
 - **Internal Padding:** 18px 20px 20px; 14px 16px 18px on phones.
 
 ### Inputs / Fields
@@ -290,7 +292,7 @@ Tags, not pills.
 - **Mobile:** the rail becomes a single scrolling row without labels or counts.
 
 ### Check-in band (Signature)
-The first answer on every screen: one verdict line at headline size beside "Latest" and "Next" rows, inside a 6px panel tinted 8% toward its state hue (blue working, green clear, amber warning, red halted, violet probing) with a matching state seam.
+The first answer on every screen: one verdict line at headline size beside "Latest" and "Next" rows, in the top pane of the grid, tinted 8% toward its state hue (blue working, green clear, amber warning, red halted, violet probing) with a 3px state edge on its left.
 
 ### Kill cell (Signature)
 The emergency stop lives alone at the far right of the top bar, after the theme toggle and Pause, behind a 1px Seam Strong divider with 16px of empty space on each side, using the dashed danger button at 650 weight. Clear emergency stop replaces it in place when the desk is stopped. Every destructive action opens a confirmation dialog that states exactly what will and will not happen.
@@ -302,7 +304,16 @@ The pipeline's five stages as one seam-divided strip: a single 6px outer border,
 The account line is Ink at 2.5px and the only series with a last-value label; it turns Live Cyan, with a faint cyan area, only while positions are open. Benchmarks are 1.5px muted greys, QQQ dashed and BTC-USD dotted, with no last-value labels. Axes and the crosshair readout are mono at 12px; only dashed horizontal seam gridlines; ticks read 24-hour times, a short date ("Nov 19") where the day changes. The library logo is off; the legend ends with a muted credit link to TradingView Lightweight Charts.
 
 ### Journal entry
-A 1px seam timeline down the left with a 9px state dot per entry (blue for hypothesis, research, decision and review; violet for tests; dim grey for intents, orders and fills; red for risk; amber for data); meta row with a mono kind tag, author and mono time, a 14px title at 600, and secondary body text that clamps with a fade and expands in place.
+A log line, not a card: a 40px mono column of 24-hour times, a short mono kind label (OBS, RES, HYP, TEST, DEC, INT, ORD, FILL, REV, RISK, DATA, SYS; full name for screen readers and on hover) tinted from the entry's state hue (blue for hypothesis, research, decision and review; violet for tests; dim grey for intents, orders and fills; red for risk; amber for data), then a 13.5px title at 600. Body, author and record links sit underneath, starting at the kind column. Entries divide by seams, and a sticky small-caps day divider ("Nov 19, 2026") opens each date. Intents keep a dashed label and say "intent, not a fill". Long bodies clamp with a fade and expand in place.
+
+### Research table
+Every column header is a button that sorts the loaded rows in place (aria-sort on the header, a small arrow that turns Keyword Blue on the active column). Numbers start high-first and names A to Z; a second click reverses; missing values always sink to the bottom.
+
+### Shortcuts and addresses
+`?` opens a keyboard list in the confirmation-dialog style with mono keycaps: `/` ask, `O` overview, `J` journal, `1`-`5` records tabs, `T` theme, `P` pause. Emergency stop has no key, and `P` never resumes. Each records tab has an address (`#research`, `#strategies`, `#orders`, `#market`, `#limits`) that the rail links to and the URL follows.
+
+### Read-only view
+Signed in with the viewer password, the same screen shows results only: the Pause button, the kill cell, Ask the desk, the Limits & system tab and every probe, retire, re-judge and model-input control are absent, not disabled. A Keyword Blue outlined "VIEW ONLY" tag follows the PAPER tag.
 
 ## Do's and Don'ts
 
@@ -314,7 +325,8 @@ A 1px seam timeline down the left with a 9px state dot per entry (blue for hypot
 - **Do** draw destructive controls (Emergency stop, Flatten all, Retire) as dashed red outlines that fill only on hover or focus, isolated from neighbouring controls, and confirm them in a dialog.
 - **Do** use Keyword Blue for routine health, recorded decisions and successful actions.
 - **Do** draw benchmarks as muted grey lines, dashed for the equity benchmark and dotted for BTC, without last-value labels.
-- **Do** keep radii at 4px (tags), 5px (controls) and 6px (panels).
+- **Do** keep radii at 4px (tags, icons), 5px (controls) and 6px (free-standing surfaces); grid panels are square.
+- **Do** let panels touch with a 1px seam rather than float with gaps.
 - **Do** keep the PAPER tag visible on every screen in both themes.
 - **Do** cancel or strike through retired and stopped items rather than removing them.
 
@@ -326,3 +338,4 @@ A 1px seam timeline down the left with a 9px state dot per entry (blue for hypot
 - **Don't** wrap figures that are part of a name ("24/7") or tag text in the mono face.
 - **Don't** set any text below 12px.
 - **Don't** use a radius above 6px or a fully rounded shape for anything except indicator dots.
+- **Don't** give Emergency stop a keyboard shortcut.
