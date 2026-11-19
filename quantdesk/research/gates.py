@@ -15,6 +15,15 @@ def _g(name, value, op, threshold, why):
     return {"name": name, "value": value, "op": op, "threshold": threshold, "pass": bool(ok), "why": why}
 
 
+def _top5(t: dict, threshold) -> dict:
+    """Sealed-test profit share of the 5 best trades. Pre-test concentration stays in the record."""
+    chk = _g("top5_concentration", t.get("top5_concentration"), "<=", threshold,
+             "Sealed-test profits should not hinge on a handful of trades.")
+    if chk["value"] is None and not (t.get("total_return") or 0) > 0:
+        chk.update({"pass": True, "why": "No positive sealed-test profit to concentrate, so this check does not apply."})
+    return chk
+
+
 def evaluate(result: dict, g: dict) -> dict:
     t, v, c = result["test"], result["validation"], result["challenge"]
     checks = [
@@ -32,8 +41,7 @@ def evaluate(result: dict, g: dict) -> dict:
            "Nearby parameter values should also work (not a lucky point)."),
         _g("subperiod_positive_frac", c.get("subperiod_positive_frac"), ">=", g["min_subperiod_positive_frac"],
            "Pre-test performance should not come from a single period."),
-        _g("top5_concentration", c.get("top5_concentration_pre_test"), "<=", g["max_top5_concentration"],
-           "Profits should not hinge on a handful of trades."),
+        _top5(t, g["max_top5_concentration"]),
         _g("deflated_psr", t.get("deflated_psr"), ">=", g["min_deflated_psr"],
            "PSR score against the expected best of N zero-skill trials, under sampling assumptions; not proof of an edge."),
     ]

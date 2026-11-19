@@ -257,3 +257,28 @@ test("live labels count strategies and probes separately", async () => {
   assert.equal(liveLabel(0, 1), "1 probe");
   assert.equal(liveLabel(3, 0), "3 strategies");
 });
+
+test("verdict names an unallocated gate pass, never a dead bar-size winner", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const dead = { id: 11, test_return: 0.21, bar_size_mismatch: "it was tested on a different bar size" };
+  const s = { controls: { emergency_stop: false, paused: false }, worker: { alive: true }, positions: [],
+    pipeline: { finished: 60, profitable: 19, profitable_current_bar: 18, live: { strategies: 0, probes: 0 }, gate_failures: [],
+      candidates: [{ id: 47, test_return: 0.059, sharpe: 1.17, passed: true, allocated: false }, dead] } };
+  const v = tradingVerdict(s).text;
+  assert.match(v, /#47 passed every gate \(test \+5\.9%, Sharpe 1\.17\) but was not allocated/);
+  assert.doesNotMatch(v, /#11|waiting/i);
+  s.pipeline.live.probes = 1;
+  assert.match(tradingVerdict(s).text, /#47 passed every gate .* not allocated\./);
+  s.pipeline = { finished: 3, profitable: 1, profitable_current_bar: 0, live: { strategies: 0, probes: 0 }, gate_failures: [],
+    candidates: [dead] };
+  assert.match(tradingVerdict(s).text, /^No experiment on the current bar size made money.*1 profitable one was tested on another bar size/);
+  assert.doesNotMatch(tradingVerdict(s).text, /#11/);
+});
+
+test("an uninvested account is not said to beat or trail the benchmark", () => {
+  const rows = [{ ts: 10, equity: 100000, benchmark_equity: 100, gross: 0 }, { ts: 20, equity: 100000, benchmark_equity: 98, gross: 0 }];
+  assert.equal(equityComparison(rows, null).uninvested, true);
+  assert.equal(equityComparison(rows, 5).uninvested, true);     // last fill before the range
+  assert.equal(equityComparison(rows, 15).uninvested, false);   // a fill inside the range
+  assert.equal(equityComparison([rows[0], { ...rows[1], gross: 500 }], null).uninvested, false);
+});

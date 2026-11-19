@@ -116,7 +116,7 @@ def test_research_cycle_via_openai_compatible_provider(compat):
     from quantdesk.agent.llm import LLM
     from quantdesk.agent.research_loop import research_cycle
     _seed_nasdaq()
-    hyp = {"decision": "investigate", "why": "w", "title": "Trend", "rationale": "r", "prediction": "p",
+    hyp = {"decision": "investigate", "holding_period_bars": 26, "edge_bps_per_trade": 500, "lookbacks_in_time": "26 bars = 1 session", "why": "w", "title": "Trend", "rationale": "r", "prediction": "p",
            "falsification": "f", "parent_experiment_id": None,
            "spec": {"name": "trend", "universe": ["AAPL", "MSFT"], "kind": "dsl", "entry": "close > sma(close, n)",
                     "exit": "close < sma(close, n)", "code": None, "rank_by": None, "top_k": None,

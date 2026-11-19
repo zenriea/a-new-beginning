@@ -231,24 +231,14 @@ GATE_PRESETS = {
 DEFAULT_SETTINGS: dict = {
     "universe": {
         # US equities (the venue is named NASDAQ but any Alpaca-listed stock/ETF works, NYSE too)
+        # Defaults only: liquid large caps and broad unleveraged ETFs; crypto majors. No single-name
+        # lottery tickets, leveraged or inverse ETFs, or memecoins. Saved operator settings are kept.
         "NASDAQ": ["QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO",
                    "TSLA", "COST", "NFLX", "AMD", "PEP", "ADBE", "CSCO",
-                   # liquid, higher-volatility mid/large caps
-                   "PLTR", "COIN", "MSTR", "HOOD", "SOFI", "MARA", "RIOT", "SMCI", "ARM", "MU",
-                   "INTC", "PYPL", "ABNB", "CRWD", "DDOG", "ZS", "AFRM", "DKNG", "RIVN",
-                   "TSM", "BABA", "UBER", "NET", "RBLX", "CVNA", "SNAP", "PINS", "NIO", "F", "CCL", "AAL",
-                   # small/mid-cap movers (very volatile)
-                   "GME", "AMC", "IONQ", "RGTI", "QBTS", "SOUN", "BBAI", "RKLB", "ACHR", "JOBY", "OKLO",
-                   "SMR", "HIMS", "UPST", "CLSK", "PLUG", "LCID", "OPEN",
-                   # ETFs, incl. leveraged/inverse (long-only account; the inverse ones act as hedges)
-                   "SPY", "IWM", "DIA", "SMH", "XLF", "XLE", "ARKK",
-                   "TQQQ", "SQQQ", "SOXL", "SOXS", "UPRO", "TNA"],
-        "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD",
-                   "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD", "UNI-USD", "AAVE-USD", "NEAR-USD",
-                   "SUI-USD", "APT-USD", "ARB-USD", "OP-USD", "SEI-USD", "HBAR-USD", "FET-USD",
-                   "RENDER-USD", "INJ-USD", "TIA-USD", "XLM-USD", "ATOM-USD", "FIL-USD", "ALGO-USD",
-                   # memecoins
-                   "PEPE-USD", "SHIB-USD", "BONK-USD", "WIF-USD", "FLOKI-USD"],
+                   "INTC", "MU", "TSM", "UBER", "PYPL", "CRWD",
+                   "SPY", "IWM", "DIA", "SMH", "XLF", "XLE"],
+        "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD",
+                   "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD"],
     },
     "benchmarks": {"NASDAQ": "QQQ", "CRYPTO": "BTC-USD", "account": "QQQ"},
     "risk": {

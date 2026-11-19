@@ -271,7 +271,8 @@ def _state() -> dict:
         "strategies": [dict(r) | {"spec": None} for r in db.q("SELECT id, name, version, venue, status, allocation, "
                                                                  "approved_allocation, created_at, probe FROM strategies "
                                                                  "WHERE status IN ('active','incubating') ORDER BY id")],
-        "beliefs": [db.row_dict(b, ["evidence"]) for b in db.q("SELECT * FROM beliefs WHERE status='active' ORDER BY id DESC LIMIT 10")],
+        "beliefs": _distinct_beliefs(),
+        "last_fill_ts": db.q1("SELECT MAX(ts) t FROM fills")["t"],
         "counts": {k: db.q1(f"SELECT COUNT(*) n FROM {t}")["n"] for k, t in
                    (("experiments", "experiments"), ("hypotheses", "hypotheses"), ("orders", "orders"),
                     ("fills", "fills"), ("strategies", "strategies"))},
@@ -361,34 +362,34 @@ async def experiment(eid: int):
     return await run_in_threadpool(f)
 
 
+def _distinct_beliefs(limit: int = 10) -> list[dict]:
+    """Newest active beliefs, one per claim per venue (older rows may hold several phrasings of one fact)."""
+    from ..agent.research_loop import same_claim
+    out: list[dict] = []
+    for b in db.q("SELECT * FROM beliefs WHERE status='active' ORDER BY id DESC"):
+        if not any(o["venue"] == b["venue"] and same_claim(o["statement"], b["statement"]) for o in out):
+            out.append(db.row_dict(b, ["evidence"]))
+    return out[:limit]
+
+
 def _pipeline(now: float) -> dict:
     """Why the desk is or is not trading: recent research outcomes and the closest candidates."""
-    from ..agent.research_loop import probe_blocker
+    from ..agent.research_loop import ranked_candidates
     since = now - 7 * 86400
-    rows = [dict(r) for r in db.q("SELECT e.id, e.venue, e.status, e.test, e.gates, e.created_at, h.title FROM experiments e "
-                                  "JOIN hypotheses h ON h.id=e.hypothesis_id WHERE e.created_at>=? ORDER BY e.id DESC", (since,))]
+    rows = [dict(r) for r in db.q("SELECT status, gates FROM experiments WHERE created_at>=?", (since,))]
     fails: dict[str, int] = {}
-    cands = []
     for r in rows:
-        g = db.loads(r["gates"], {}) or {}
-        for f in g.get("failed") or []:
+        for f in (db.loads(r["gates"], {}) or {}).get("failed") or []:
             fails[f] = fails.get(f, 0) + 1
-        t = db.loads(r["test"], {}) or {}
-        if t.get("total_return") is not None:
-            cands.append({"id": r["id"], "title": r["title"], "venue": r["venue"], "status": r["status"],
-                          "test_return": t["total_return"], "sharpe": t.get("sharpe"), "trades": t.get("n_trades"),
-                          "failed": g.get("failed") or [], "n_checks": len(g.get("checks") or []) or 9})
-    cands.sort(key=lambda c: -c["test_return"])
-    for c in cands[:3]:
-        e = db.q1("SELECT * FROM experiments WHERE id=?", (c["id"],))
-        c["probe_blocker"] = probe_blocker(dict(e))
-        c["operator_blocker"] = probe_blocker(dict(e), operator=True)
+    cands = ranked_candidates(since)
     counts = {k: db.q1(f"SELECT COUNT(*) n FROM strategies WHERE status IN ('active','incubating') AND probe={v}")["n"]
               for k, v in (("strategies", 0), ("probes", 1))}
     finished = [r for r in rows if r["status"] in ("passed", "failed")]
     return {"window_days": 7, "experiments": len(rows), "finished": len(finished),
             "passed": sum(r["status"] == "passed" for r in rows),
+            "passed_unallocated": sum(1 for c in cands if c["passed"] and not c["allocated"] and not c["bar_size_mismatch"]),
             "profitable": sum(1 for c in cands if c["test_return"] > 0),
+            "profitable_current_bar": sum(1 for c in cands if c["test_return"] > 0 and not c["bar_size_mismatch"]),
             "gate_failures": sorted(({"gate": k, "n": v} for k, v in fails.items()), key=lambda x: -x["n"]),
             "candidates": cands[:3], "live": counts, "probe": settings.get("probe")}
 

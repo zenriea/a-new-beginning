@@ -299,9 +299,24 @@ class AnalystThread(threading.Thread):
                 ([f"{n_probes} probe{'' if n_probes == 1 else 's'} (forward test{'' if n_probes == 1 else 's'})"] if n_probes else [])
         live_n = n_strats + n_probes
         detail = (f"Monitoring {' and '.join(parts)} and the markets between research cycles"
-                  if live_n else "No strategy or probe is live yet. Waiting for an idea that passes the gates or makes "
-                                 "money on its sealed test (probe), until the next research cycle")
+                  if live_n else idle_detail(now))
         journal.set_status("waiting", detail, next_actions=next_actions())
+
+
+def idle_detail(now: float) -> str:
+    """Worker status when nothing is live; names the same top candidate as the pipeline and the UI verdict."""
+    from .agent.research_loop import ranked_candidates
+    best = next(iter(ranked_candidates(now - 7 * 86400)), None)
+    if best and not best["bar_size_mismatch"]:
+        if best["passed"] and not best["allocated"]:
+            return (f"No strategy or probe is live. Experiment #{best['id']} passed every gate "
+                    f"(test {best['test_return']:+.1%}) but was not allocated")
+        if best["test_return"] > 0:
+            return (f"No strategy or probe is live. Best idea #{best['id']} made {best['test_return']:+.1%} on its sealed "
+                    "test" + (f" but cannot be probed: {best['probe_blocker']}" if best["probe_blocker"] else
+                              "; a probe can start after the next research decision"))
+    return ("No strategy or probe is live. No experiment on the current bar size has passed the gates or made money "
+            "on its sealed test yet; the next research cycle keeps looking")
 
 
 RESEARCH_VENUES = ("CRYPTO", "NASDAQ")

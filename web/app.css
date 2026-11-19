@@ -942,3 +942,12 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 6px; font: 600 12px v
 /* read-only view: people you show results to see the desk, never its controls */
 :root[data-role="viewer"] .operator-only { display: none !important; }
 .badge.viewer { background: var(--surface-1); border-color: var(--accent); color: var(--accent); }
+
+/* Sidebar items are views: one shows, the others hide. The sidebar replaces the records tabs. */
+.layout[data-view="overview"] #records,
+.layout[data-view="records"] #overview > :not(#records),
+.layout[data-view="records"] .journal-col,
+.layout[data-view="records"] #tabs,
+.layout[data-view="journal"] #overview { display: none; }
+.layout:not([data-view="overview"]) { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1260px) { .layout[data-view="overview"] .journal-col { display: none; } }
