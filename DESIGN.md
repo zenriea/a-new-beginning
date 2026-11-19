@@ -228,7 +228,7 @@ Both load from Google Fonts as variable weight ranges (400 to 700), so the 550 a
 - **Figures** (JetBrains Mono, 500, tabular numerals, negative tracking): 24px funnel counts, 19 to 22px account values, 17px compact and summary stats, 12 to 13.5px inline figures and units.
 
 ### Named Rules
-**The Every Figure Is Mono Rule.** Every number, money value, percentage, timestamp, count and unit is set in JetBrains Mono with tabular numerals, so columns never move and values change in place. Elements that hold only figures (values, table cells, axes, timestamps, the chart readout) are mono whole; inside prose, a render-time pass wraps each figure in mono and leaves the words in Hanken Grotesk.
+**The Every Figure Is Mono Rule.** Every number, money value, percentage, timestamp, count and unit is set in JetBrains Mono with tabular numerals, so columns never move and values change in place. Elements that hold only figures (values, table cells, axes, timestamps, the chart readout) are mono whole; inside prose, a render-time pass wraps each figure in mono and leaves the words in Hanken Grotesk. UI figures use US separators (comma groups, point decimals, English month names) to match the server-generated journal text in the same review.
 
 **The Names Stay In Words Rule.** Figures that are part of a name stay in the UI face: tokens joined by a slash ("24/7") and text inside status and mode tags, which keep Hanken Grotesk with tabular numerals. The PAPER tag is the one mono tag.
 
@@ -293,7 +293,7 @@ Tags, not pills.
 
 ### Check-in band (Signature)
 The first answer on every screen: one verdict line at headline size beside "Latest" and "Next" rows, in the top pane of the grid, tinted 8% toward its state hue (blue working, green clear, amber warning, red halted, violet probing) with a 3px state edge on its left.
-“Next” and Agent activity both follow the current desk controls. A stopped, paused or offline desk shows what it is waiting for instead of counting down to a stale worker schedule.
+“Next” and Agent activity both follow the current desk controls. A stopped, paused or offline desk shows what it is waiting for instead of counting down to a stale worker schedule. When every live strategy or probe trades one market that is closed, the verdict names that market; the next-bar line below it may describe another market’s desk event.
 
 ### Kill cell (Signature)
 The emergency stop lives alone at the far right of the top bar, after the theme toggle and Pause, behind a 1px Seam Strong divider, using the dashed danger button at 650 weight. Clear emergency stop replaces it in place when the desk is stopped. Every destructive action opens a confirmation that states what will and will not happen, and initially focuses Cancel.
@@ -317,7 +317,7 @@ On phones, a “Sort by” selector and direction button expose the same orderin
 Opening a drawer from the desk adds one browser history entry. Back closes it, Forward reopens it, and browsing another record inside it keeps Back pointed at the workspace. Overview returns to the top with the phone navigation rail in view.
 
 ### Experiment drawer
-Lead with the decision, sealed-test return and gate outcomes. The rationale, passing checks, frozen rules and full results expand on demand. Wide results scroll independently with an edge cue; CAGR appears only for windows of at least 90 days.
+Lead with the decision, sealed-test return and gate outcomes. The rationale, passing checks, frozen rules and full results expand on demand. Wide results scroll independently with an edge cue; CAGR appears only for windows of at least 90 days. A gate with no measurement reads “not evaluated” with its threshold kept separate and the gate still unmet, never “n/a” as if it had been tested. Starting a probe from a record is labelled a manual probe, distinct from the automatic probe rule.
 
 ### Read-only view
 Signed in with the viewer password, the same screen shows results only: the Pause button, the kill cell, Ask the desk, the Limits & system tab and every probe, retire, re-judge and model-input control are absent, not disabled. A Keyword Blue outlined "VIEW ONLY" tag follows the PAPER tag.

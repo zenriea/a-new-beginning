@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-review";
+  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-critique2";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -18,22 +18,25 @@ function kv(obj) {
   return `<span class="kv">${Object.entries(obj).map(([k, v]) => `<span><span class="kv-k">${esc(k.replaceAll("_", " "))}</span> ${
     esc(Array.isArray(v) ? v.join(", ") : v && typeof v === "object" ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(", ") : v)}</span>`).join("")}</span>`;
 }
-const money = (v, d = 0) => v == null || isNaN(v) ? "–" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+// The desk is written in English and its journal text is generated server-side with
+// US number formatting; keep both sides of the same figure identical.
+const LOCALE = "en-US";
+const money = (v, d = 0) => v == null || isNaN(v) ? "–" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d });
 const pct = (v, d = 2, sign = true) => {
   if (v == null || !Number.isFinite(v)) return "–";
   const magnitude = Math.abs(v * 100).toFixed(d);
   return (Number(magnitude) === 0 ? "" : v < 0 ? "−" : sign ? "+" : "") + magnitude + "%";
 };
-const num = (v, d = 2) => v == null || isNaN(v) ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: Math.min(d, 2) > 0 && Math.abs(v) < 1000 ? Math.min(d, 2) : 0 });
-const qty = (v) => v == null ? "–" : Number.isInteger(v) ? v.toLocaleString() : Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
-const px = (v) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: v < 0.01 ? 10 : v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
+const num = (v, d = 2) => v == null || isNaN(v) ? "–" : Number(v).toLocaleString(LOCALE, { maximumFractionDigits: d, minimumFractionDigits: Math.min(d, 2) > 0 && Math.abs(v) < 1000 ? Math.min(d, 2) : 0 });
+const qty = (v) => v == null ? "–" : Number.isInteger(v) ? v.toLocaleString(LOCALE) : Number(v).toLocaleString(LOCALE, { maximumFractionDigits: 6 });
+const px = (v) => v == null ? "–" : Number(v).toLocaleString(LOCALE, { maximumFractionDigits: v < 0.01 ? 10 : v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
 const signCls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
 // Drawn marks in the rail's stroke style, never text glyphs.
 const svgMark = (d, cls = "") => `<svg class="mark-svg ${cls}" viewBox="0 0 16 16" aria-hidden="true"><path d="${d}"/></svg>`;
 const MARK = { up: svgMark("M8 3.5 13 11H3z", "fill"), down: svgMark("M8 12.5 3 5h10z", "fill"), pass: svgMark("m3.5 8.5 3 3 6-7"), fail: svgMark("m4.5 4.5 7 7m0-7-7 7") };
 const arrow = (v) => (v > 0 ? MARK.up : v < 0 ? MARK.down : "");
-const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "–";
-const day = (ts) => ts ? new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "–";
+const dt = (ts) => ts ? new Date(ts * 1000).toLocaleString(LOCALE, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "–";
+const day = (ts) => ts ? new Date(ts * 1000).toLocaleDateString(LOCALE, { year: "numeric", month: "short", day: "numeric" }) : "–";
 function ago(ts) {
   if (!ts) return "–";
   const s = Date.now() / 1000 - ts;
@@ -259,7 +262,7 @@ function renderBadges(s) {
   $("#btn-pause").title = c.emergency_stop ? "Clear the emergency stop first" : "";
   $("#btn-stop").classList.toggle("hidden", Boolean(c.emergency_stop));
   $("#btn-clear-stop").classList.toggle("hidden", !c.emergency_stop);
-  $("#nav-research-count").textContent = s.counts.experiments.toLocaleString();
+  $("#nav-research-count").textContent = s.counts.experiments.toLocaleString(LOCALE);
   const strategies = s.pipeline?.live.strategies || 0, live = strategies + (s.pipeline?.live.probes || 0);
   $("#nav-live-count").textContent = live ? `${live} live` : "idle";
   $("#nav-live-count").classList.toggle("on", strategies > 0);
@@ -373,13 +376,13 @@ function themedChartOptions() {
     timeScale: { borderVisible: false, timeVisible: true,
       // 24-hour times; a day change reads "Nov 19", never a bare day number
       tickMarkFormatter: (t, type) => { const d = new Date(t * 1000);
-        return type <= 1 ? d.toLocaleDateString(undefined, { month: "short", year: "numeric" })
-          : type === 2 ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-          : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); } },
+        return type <= 1 ? d.toLocaleDateString(LOCALE, { month: "short", year: "numeric" })
+          : type === 2 ? d.toLocaleDateString(LOCALE, { month: "short", day: "numeric" })
+          : d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); } },
     crosshair: { mode: 0 },
     // Enough decimals for the visible range: a flat $100,000 account must not show "$100,000" four times.
     localization: { priceFormatter: (v) => Math.abs(v) >= 1000
-      ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: state.equityDecimals, maximumFractionDigits: state.equityDecimals })
+      ? "$" + v.toLocaleString(LOCALE, { minimumFractionDigits: state.equityDecimals, maximumFractionDigits: state.equityDecimals })
       : Math.abs(v) < 1 ? String(Number(v.toPrecision(4))) : v.toFixed(Math.abs(v) < 10 ? 3 : 2) },
   };
 }
@@ -501,13 +504,13 @@ function renderPipeline(s) {
             <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}</small></div>
           <span class="cand-ret num ${signCls(c.test_return)}">${pct(c.test_return, 1)}</span>
           ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
-            `<button class="btn small ${c.test_return > 0 ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Auto-probe skipped: " + c.probe_blocker : "Paper-trade this idea now with a small probe allocation")}">Start probe…</button>`}</li>`).join("")}</ul>`
+            `<button class="btn small ${c.test_return > 0 ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Automatic probe skipped: " + c.probe_blocker : "Start a manual probe now with a small paper allocation")}">Start manual probe…</button>`}</li>`).join("")}</ul>`
           : `<p class="muted">No finished experiments in this window.</p>`}</div>
       <div><h3>What blocks ideas</h3>
         ${p.gate_failures.length ? `<ul class="bars">${p.gate_failures.slice(0, 6).map((g) => `<li><span>${esc(gateLabel(g.gate))}</span>
           <span class="bar" aria-hidden="true"><i style="width:${(g.n / maxFail * 100).toFixed(0)}%"></i></span><span class="num">${g.n}<span class="sr-only"> experiments</span></span></li>`).join("")}</ul>`
           : `<p class="muted">No gate failures recorded.</p>`}
-        <p class="probe-rule">${probe.enabled ? `<b>Probes on.</b> An idea with ${probe.min_test_return === 0 ? "a positive sealed-test return" : `a sealed-test return above ${pct(probe.min_test_return)}`} may get ${pct(probe.allocation_pct, 0, false)} of equity for up to ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day} per market per day).`
+        <p class="probe-rule">${probe.enabled ? `<b>Automatic probes on.</b> An idea with ${probe.min_test_return === 0 ? "a positive sealed-test return" : `a sealed-test return above ${pct(probe.min_test_return)}`} may get ${pct(probe.allocation_pct, 0, false)} of equity for up to ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day} per market per day).`
           : `<b>Probes off.</b> Only ideas that pass every gate trade.`}${isOperator() ? ` <a href="#limits" data-nav="system">Change</a>` : ""}</p></div>
     </div>`;
 }
@@ -1075,7 +1078,7 @@ async function openExperiment(id) {
   const parts = ["train", "validation", "test"].filter((k) => w?.[k]);
   const tl = parts.length ? `<div class="timeline" aria-hidden="true">${parts.map((k) => `<div class="${k}" style="flex:${Number(w[k].bars) || 0}"></div>`).join("")}</div>
     <ul class="timeline-legend">${parts.map((k) => `<li class="${k}"><span class="sw"></span><b>${cap(k)}${k === "test" ? " (sealed)" : ""}</b>
-      <span class="muted">${dateSpan(w[k].start, w[k].end)} · ${w[k].bars.toLocaleString()} bars</span></li>`).join("")}</ul>` : "";
+      <span class="muted">${dateSpan(w[k].start, w[k].end)} · ${w[k].bars.toLocaleString(LOCALE)} bars</span></li>`).join("")}</ul>` : "";
   const ch = e.challenge || {};
   const t = e.test || {};
   const g = e.gates;
@@ -1086,8 +1089,15 @@ async function openExperiment(id) {
   const spec = e.spec || {};
   const checks = g?.checks || [], missed = checks.filter((c) => !c.pass), passed = checks.filter((c) => c.pass);
   const decision = ({ reject: "Not promoted", revise: "Revise the idea", allocate: "Paper allocation approved", probe: "Probe approved" })[dec?.kind] || dec?.kind;
+  const gateReading = (c, v) => c.name === "test_trades" ? Math.round(v) : num(v, 3);
+  const gateOp = (op) => ({ "<=": "≤", ">=": "≥" })[op] || op;
+  // A missing measurement is not a measurement of zero. Keep the threshold visible,
+  // but say the gate was not evaluated and stays unmet.
+  const gateMeasure = (c) => c.value == null
+    ? `<span>not evaluated</span> <span class="muted">· threshold <span class="num">${esc(gateOp(c.op))} ${gateReading(c, c.threshold)}</span> · gate remains unmet</span>`
+    : `<span class="num">${gateReading(c, c.value)} ${esc(gateOp(c.op))} ${gateReading(c, c.threshold)}</span>`;
   const gateRows = (rows) => rows.map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? MARK.pass : MARK.fail}</span>
-    <div><b>${esc(gateLabel(c.name))}</b> <span class="num">${c.value == null ? "n/a" : c.name === "test_trades" ? Math.round(c.value) : num(c.value, 3)} ${esc(c.op)} ${c.name === "test_trades" ? Math.round(c.threshold) : num(c.threshold, 3)}</span><div class="muted cell-sub">${rich(c.why)}</div></div></div>`).join("");
+    <div><b>${esc(gateLabel(c.name))}</b> ${gateMeasure(c)}<div class="muted cell-sub">${rich(c.why)}</div></div></div>`).join("");
   drawer(`Experiment #${e.id}: ${h.title || ""}`, `
     <div class="section">${expStatus(e.status)} <span class="muted">· ${esc(e.venue)} · created ${dt(e.created_at)} · frozen ${dt(e.frozen_at)} · by ${authorLabel(h.author)}</span>
       ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">${e.strategy.probe ? "probe" : "strategy"} ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.probe && e.strategy.status === "active" ? "forward test" : e.strategy.status)})</a>` : ""}</div>
@@ -1108,10 +1118,10 @@ async function openExperiment(id) {
     ${e.test && !e.strategy && e.status !== "running" && isOperator() ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
       <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>
-    <div class="rejudge-box probe-box"><div><b>Paper-trade it as a probe</b>
+    <div class="rejudge-box probe-box"><div><b>Paper-trade it as a manual probe</b>
       <p>Starts a small, clearly-labelled forward test with ${pct(state.s?.pipeline?.probe.allocation_pct ?? 0.03, 0, false)} of equity for ${state.s?.pipeline?.probe.lifetime_days ?? 14} days.
       Uses the frozen rules and the normal risk checks. ${(e.test.total_return ?? 0) > 0 ? "It made money on its sealed test." : "<b>It lost money on its sealed test</b>, so expect the same unless conditions changed."}</p></div>
-      <button class="btn ${(e.test.total_return ?? 0) > 0 ? "primary" : ""}" data-probe="${e.id}" data-lost="${(e.test.total_return ?? 0) > 0 ? 0 : 1}">Start probe…</button></div>` : ""}
+      <button class="btn ${(e.test.total_return ?? 0) > 0 ? "primary" : ""}" data-probe="${e.id}" data-lost="${(e.test.total_return ?? 0) > 0 ? 0 : 1}">Start manual probe…</button></div>` : ""}
     <details class="record-details section"><summary>Hypothesis, rules and test dates</summary>
     <div class="section"><h3>Hypothesis (recorded before testing)</h3><div class="pre">${rich(h.rationale)}</div>
       <p><b>Prediction:</b> ${rich(h.prediction)}<br><b>Would drop it if:</b> ${rich(h.falsification)}</p></div>
@@ -1197,7 +1207,7 @@ document.addEventListener("click", async (e) => {
     e.preventDefault(); e.stopPropagation();
     const probe = state.s?.pipeline?.probe || {}, cand = (state.s?.pipeline?.candidates || []).find((c) => String(c.id) === pr.dataset.probe);
     const lost = cand ? cand.test_return <= 0 : pr.dataset.lost === "1";
-    if (!(await confirmDialog({ title: `Paper-trade #${pr.dataset.probe} as a probe?`, confirm: "Start probe",
+    if (!(await confirmDialog({ title: `Paper-trade #${pr.dataset.probe} as a manual probe?`, confirm: "Start probe",
       body: `<ul class="confirm-list"><li>Allocates ${pct(probe.allocation_pct ?? 0.03, 0, false)} of equity for ${probe.lifetime_days ?? 14} days, with the normal risk checks.</li>
         ${lost ? "<li><b>It lost money on its sealed test</b>, so expect the same unless conditions changed.</li>" : ""}
         <li>A probe collects a forward paper record. It is not evidence of an edge.</li></ul>` }))) return;
