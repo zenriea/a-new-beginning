@@ -3,7 +3,7 @@ from __future__ import annotations
 
 SYSTEM = """You are the research analyst of a small, autonomous PAPER-trading desk (virtual money only). \
 You research US stocks and ETFs (venue "NASDAQ"; 15-minute bars, regular session only) and crypto spot \
-including memecoins (15-minute bars, 24/7). \
+(15-minute bars, 24/7). \
 You form specific, testable hypotheses, interpret deterministic backtest results, decide what deserves \
 limited virtual capital, review live paper results, and explain your reasoning to the operator.
 
@@ -74,10 +74,14 @@ SPEC_SCHEMA = {
 
 HYPOTHESIS_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["decision", "why", "title", "rationale", "prediction", "falsification", "parent_experiment_id", "spec"],
+    "required": ["decision", "why", "title", "rationale", "prediction", "falsification", "parent_experiment_id",
+                 "holding_period_bars", "edge_bps_per_trade", "lookbacks_in_time", "spec"],
     "properties": {
         "decision": {"type": "string", "enum": ["investigate", "no_idea"]},
         "why": {"type": "string"},
+        "holding_period_bars": NULL_INT,
+        "edge_bps_per_trade": NULL_NUM,
+        "lookbacks_in_time": {"type": "string"},
         "title": {"type": "string"},
         "rationale": {"type": "string"},
         "prediction": {"type": "string"},
@@ -147,13 +151,24 @@ def hypothesis_prompt(ctx: dict) -> str:
         "TASK: Propose at most ONE hypothesis worth testing now on the venue below, or decide there is none.\n"
         "Build on the research memory: do not repeat a rejected idea unless you change something specific "
         "and say why; revisions should cite the parent experiment id. Testing is cheap and the gates decide, so "
-        "propose the most promising idea you have, including one that stays flat (in cash) through downtrends. "
-        "Answer decision='no_idea' only if every idea you can think of would repeat a recorded failure; then "
-        "explain why in 'why', use empty strings for the text fields and null for spec.\n"
+        "propose the most promising idea you have. Answer decision='no_idea' only if every idea you can think of "
+        "would repeat a recorded failure; then explain why in 'why', use empty strings for the text fields and "
+        "null for spec.\n"
+        "Diversify mechanisms: if the 'mechanism' tags in research_memory show the last experiments on this venue "
+        "share one benchmark gate (e.g. market(close) vs a moving average) or one family (reversion, breakout, "
+        "low-vol rotation), propose a different mechanism or answer no_idea. Changing a window or threshold of "
+        "the same rule is not a new mechanism.\n"
+        "Bar arithmetic: read bar_clock. Every window is counted in bars of bar_clock.bar_size, so justify each "
+        "lookback in calendar time using bar_clock (e.g. 260 bars is about 10 stock sessions or 2.7 crypto days, "
+        "not a year). In 'rationale', state the intended holding period and why the expected edge per trade at "
+        "that holding period exceeds the round-trip cost. Fill 'holding_period_bars' (typical bars per trade), "
+        "'edge_bps_per_trade' (expected gross edge per round trip, in basis points; it must exceed "
+        "trading_costs.approx_round_trip_bps) and 'lookbacks_in_time' (each window in bars and its calendar "
+        "meaning). Use null and an empty string only with decision='no_idea'.\n"
         "The market context below is BLINDED: it ends before the earliest possible test window, so whatever "
         "you see cannot leak into the sealed test. The universe must be a subset of the approved symbols.\n"
         "Each round trip costs about trading_costs.approx_round_trip_bps, so an idea must earn more than that per "
-        "trade on average. The operator wants an active book: favour ideas that trade often (several round trips a day across the universe, e.g. intraday mean reversion or breakouts with max_hold_bars) as long as each trade still clears costs. Capital is allocated only if every "
+        "trade on average at the stated holding period; trade frequency is not a goal in itself. Capital is allocated only if every "
         "threshold in acceptance_gates passes (they include doubled costs and a one-bar delay), so design for them.\n"
         "The mandatory neighbor_positive_frac check perturbs declared params by +/-25% on pre-test data. "
         "Empty params produce no neighbors and cannot pass. Expose at least one meaningful rule lookback or "
@@ -176,10 +191,11 @@ def decision_prompt(ctx: dict) -> str:
     import json
     return (
         "TASK: The experiment below has finished. The spec was frozen before the test window was evaluated. "
-        "Interpret the evidence and decide: 'reject', 'revise' (describe one specific change worth a new "
-        "experiment in revision_idea), or 'allocate' (only possible if gates.passed is true; allocation_pct is a "
-        "fraction of account equity and will be capped by operator limits; new strategies start at a reduced "
-        "incubation size). Compare the test with what the hypothesis predicted, compare with the benchmark, and "
+        "Interpret the evidence and decide. If gates.passed is true, the only decision is 'allocate': the gates "
+        "admit it, and your allocation_pct (a fraction of account equity) is only a size suggestion; operator "
+        "limits cap it, a passing test never gets less than the gate-pass floor, and new strategies start at a "
+        "reduced incubation size. 'reject' and 'revise' (describe one specific change worth a new experiment in "
+        "revision_idea) are only for experiments whose gates failed. Compare the test with what the hypothesis predicted, compare with the benchmark, and "
         "weigh the challenge results and leakage notes. 'journal' is your note to the operator. 'lessons' are "
         "short, reusable research findings (they become memory for future hypotheses). If allocating, 'thesis' "
         "and 'exit_plan' must say why you are entering and what would make you exit or retire it; "

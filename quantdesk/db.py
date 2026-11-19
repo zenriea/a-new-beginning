@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS experiments (
   frozen_at REAL, windows TEXT, chosen_params TEXT, grid_results TEXT,
   train TEXT, validation TEXT, test TEXT, challenge TEXT, gates TEXT,
   leakage TEXT, status TEXT NOT NULL, error TEXT, completed_at REAL,
-  equity_curve TEXT);
+  equity_curve TEXT, bar_seconds INTEGER);
 
 CREATE TABLE IF NOT EXISTS strategies (
   id INTEGER PRIMARY KEY, hypothesis_id INTEGER NOT NULL, experiment_id INTEGER NOT NULL,
@@ -177,6 +177,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(strategies)")}
     if "probe" not in cols:
         conn.execute("ALTER TABLE strategies ADD COLUMN probe INTEGER NOT NULL DEFAULT 0")
+    if "bar_seconds" not in {r[1] for r in conn.execute("PRAGMA table_info(experiments)")}:
+        conn.execute("ALTER TABLE experiments ADD COLUMN bar_seconds INTEGER")  # NULL on rows from before it was stored
 
 
 def connect() -> sqlite3.Connection:

@@ -11,12 +11,14 @@ export function equityInRange(rows, range, now) {
 }
 
 // Compare the same snapshot endpoints shown in the selected chart range.
-export function equityComparison(rows) {
+// `uninvested`: no exposure in any snapshot and no fill since the range began, so the gap is cash vs. QQQ, not skill.
+export function equityComparison(rows, lastFillTs = null) {
   const first = rows[0], last = rows.at(-1);
   if (!first || first === last || last.ts <= first.ts || !(first.equity > 0) || !(first.benchmark_equity > 0) ||
       !Number.isFinite(last.equity) || !(last.benchmark_equity > 0)) return null;
   const account = last.equity / first.equity - 1, benchmark = last.benchmark_equity / first.benchmark_equity - 1;
-  return { account, benchmark, difference: account - benchmark };
+  const uninvested = rows.every((r) => !(r.gross > 0)) && !(lastFillTs >= first.ts);
+  return { account, benchmark, difference: account - benchmark, uninvested };
 }
 
 export function showAnnualizedReturn(window) {
@@ -120,11 +122,16 @@ export function tradingVerdict(s) {
   if (!s.worker.alive) return { tone: "bad", text: "The worker is offline, so nothing is researched or traded." };
   if (c.drawdown_halt || c.system_halt) return { tone: "bad", text: "A risk halt blocks new positions; exits still run." };
   const n = s.positions.length, held = `${n} open position${n === 1 ? "" : "s"}`;
+  // Candidates arrive ranked by the server: current bar size, then passed-not-allocated, then probe-eligible.
+  const best = (p.candidates || [])[0];
+  const current = best && !best.bar_size_mismatch ? best : null;
+  const idlePass = current?.passed && !current.allocated ? current : null;
+  const passNote = idlePass ? ` #${idlePass.id} passed every gate (test ${fmt(idlePass.test_return)}) but was not allocated.` : "";
   // Pause outranks "live": a paused desk must never read as if it is about to trade.
   if (c.paused) return { tone: "warn", text: `Paused: no research and no new entries.${n ? ` ${held} ${n === 1 ? "is" : "are"} held; exits still run.` :
     live ? ` ${liveLabel(strategies, probes)} keep${live === 1 ? "s" : ""} ${live === 1 ? "its" : "their"} allocation; exits still run.` : ""}` };
   if (n) return { tone: liveTone, text: `Trading: ${held} across ${liveLabel(strategies, probes)}.` +
-    (strategies ? "" : " Probes are forward paper tests, not evidence of an edge.") };
+    (strategies ? "" : " Probes are forward paper tests, not evidence of an edge.") + passNote };
   if (live) {
     // The check-in pairs this verdict with the next desk event, which may be in another
     // market. When every live strategy is on one closed venue, say so instead of implying
@@ -132,17 +139,20 @@ export function tradingVerdict(s) {
     const venue = singleLiveVenue(s), session = venue ? s.sessions?.[venue] : null;
     if (session && session.open === false) return { tone: liveTone, text:
       `${cap(liveLabel(strategies, probes))} live, but the ${MARKET[venue]} is closed, so entries wait for the next session.` +
-      (strategies ? "" : " Forward test only, not evidence of an edge.") };
+      (strategies ? "" : " Forward test only, not evidence of an edge.") + passNote };
     return { tone: liveTone, text: `${cap(liveLabel(strategies, probes))} live. Waiting for entry signals on the next bar close.` +
-      (strategies ? "" : " Forward test only, not evidence of an edge.") };
+      (strategies ? "" : " Forward test only, not evidence of an edge.") + passNote };
   }
   if (!p.finished) return { tone: "info", text: "No finished experiment in the last 7 days yet. The first research cycle needs market data." };
-  const best = (p.candidates || [])[0];
   const top = (p.gate_failures || [])[0];
-  if (best && best.test_return > 0) {
-    if (best.probe_blocker) return { tone: "warn", text: `Best idea #${best.id} made ${fmt(best.test_return)} on its sealed test, but no probe started: ${best.probe_blocker}.` };
-    return { tone: "info", text: `Best idea #${best.id} made ${fmt(best.test_return)} on test; a probe starts after the next research decision.` };
+  if (idlePass) return { tone: "warn", text: `Experiment #${idlePass.id} passed every gate (test ${fmt(idlePass.test_return)}, Sharpe ${Number(idlePass.sharpe ?? 0).toFixed(2)}) but was not allocated, so nothing trades.` };
+  if (current && current.test_return > 0) {
+    if (current.probe_blocker) return { tone: "warn", text: `Best idea #${current.id} made ${fmt(current.test_return)} on its sealed test, but no probe started: ${current.probe_blocker}.` };
+    return { tone: "info", text: `Best idea #${current.id} made ${fmt(current.test_return)} on test; a probe starts after the next research decision.` };
   }
+  const stale = (p.profitable || 0) - (p.profitable_current_bar ?? p.profitable ?? 0);
+  if (stale > 0) return { tone: "warn", text: `No experiment on the current bar size made money on its sealed test. ${stale} profitable one${stale === 1 ? " was" : "s were"} tested on another bar size and cannot trade.` +
+    (top ? ` Most common failure: ${gateLabel(top.gate)} (${top.n}×).` : "") };
   return { tone: "warn", text: `None of the ${p.finished} experiment${p.finished === 1 ? "" : "s"} made money on its sealed test (after costs), so nothing qualifies.` +
     (top ? ` Most common failure: ${gateLabel(top.gate)} (${top.n}×).` : "") };
 }
@@ -177,7 +187,7 @@ export const LIMIT_FIELDS = [
   { g: "gates", k: "min_delay_stress_sharpe", label: "Min Sharpe with 1-bar delay", unit: "num", loosens: -1 },
   { g: "gates", k: "min_neighbor_positive_frac", label: "Min share of positive nearby params", unit: "pct", loosens: -1 },
   { g: "gates", k: "min_subperiod_positive_frac", label: "Min share of positive sub-periods", unit: "pct", loosens: -1 },
-  { g: "gates", k: "max_top5_concentration", label: "Max top-5 trade concentration", unit: "pct", hint: "share of pre-test profit", loosens: 1 },
+  { g: "gates", k: "max_top5_concentration", label: "Max top-5 trade concentration", unit: "pct", hint: "share of sealed-test profit", loosens: 1 },
   { g: "research", k: "deflation_window_days", label: "Deflated PSR counts trials from the last", unit: "days", loosens: -1 },
   { g: "budget", k: "monthly_usd", label: "AI budget per month", unit: "usd", loosens: 1 },
   { g: "budget", k: "daily_usd", label: "AI budget per day", unit: "usd", loosens: 1 },

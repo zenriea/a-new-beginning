@@ -211,6 +211,23 @@ def get_analyst():
     return LLMAnalyst(llm) if llm.available else RulesAnalyst()
 
 
+def mechanism_tags(spec: dict) -> set[str]:
+    """Coarse mechanism of a rule set, so the desk can tell when it keeps testing one idea in new windows."""
+    import re
+    rules = " ".join(spec.get(k) or "" for k in ("entry", "exit"))
+    rank = spec.get("rank_by") or ""
+    tags = set()
+    if re.search(r"(sma|ema)\(\s*market\(|market\(\s*(sma|ema)\(|market\([^)]*\)\s*[<>]", rules):
+        tags.add("benchmark trend gate")
+    if re.search(r"\b(zscore|rsi)\(", rules):
+        tags.add("reversion")
+    if re.search(r"\b(highest|lowest|crossover|crossunder)\(", rules):
+        tags.add("breakout")
+    if re.search(r"\b(rvol|std|atr)\(", rank):
+        tags.add("low-vol rotation")
+    return tags
+
+
 def memory(venue: str, limit: int = 15) -> list[dict]:
     """Compact research memory: prior experiments, outcomes and recorded lessons."""
     out = []
@@ -224,6 +241,7 @@ def memory(venue: str, limit: int = 15) -> list[dict]:
         lessons = (db.loads(dec["details"], {}) or {}).get("lessons", []) if dec else []
         out.append({"experiment_id": e["id"], "title": e["title"], "status": e["status"], "template": spec.get("template"),
                     "entry": spec.get("entry"), "exit": spec.get("exit"), "rank_by": spec.get("rank_by"),
+                    "mechanism": sorted(mechanism_tags(spec)), "bar_seconds": e["bar_seconds"],
                     "universe": spec.get("universe"), "chosen_params": db.loads(e["chosen_params"]),
                     "test_sharpe": test.get("sharpe"), "test_return": test.get("total_return"),
                     "test_trades": test.get("n_trades"), "failed_gates": gates.get("failed"),

@@ -93,9 +93,10 @@ Research tab is that record.
 ### US stocks vs. crypto
 
 The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-listed US stock or ETF
-(NYSE listings, leveraged and inverse ETFs included); all of them trade in the same regular session.
+(NYSE listings too); all of them trade in the same regular session. The default universe is liquid large
+caps and broad unleveraged ETFs, plus crypto majors; saved operator settings are kept until edited.
 
-| | Stocks and ETFs (Alpaca data) | Crypto incl. memecoins (Coinbase public data) |
+| | Stocks and ETFs (Alpaca data) | Crypto majors (Coinbase public data) |
 |---|---|---|
 | Research bars | 15-minute, regular session only, split- and dividend-adjusted, 2 years | 15-minute, 24/7, 1 year |
 | Research schedule | Every 2 h while new bars arrive | Every 2 h |
@@ -188,7 +189,7 @@ A sustained, timestamped forward-paper record is still required.
 * **Holdout reuse.** Later experiments are informed by earlier test outcomes. Each experiment
   counts the overlapping test windows and deflates its significance accordingly; this mitigates
   the problem but doesn't remove it.
-* **Survivorship.** The NASDAQ universe is today's survivors (large caps plus liquid mid caps), so backtests overstate returns.
+* **Survivorship.** The default NASDAQ universe is today's surviving liquid large caps and broad ETFs, so backtests overstate returns.
 * **Free-plan data.** Alpaca's free real-time quotes come from IEX only (a few percent of volume),
   so spreads can be wider or one-sided. The simulator then uses a fresh last trade plus a modeled
   spread and labels the fill accordingly. Historical spreads are modeled, not observed. Coinbase

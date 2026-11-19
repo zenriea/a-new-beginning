@@ -66,7 +66,7 @@ def test_research_cycle_records_in_order_and_enforces_gates(env):
     from quantdesk.agent.llm import LLM
     from quantdesk.agent.research_loop import research_cycle
     _seed_nasdaq()
-    hyp = {"decision": "investigate", "why": "testing", "title": "Trend", "rationale": "r", "prediction": "p",
+    hyp = {"decision": "investigate", "holding_period_bars": 26, "edge_bps_per_trade": 500, "lookbacks_in_time": "26 bars = 1 session", "why": "testing", "title": "Trend", "rationale": "r", "prediction": "p",
            "falsification": "f", "parent_experiment_id": None,
            "spec": {"name": "trend", "universe": ["AAPL", "MSFT"], "kind": "dsl", "entry": "close > sma(close, n)",
                     "exit": "close < sma(close, n)", "code": None, "rank_by": None, "top_k": None,
@@ -142,7 +142,7 @@ def test_no_idea_is_recorded_as_a_decision(env):
     from quantdesk.agent.llm import LLM
     from quantdesk.agent.research_loop import research_cycle
     _seed_nasdaq()
-    noidea = {"decision": "no_idea", "why": "Nothing compelling: dispersion is low and prior trend tests failed.",
+    noidea = {"decision": "no_idea", "holding_period_bars": None, "edge_bps_per_trade": None, "lookbacks_in_time": "", "why": "Nothing compelling: dispersion is low and prior trend tests failed.",
               "title": "", "rationale": "", "prediction": "", "falsification": "", "parent_experiment_id": None,
               "spec": None}
     research_cycle("NASDAQ", analyst=LLMAnalyst(LLM(FakeClient([noidea]))))
@@ -155,7 +155,7 @@ def test_hypothesis_prompt_shows_costs_and_gates(env):
     from quantdesk.agent.llm import LLM
     from quantdesk.agent.research_loop import research_cycle
     _seed_nasdaq()
-    noidea = {"decision": "no_idea", "why": "w", "title": "", "rationale": "", "prediction": "", "falsification": "",
+    noidea = {"decision": "no_idea", "holding_period_bars": None, "edge_bps_per_trade": None, "lookbacks_in_time": "", "why": "w", "title": "", "rationale": "", "prediction": "", "falsification": "",
               "parent_experiment_id": None, "spec": None}
     fc = FakeClient([noidea])
     research_cycle("NASDAQ", analyst=LLMAnalyst(LLM(fc)))

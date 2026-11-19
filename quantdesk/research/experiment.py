@@ -296,7 +296,7 @@ def _leak_notes(venue, llm_authored, before_cutoff, reuse) -> list[str]:
         notes.append(f"This test window overlaps {reuse} earlier experiment(s); significance is deflated for "
                      f"{reuse + 1} trials, and the agent saw earlier test outcomes when forming this idea.")
     if venue == "NASDAQ":
-        notes.append("Universe is today's large NASDAQ listings (survivorship/selection bias: backtests overstate). "
+        notes.append("Universe is today's liquid US large caps and broad ETFs (survivorship/selection bias: backtests overstate). "
                      "Bars are split/dividend-adjusted; historical spreads are modelled, not observed.")
     else:
         notes.append("Coinbase-only volume is used for liquidity (conservative); historical spreads are modelled.")

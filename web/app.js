@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-critique2";
+  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-views";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -164,6 +164,7 @@ function selectTab(key, { hash = true } = {}) {
     item.classList.toggle("active", active); item.setAttribute("aria-selected", String(active)); item.tabIndex = active ? 0 : -1;
   });
   $("#tab-body").setAttribute("aria-labelledby", tab.id);
+  $("#records-heading").textContent = tab.textContent;
   state.tab = key; markNavigation(key); renderTab();
 }
 document.addEventListener("click", (event) => {
@@ -178,9 +179,11 @@ function goTo(key, { hash = true } = {}) {
   if (key === "system" && !isOperator()) { key = "research"; setHash("research", true); hash = false; }
   if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key, { hash });
   else { markNavigation(key); if (hash) setHash(key === "overview" ? "" : key); }
+  // Sidebar items are views: the chosen one shows, the others hide (CSS keys off data-view).
+  $("#dashboard").dataset.view = ["overview", "pipeline"].includes(key) ? "overview" : key === "journal" ? "journal" : "records";
   const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : key === "pipeline" ? "#pipeline" : "#records");
   if (target) {
-    if (key === "overview") {
+    if (key !== "pipeline") {
       window.scrollTo({ top: 0, behavior: "instant" });
       $(".sidebar").scrollLeft = 0;
     } else target.scrollIntoView({ behavior: "instant", block: "start" });
@@ -413,9 +416,11 @@ async function loadEquity() {
 }
 function renderEquityComparison(rows) {
   if (!$("#equity-difference")) return;
-  const comparison = equityComparison(rows);
-  $("#equity-difference").textContent = comparison ? pct(comparison.difference).replace("%", " pp") : "–";
-  $("#equity-comparison").textContent = comparison ? `Chart range · Account ${pct(comparison.account)} · Benchmark ${pct(comparison.benchmark)}` : "Needs two chart snapshots with benchmark values.";
+  const comparison = equityComparison(rows, state.s?.last_fill_ts);
+  $("#equity-difference").textContent = !comparison ? "–" : comparison.uninvested ? "Uninvested" : pct(comparison.difference).replace("%", " pp");
+  $("#equity-comparison").textContent = !comparison ? "Needs two chart snapshots with benchmark values." : comparison.uninvested
+    ? `Account held cash all range (no positions, no fills); ${state.s?.account.benchmark_symbol || "QQQ"} ${pct(comparison.benchmark)}.`
+    : `Chart range · Account ${pct(comparison.account)} · Benchmark ${pct(comparison.benchmark)}`;
 }
 function dateSpan(start, end) {
   return day(start) === day(end) ? day(start) : `${day(start)} – ${day(end)}`;
@@ -486,7 +491,7 @@ function renderPipeline(s) {
   const steps = [
     ["Tested", p.finished, `${p.experiments} started`],
     ["Profitable on test", p.profitable, "net of costs"],
-    ["Passed all gates", p.passed, "full allocation"],
+    ["Passed all gates", p.passed, p.live.strategies ? "full allocation" : `${p.passed_unallocated ?? p.passed} passed, not allocated`],
     ["Live", live, p.live.probes ? `${p.live.probes} probe${p.live.probes === 1 ? "" : "s"} included` : "strategies only"],
     ["Positions", s.positions.length, s.open_orders.length ? `${s.open_orders.length} order${s.open_orders.length > 1 ? "s" : ""} pending` : "open now"],
   ];
@@ -501,10 +506,10 @@ function renderPipeline(s) {
       <div><h3>Closest to trading</h3>
         ${p.candidates.length ? `<ul class="cands">${p.candidates.map((c) => `<li>
           <div class="cand-main"><a href="#" data-exp="${c.id}">#${c.id} ${esc(c.title)}</a>
-            <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}</small></div>
+            <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}${c.passed && !c.allocated ? " · not allocated" : ""}</small></div>
           <span class="cand-ret num ${signCls(c.test_return)}">${pct(c.test_return, 1)}</span>
           ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
-            `<button class="btn small ${c.test_return > 0 ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Automatic probe skipped: " + c.probe_blocker : "Start a manual probe now with a small paper allocation")}">Start manual probe…</button>`}</li>`).join("")}</ul>`
+            `<button class="btn small ${c.test_return > 0 && !c.probe_blocker ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Automatic probe skipped: " + c.probe_blocker : "Start a manual probe now with a small paper allocation")}">Start manual probe…</button>`}</li>`).join("")}</ul>`
           : `<p class="muted">No finished experiments in this window.</p>`}</div>
       <div><h3>What blocks ideas</h3>
         ${p.gate_failures.length ? `<ul class="bars">${p.gate_failures.slice(0, 6).map((g) => `<li><span>${esc(gateLabel(g.gate))}</span>
@@ -1472,7 +1477,7 @@ window.addEventListener("hashchange", openFromHash);
 const TAB_KEYS = ["research", "strategies", "orders", "market", "system"];
 const shortcutList = () => [
   ["?", "Show this list"], ["/", isOperator() ? "Ask the desk" : null], ["O", "Overview"], ["J", "Analyst journal"],
-  [`1–${isOperator() ? 5 : 4}`, `Records tabs: ${TAB_KEYS.filter((k) => k !== "system" || isOperator()).map((k) => $(`#tabs [data-tab="${k}"]`).textContent).join(", ")}`],
+  [`1–${isOperator() ? 5 : 4}`, `Views: ${TAB_KEYS.filter((k) => k !== "system" || isOperator()).map((k) => $(`#tabs [data-tab="${k}"]`).textContent).join(", ")}`],
   ["T", "Switch light / dark theme"], ["Esc", "Close a drawer or dialog"],
 ].filter(([, what]) => what);
 function showShortcuts() {

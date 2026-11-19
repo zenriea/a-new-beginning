@@ -81,7 +81,7 @@ def test_all_demo_templates_have_admissible_robustness_parameters(venue):
 
 def _proposal(parameterized=False):
     return {
-        "decision": "investigate", "why": "testing", "title": "Trend", "rationale": "r",
+        "decision": "investigate", "holding_period_bars": 26, "edge_bps_per_trade": 500, "lookbacks_in_time": "26 bars = 1 session", "why": "testing", "title": "Trend", "rationale": "r",
         "prediction": "p", "falsification": "f", "parent_experiment_id": None,
         "spec": {
             "name": "trend", "universe": ["AAPL"], "kind": "dsl",
@@ -97,7 +97,7 @@ def _proposal(parameterized=False):
 
 
 def _no_idea():
-    return {"decision": "no_idea", "why": "No meaningful robustness parameter for this idea.",
+    return {"decision": "no_idea", "holding_period_bars": None, "edge_bps_per_trade": None, "lookbacks_in_time": "", "why": "No meaningful robustness parameter for this idea.",
             "title": "", "rationale": "", "prediction": "", "falsification": "",
             "parent_experiment_id": None, "spec": None}
 

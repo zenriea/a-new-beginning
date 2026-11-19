@@ -71,6 +71,44 @@ def _prior_test_windows(venue: str) -> list[tuple[int, int]]:
     return out
 
 
+def bar_clock(venue: str) -> dict:
+    """What a window of N bars means in calendar time on this venue (from venues.py)."""
+    from ..venues import VENUES
+    v = VENUES[venue]
+    per_week = v.bars_per_day * (5 if v.asset_class == "equity" else 7)
+    return {"bar_size": v.timeframe, "bar_minutes": v.bar_seconds // 60,
+            "bars_per_session" if v.asset_class == "equity" else "bars_per_day": v.bars_per_day,
+            "bars_per_week": per_week, "bars_per_year": v.periods_per_year,
+            "note": ("Stock sessions are 6.5 hours; windows skip nights, weekends and holidays." if v.asset_class == "equity"
+                     else "Crypto trades 24/7.")}
+
+
+MECHANISM_STREAK = 3   # this many consecutive finished experiments on one mechanism forces a different one
+
+
+def validate_trade_economics(prop: dict, spec: dict, venue: str, round_trip_bps: float) -> None:
+    """Pre-experiment checks on an LLM proposal: a stated holding period, an edge per trade above the
+    round-trip cost, lookbacks explained in time, and no fourth test in a row of one mechanism."""
+    from .analyst import mechanism_tags
+    hold, edge = prop.get("holding_period_bars"), prop.get("edge_bps_per_trade")
+    if not isinstance(hold, int) or hold < 1:
+        raise SpecError("State holding_period_bars: the typical number of bars a trade is held.")
+    if not isinstance(edge, (int, float)) or edge <= round_trip_bps:
+        raise SpecError(f"edge_bps_per_trade ({edge}) must exceed the round-trip cost of about {round_trip_bps:.0f} bp "
+                        f"at the stated holding period of {hold} bars.")
+    if not str(prop.get("lookbacks_in_time") or "").strip():
+        raise SpecError(f"Explain each lookback in calendar time in lookbacks_in_time ({bar_clock(venue)}).")
+    tags = mechanism_tags(spec)
+    recent = [mechanism_tags(db.loads(r["spec"], {})) for r in db.q(
+        "SELECT spec FROM experiments WHERE venue=? AND status IN ('passed','failed') ORDER BY id DESC LIMIT ?",
+        (venue, MECHANISM_STREAK))]
+    if len(recent) == MECHANISM_STREAK:
+        repeated = tags & set.intersection(*recent)
+        if repeated:
+            raise SpecError(f"The last {MECHANISM_STREAK} {venue} experiments all used {', '.join(sorted(repeated))}. "
+                            "Propose a different mechanism or answer no_idea; a new window is not a new mechanism.")
+
+
 def record_unexpected_failure(venue: str, exc: BaseException) -> None:
     """A research cycle crashed (a bug, not a provider outage): make it visible in the journal
     and close out any experiment it left half-done, so nothing fails silently."""
@@ -120,6 +158,7 @@ def research_cycle(venue: str, analyst=None) -> dict:
         "timeframe": obs["timeframe"], "market_context": blinded,
         "context_note": ("Blinded: statistics end at the earliest possible test-window start." if blinded is not obs
                          else "Unblinded current statistics (operator disabled blinding)."),
+        "bar_clock": bar_clock(venue),
         "research_memory": memory(venue),
         "active_strategies": portfolio_summary()["active_strategies"],
         "limits": {"max_param_combos": rs["max_param_combos"]},
@@ -142,6 +181,8 @@ def research_cycle(venue: str, analyst=None) -> dict:
     for attempt in range(2):
         try:
             validate_research_spec(spec, allowed, rs["max_param_combos"])
+            if author == "llm":
+                validate_trade_economics(prop, spec, venue, round_trip)
             break
         except SpecError as e:
             if attempt == 0 and author == "llm":
@@ -171,8 +212,10 @@ def research_cycle(venue: str, analyst=None) -> dict:
                   + (f", rank by `{rules['rank_by']}` top {rules['top_k']}" if rules.get("rank_by") else "")
                   + f"; universe {', '.join(spec['universe'])}; parameter grid {spec.get('params') or {}}.",
                   refs={"hypothesis_id": hid, "observation_id": obs["observation_id"]}, author=author, llm_call_id=call_id)
-    eid = db.ex("INSERT INTO experiments(hypothesis_id, created_at, venue, kind, spec, spec_hash, status) VALUES(?,?,?,?,?,?,?)",
-                (hid, now, venue, spec.get("kind", "dsl"), db.dumps(spec), spec_hash(spec), "running"))
+    from ..venues import VENUES
+    eid = db.ex("INSERT INTO experiments(hypothesis_id, created_at, venue, kind, spec, spec_hash, status, bar_seconds) "
+                "VALUES(?,?,?,?,?,?,?,?)", (hid, now, venue, spec.get("kind", "dsl"), db.dumps(spec), spec_hash(spec),
+                                            "running", VENUES[venue].bar_seconds))
     journal.set_status("testing", f"Experiment {eid}: {prop['title']}")
 
     def on_freeze(fr):
@@ -279,9 +322,14 @@ DEFAULT_EXIT_PLAN = "Exit per the tested rules; retire if live drawdown exceeds 
 def bar_size_mismatch(e: dict) -> str | None:
     """Rule windows are counted in bars, so an experiment run on another bar size (e.g. daily, before
     the switch to 15-minute bars) tests a different strategy than the one that would trade now.
-    The experiment row has no bar-size column; its test window's calendar span per bar tells."""
+    New rows store bar_seconds; older rows fall back to the test window's calendar span per bar."""
     from ..venues import VENUES
     v = VENUES.get(e.get("venue"))
+    if v and e.get("bar_seconds"):
+        if e["bar_seconds"] == v.bar_seconds:
+            return None
+        return (f"it was tested on a different bar size ({e['bar_seconds'] // 60}-minute bars vs {v.timeframe} now), "
+                "so its rules would mean something else live")
     t = (db.loads(e.get("windows"), {}) or {}).get("test") or {}
     if not v or not t.get("bars") or not t.get("end") or t["end"] <= t.get("start", 0):
         return None
@@ -326,6 +374,30 @@ def probe_blocker(e: dict, operator: bool = False) -> str | None:
     if today >= p["per_venue_per_day"]:
         return f"{e['venue']} already started {today} probe(s) in the last 24 hours"
     return None
+
+
+def ranked_candidates(since: float) -> list[dict]:
+    """Experiments with a sealed-test result since ``since``, closest to trading first: current bar size,
+    then passed but not allocated, then probe-eligible, then the rest; ties by test return.
+    The API pipeline, the UI verdict and the worker status all read this one order."""
+    out = []
+    for r in db.q("SELECT e.*, h.title FROM experiments e JOIN hypotheses h ON h.id=e.hypothesis_id "
+                  "WHERE e.created_at>=? ORDER BY e.id DESC", (since,)):
+        e = dict(r)
+        t = db.loads(e["test"], {}) or {}
+        if t.get("total_return") is None:
+            continue
+        g = db.loads(e["gates"], {}) or {}
+        live = db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND status IN ('active','incubating')", (e["id"],))
+        out.append({"id": e["id"], "title": e["title"], "venue": e["venue"], "status": e["status"],
+                    "test_return": t["total_return"], "sharpe": t.get("sharpe"), "trades": t.get("n_trades"),
+                    "failed": g.get("failed") or [], "n_checks": len(g.get("checks") or []) or 9,
+                    "passed": e["status"] == "passed", "allocated": bool(live),
+                    "bar_size_mismatch": bar_size_mismatch(e),
+                    "probe_blocker": probe_blocker(e), "operator_blocker": probe_blocker(e, operator=True)})
+    out.sort(key=lambda c: (c["bar_size_mismatch"] is not None, not (c["passed"] and not c["allocated"]),
+                            c["probe_blocker"] is not None, -c["test_return"]))
+    return out
 
 
 def auto_probe(venue: str, eid: int) -> int | None:
@@ -419,6 +491,21 @@ def rejudge_experiment(eid: int, analyst=None) -> dict:
                    settings.get("research"), analyst or get_analyst())
 
 
+_FILLER = {"the", "a", "an", "is", "are", "was", "were", "be", "on", "in", "of", "to", "and", "or", "for", "with",
+           "this", "that", "it", "its", "at", "as", "by", "so", "than", "currently", "still", "now", "has", "have"}
+
+
+def _claim_words(s: str) -> set[str]:
+    import re
+    return {w.rstrip("s") for w in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s.lower()) if w not in _FILLER}
+
+
+def same_claim(a: str, b: str) -> bool:
+    """Two phrasings of one claim share most of their content words (Jaccard >= 0.5)."""
+    wa, wb = _claim_words(a), _claim_words(b)
+    return bool(wa and wb) and len(wa & wb) / len(wa | wb) >= 0.5
+
+
 def _save_beliefs(beliefs: list, venue: str, author: str, call_id) -> None:
     valid_types = {"experiment": "experiments", "strategy": "strategies", "order": "orders", "fill": "fills",
                    "observation": "observations", "hypothesis": "hypotheses", "decision": "decisions"}
@@ -430,8 +517,9 @@ def _save_beliefs(beliefs: list, venue: str, author: str, call_id) -> None:
                 ev.append(f"{typ}:{rid}")
         if not ev:
             continue  # beliefs without verifiable evidence are not stored
-        db.ex("UPDATE beliefs SET status='superseded' WHERE status='active' AND venue=? AND statement=?",
-              (venue, b["statement"]))
+        for old in db.q("SELECT id, statement FROM beliefs WHERE status='active' AND venue=?", (venue,)):
+            if same_claim(old["statement"], b["statement"]):
+                db.ex("UPDATE beliefs SET status='superseded' WHERE id=?", (old["id"],))
         db.ex("INSERT INTO beliefs(ts, venue, statement, confidence, evidence, status, author, llm_call_id) "
               "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), venue, b["statement"], b["confidence"], db.dumps(ev), "active",
                                           author, call_id))

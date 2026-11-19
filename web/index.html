@@ -8,14 +8,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400..700&display=swap">
-  <link rel="stylesheet" href="/static/app.css?v=20261119-critique2">
+  <link rel="stylesheet" href="/static/app.css?v=20261119-views">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%2379c0ff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
   <div id="login-view" class="hidden">
     <div class="card login">
       <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l5-5 4 4 7-8"/></svg></span><div>QuantDesk<small>AI research &amp; paper trading</small></div></div>
-      <h1>Welcome back</h1>
+      <h1>Open the desk</h1>
       <div class="secondary">Use your operator or read-only password. Paper trading only, no real money.</div>
       <form id="login-form">
         <input type="password" id="login-pw" aria-label="Desk password" placeholder="Password" autocomplete="current-password" required>
@@ -68,7 +68,7 @@
       <div class="alerts" id="alerts"></div>
       <div class="alert critical hidden" id="connection-alert" role="status"></div>
 
-      <main class="layout" id="dashboard">
+      <main class="layout" id="dashboard" data-view="overview">
       <div class="col" id="overview" tabindex="-1">
         <h1 class="sr-only">QuantDesk overview</h1>
          <section class="checkin" id="checkin" aria-label="Check-in summary" tabindex="-1"></section>
@@ -108,8 +108,8 @@
           </div>
         </section>
 
-        <section class="card records-card" id="records" tabindex="-1" aria-label="Research and desk records">
-          <div class="card-h"><h2>Records</h2></div>
+        <section class="card records-card" id="records" tabindex="-1" aria-labelledby="records-heading">
+          <div class="card-h"><h2 id="records-heading">Research</h2></div>
           <div class="tabs" role="tablist" aria-label="Desk records" id="tabs">
             <button class="tab active" role="tab" id="tab-research" aria-controls="tab-body" aria-selected="true" data-tab="research">Research</button>
             <button class="tab" role="tab" id="tab-strategies" aria-controls="tab-body" aria-selected="false" tabindex="-1" data-tab="strategies">Strategies</button>
@@ -160,6 +160,6 @@
 
   <div id="drawer-root"></div>
   <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-  <script type="module" src="/static/app.js?v=20261119-critique2"></script>
+  <script type="module" src="/static/app.js?v=20261119-views"></script>
 </body>
 </html>
