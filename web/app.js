@@ -3,8 +3,10 @@ import { changeDirection, deskHealth, equityInRange, formatLimit, friendlyGates,
   limitUsage, LIMIT_FIELDS, sameValue, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-console";
 
 const $ = (s, el = document) => el.querySelector(s);
+// Viewers (read-only share) see results, never controls, prompts or limits.
+const isOperator = () => state.role !== "viewer";
 const state = { s: null, journal: [], lastId: 0, filter: new Set(), tab: "research", charts: {}, symbol: null, es: null,
-  timers: [], booting: false, tabVersion: 0, lastRefresh: null, equityRows: [], equityRange: "all", equityDecimals: 0, tabKey: null };
+  timers: [], booting: false, role: "operator", tabVersion: 0, lastRefresh: null, equityRows: [], equityRange: "all", equityDecimals: 0, tabKey: null };
 
 // ---------------------------------------------------------------- helpers
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1085,23 +1087,38 @@ $("#filters").addEventListener("click", async (e) => {
     } catch (err) { console.error(err); }
   }
 });
+// The journal reads as a log: one aligned time column, a short kind label, then the entry.
+const KIND_SHORT = { observation: "OBS", research: "RES", hypothesis: "HYP", test: "TEST", decision: "DEC", intent: "INT",
+  order: "ORD", fill: "FILL", review: "REV", risk: "RISK", data: "DATA", system: "SYS" };
+const KIND_FULL = { intent: "intent, not a fill" };
+const dayKey = (ts) => new Date(ts * 1000).toDateString();
 function entryHTML(j, fresh) {
   const refs = j.refs || {};
   const links = [];
   if (refs.experiment_id) links.push(`<a href="#" data-exp="${refs.experiment_id}">experiment #${refs.experiment_id}</a>`);
   if (refs.strategy_id) links.push(`<a href="#" data-strat="${refs.strategy_id}">strategy #${refs.strategy_id}</a>`);
   if (refs.order_id) links.push(`<a href="#" data-order="${refs.order_id}">order #${refs.order_id}</a>`);
-  if (j.llm_call_id) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
+  if (j.llm_call_id && isOperator()) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
   const long = (j.body || "").length > 420;
-  return `<div class="entry k-${esc(j.kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}"><div class="entry-meta"><span class="kind ${esc(j.kind)}">${esc(j.kind === "intent" ? "intent · not a fill" : j.kind)}</span>
-    <span class="author">${authorLabel(j.author)}</span><span title="${esc(new Date(j.ts * 1000).toISOString())}">${dt(j.ts)}</span></div>
-    <div class="entry-title">${rich(j.title)}</div><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
-    <div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div></div>`;
+  const short = KIND_SHORT[j.kind] || String(j.kind || "").slice(0, 4).toUpperCase();
+  const full = KIND_FULL[j.kind] || j.kind;
+  return `<div class="entry k-${esc(j.kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
+    <time class="entry-time" datetime="${esc(new Date(j.ts * 1000).toISOString())}" title="${esc(dt(j.ts))}">${esc(clock24(j.ts))}</time>
+    <span class="kind ${esc(j.kind)}" title="${esc(full)}"><span aria-hidden="true">${esc(short)}</span><span class="sr-only">${esc(full)}</span></span>
+    <div class="entry-title">${rich(j.title)}</div>
+    <div class="entry-main"><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
+      <div class="entry-meta"><span class="author">${authorLabel(j.author)}</span>${j.kind === "intent" ? '<span class="muted">intent, not a fill</span>' : ""}</div>
+      ${long || links.length ? `<div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div>` : ""}</div></div>`;
 }
 function renderFeed(freshIds = new Set()) {
   const kinds = activeKinds();
-  const items = state.journal.filter((j) => !state.filter.size || kinds.has(j.kind));
-  $("#feed").innerHTML = items.length ? items.slice(0, 300).map((j) => entryHTML(j, freshIds.has(j.id))).join("") : `<div class="empty">No journal entries${state.filter.size ? " for this filter" : ""} yet.</div>`;
+  const items = state.journal.filter((j) => !state.filter.size || kinds.has(j.kind)).slice(0, 300);
+  let lastDay = null;
+  $("#feed").innerHTML = items.length ? items.map((j) => {
+    const d = dayKey(j.ts), head = d !== lastDay ? `<div class="log-day" role="separator">${esc(day(j.ts))}</div>` : "";
+    lastDay = d;
+    return head + entryHTML(j, freshIds.has(j.id));
+  }).join("") : `<div class="empty">No journal entries${state.filter.size ? " for this filter" : ""} yet.</div>`;
 }
 $("#feed").addEventListener("click", (e) => {
   const m = e.target.closest("[data-more]"); if (!m) return; e.preventDefault();
@@ -1163,6 +1180,9 @@ function edgeCue(el) {
   update();
 }
 edgeCue($(".sidebar")); edgeCue($("#tabs"));
+// The journal pane sticks flush under the top bar, whose height changes with its content and the viewport.
+new ResizeObserver(([e]) => document.documentElement.style.setProperty("--topbar-h", `${Math.round(e.target.getBoundingClientRect().height)}px`))
+  .observe($(".topbar"));
 // Figures inside prose (counts, money, times, percentages) render in the mono face; words stay in the UI face.
 // Tokens touching a slash ("24/7") are names, not measurements, and stay in the UI face.
 const FIGURE = /(^|[\s(·,:])([−+-]?[#$]?\d[\d,.:]*(?:%| ?bp|[hmsd×])?)(?=$|[\s),·;.:]|,\s)/g;

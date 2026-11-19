@@ -16,6 +16,7 @@
   --shadow: none;
   --shadow-lg: 0 16px 48px rgba(17, 21, 27, .18);
   --on-danger: #ffffff; --on-warning: #1a1300;
+  --grid-dot: rgba(17, 21, 27, .11);
   --radius: 6px;
   --radius-sm: 5px;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -38,7 +39,7 @@
     --violet: #c678dd; --chip: #1b212b;
     --shadow: none;
     --shadow-lg: 0 16px 48px rgba(0, 0, 0, .55);
-    --on-warning: #1a1300;
+    --on-warning: #1a1300; --grid-dot: rgba(230, 237, 243, .07);
   }
 }
 :root[data-theme="dark"] {
@@ -56,7 +57,7 @@
   --violet: #c678dd; --chip: #1b212b;
   --shadow: none;
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, .55);
-  --on-warning: #1a1300;
+  --on-warning: #1a1300; --grid-dot: rgba(230, 237, 243, .07);
 }
 
 /* ------------------------------------------------------------------ base */
@@ -120,7 +121,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
   color: var(--accent); background: var(--surface-2); border: 1px solid var(--border-strong); }
 .brand .logo svg { width: 18px; height: 18px; }
 .brand small { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); letter-spacing: 0; margin-top: 0; }
-.statusbar { padding: 10px 32px; border-bottom: 1px solid var(--border); }
+.statusbar { padding: 10px 32px; }
 .badges { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; flex: 1 1 0; min-width: 0; }
 .badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 550; padding: 4px 10px;
   border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
@@ -768,7 +769,7 @@ a { text-underline-offset: 3px; }
 
 /* every figure in the mono face */
 /* figure-only elements set whole in mono; everywhere else the figures inside words are wrapped in .num at render */
-.entry-meta > span:last-child, .desk-health small, .timeline-legend .muted, #equity-since, .audit .num { font-family: var(--mono); }
+.entry-time, .log-day, .desk-health small, .timeline-legend .muted, #equity-since, .audit .num { font-family: var(--mono); }
 .mark-svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -1px; }
 .mark-svg.fill { fill: currentColor; stroke: none; width: 10px; height: 10px; margin-right: 3px; }
 .gate .mark .mark-svg { width: 12px; height: 12px; }
@@ -791,3 +792,57 @@ a { text-underline-offset: 3px; }
   .funnel li:nth-child(n+4) { border-top: 1px solid var(--border); }
   .funnel li::after { display: none; }
 }
+
+/* ------------------------------------------------------------------ seamed workspace
+   Panels touch and divide by 1px seams, like an editor's panes: no floating cards, no gaps. */
+.layout { gap: 0; padding: 0; align-items: stretch; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.layout > .col { gap: 0; border-right: 1px solid var(--border); }
+.layout > .col > .checkin, .layout > .col > .kpis, .layout > .col > .card, .layout > .col > .desk {
+  border: 0; border-radius: 0; border-bottom: 1px solid var(--border); }
+.layout > .col > :last-child { border-bottom: 0; }
+.layout .checkin { box-shadow: inset 3px 0 0 var(--v); }
+.layout .kpis, .layout .kpis.compact { gap: 0; border-radius: 0; background: var(--surface-1); }
+.layout .kpis .kpi { border: 0; border-radius: 0; }
+.layout .kpis .kpi + .kpi { border-left: 1px solid var(--border); }
+.layout .desk { gap: 0; align-items: stretch; background: var(--surface-1); }
+.layout .desk > .card { border: 0; border-radius: 0; }
+.layout .desk > .card + .card { border-left: 1px solid var(--border); }
+@container desk (max-width: 760px) { .layout .desk > .card + .card { border-left: 0; border-top: 1px solid var(--border); } }
+@container desk (max-width: 680px) {
+  .layout .kpis .kpi:nth-child(3) { border-left: 0; }
+  .layout .kpis .kpi:nth-child(n+3) { border-top: 1px solid var(--border); }
+}
+/* the journal pane sits flush under the top bar; its height follows the bar's measured height */
+.journal-col { top: var(--topbar-h, 72px); height: calc(100vh - var(--topbar-h, 72px)); }
+.journal-col .card { border: 0; border-radius: 0; }
+.alerts:not(:empty) { padding-bottom: 16px; }
+#connection-alert { margin-bottom: 16px; }
+@media (max-width: 1260px) {
+  .layout > .col { border-right: 0; }
+  .journal-col { border-top: 1px solid var(--border); }
+}
+@media (min-width: 2153px) { .layout { border-left: 1px solid var(--border); border-right: 1px solid var(--border); } }
+
+/* a faint dot grid on the ground, the only texture; panels stay flat on top of it */
+body, .sidebar, .topbar { background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 1.5px);
+  background-size: 16px 16px; background-attachment: fixed; }
+@media (forced-colors: active) { body, .sidebar, .topbar { background-image: none; } }
+
+/* the analyst journal as a log: time | kind | title, body under the kind */
+.feed { padding: 0 20px 8px; }
+.entry { display: grid; grid-template-columns: 40px 44px minmax(0, 1fr); column-gap: 10px; align-items: baseline;
+  padding: 11px 0; border-radius: 0; border-top: 1px solid var(--border); }
+.entry::before, .entry::after { content: none; }
+.log-day + .entry { border-top: 0; }
+.entry-time { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.entry .kind { justify-self: start; min-width: 40px; text-align: center; padding: 1px 4px; }
+.entry-title { margin-top: 0; font-size: 13.5px; }
+.entry-main { grid-column: 2 / -1; min-width: 0; }
+.entry-body { margin-top: 5px; }
+.entry-body:empty { display: none; }
+.entry-meta { margin-top: 5px; gap: 8px; }
+.entry-refs { margin-top: 5px; }
+.log-day { position: sticky; top: 0; z-index: 1; margin: 0 -20px; padding: 7px 20px; font-size: 12px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .06em; background: var(--surface-1); border-bottom: 1px solid var(--border); }
+.log-day:not(:first-child) { border-top: 1px solid var(--border); }
+@media (max-width: 640px) { .log-day { margin: 0 -16px; padding: 7px 16px; } }
