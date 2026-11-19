@@ -64,6 +64,18 @@ export function deskHealth(s) {
   return { tone: "ok", label: "Desk online · paper mode" };
 }
 
+// Worker schedules are snapshots and may predate an operator action. Both dashboard
+// summaries must prefer the current controls over what the worker last planned.
+export function displayedActivity(s) {
+  const waiting = (activity, detail, what) => ({ activity, detail, next_actions: [{ what }] });
+  if (s.controls.emergency_stop) return waiting("stopped", "Research, new orders and fills are halted.",
+    "Waiting for the emergency stop to be cleared.");
+  if (!s.worker.alive) return waiting("offline", "The worker is offline.", "Waiting for the worker to reconnect.");
+  if (s.controls.paused) return waiting("paused", "No new research or positions. Exits and risk monitoring continue.",
+    "Scheduled research resumes when the agent is resumed.");
+  return s.agent || {};
+}
+
 // ---------------------------------------------------------------- gates
 // One vocabulary for gate names everywhere, including text the server or the analyst wrote.
 export const GATE_LABEL = {

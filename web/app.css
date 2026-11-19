@@ -244,12 +244,13 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .now-activity.act-trading::before, .now-activity.act-reviewing::before { background: var(--accent); animation: pulse 1.6s ease-out infinite; }
 .now-activity.act-waiting::before { background: var(--accent); }
 .now-activity.act-paused::before { background: var(--warning-mark); }
+.now-activity.act-stopped::before, .now-activity.act-offline::before { background: var(--critical-mark); }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
 .now-detail { color: var(--text-secondary); margin-top: 8px; font-size: 13.5px; line-height: 1.65; }
 .next-list { list-style: none; padding: 0; margin: 16px 0 0; }
 .next-list li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 13.5px; color: var(--text-secondary); }
 .next-list li + li { border-top: 1px dashed var(--border); }
-.next-list li span:last-child { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-soft);
+.next-list li > .num { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-soft);
   padding: 2px 9px; border-radius: 4px; white-space: nowrap; align-self: center; }
 .belief { padding: 14px 0; border-top: 1px solid var(--border); font-size: 14px; line-height: 1.6; }
 .belief:first-child { border-top: 0; padding-top: 0; }
@@ -299,6 +300,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 /* ------------------------------------------------------------------ records */
 .research-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 16px; font-size: 13px; color: var(--text-secondary); }
 .research-summary .summary-total { margin-right: auto; }
+.phone-sort { display: none; }
 .research-summary .summary-total b { color: var(--text-primary); font: 600 20px var(--mono); margin-right: 4px; }
 .research-summary .summary-count { display: inline-flex; gap: 6px; align-items: center; padding: 4px 11px; background: var(--surface-2);
   border: 1px solid var(--border); border-radius: 4px; font-size: 12.5px; }
@@ -773,6 +775,9 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
   /* research table becomes stacked cards */
   .research-tbl, .research-tbl tbody { display: block; }
   .research-tbl thead { display: none; }
+  .phone-sort { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font-size: 13px; }
+  .phone-sort label { color: var(--text-secondary); }
+  .phone-sort select, .phone-sort button { min-height: 36px; }
   .research-tbl tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; padding: 14px 2px; border-bottom: 1px solid var(--border); }
   .research-tbl tr:last-child { border-bottom: 0; }
   .research-tbl td { display: block; padding: 0; border: 0 !important; text-align: left !important; min-width: 0 !important; }

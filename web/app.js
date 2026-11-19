@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
-import { changeDirection, deskHealth, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-polish";
+import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
+  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-review";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -144,9 +144,12 @@ function markNavigation(key) {
 // Every records tab has its own address (#limits opens Limits & system), so a tab can be bookmarked or sent.
 const TAB_HASH = { research: "research", strategies: "strategies", orders: "orders", market: "market", system: "limits" };
 const HASH_TAB = Object.fromEntries(Object.entries(TAB_HASH).map(([k, v]) => [v, k]));
-function setHash(hash) {
+function setHash(hash, replace = false) {
   const url = hash ? `#${hash}` : location.pathname + location.search;
-  if (location.hash !== (hash ? `#${hash}` : "")) history.replaceState(null, "", url);
+  if (location.hash !== (hash ? `#${hash}` : "")) {
+    if (replace) history.replaceState(null, "", url);
+    else history.pushState(null, "", url);
+  }
 }
 function selectTab(key, { hash = true } = {}) {
   if (key === "system" && !isOperator()) key = "research";
@@ -169,11 +172,17 @@ document.addEventListener("click", (event) => {
 function goTo(key, { hash = true } = {}) {
   drawerRequest++;
   closeDrawer?.({ keepHash: true, restoreFocus: false });
-  if (key === "system" && !isOperator()) { key = "research"; hash = true; }
+  if (key === "system" && !isOperator()) { key = "research"; setHash("research", true); hash = false; }
   if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key, { hash });
   else { markNavigation(key); if (hash) setHash(key === "overview" ? "" : key); }
   const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : key === "pipeline" ? "#pipeline" : "#records");
-  if (target) { target.scrollIntoView({ behavior: "instant", block: "start" }); target.focus({ preventScroll: true }); }
+  if (target) {
+    if (key === "overview") {
+      window.scrollTo({ top: 0, behavior: "instant" });
+      $(".sidebar").scrollLeft = 0;
+    } else target.scrollIntoView({ behavior: "instant", block: "start" });
+    target.focus({ preventScroll: true });
+  }
 }
 
 // ---------------------------------------------------------------- auth
@@ -183,6 +192,7 @@ function stopUpdates() {
 }
 function showLogin() {
   stopUpdates(); drawerRequest++; closeDrawer?.({ keepHash: true, restoreFocus: false });
+  $("#feed").replaceChildren(); state.journal = [];
   $("#app").classList.add("hidden"); $("#login-view").classList.remove("hidden");
 }
 $("#login-form").addEventListener("submit", async (e) => {
@@ -451,14 +461,16 @@ $("#equity-ranges").addEventListener("click", (event) => {
 });
 
 // ---------------------------------------------------------------- desk view
+const actionTime = (n) => n.at == null ? "" :
+  `<span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span>`;
 function renderNow(s) {
-  const a = s.agent || {};
+  const a = displayedActivity(s);
   const nexts = (a.next_actions || []).slice(0, 4);
   $("#now").innerHTML = `
     <div class="now-activity act-${esc(a.activity || "starting")}">${esc(cap(a.activity || "starting"))}</div>
-    <div class="now-detail">${esc(a.detail || "")} <span class="muted">· ${ago(a.updated_at)}</span></div>
-    ${s.open_orders.length ? `<div class="now-orders"><b>${s.open_orders.length}</b> open order${s.open_orders.length > 1 ? "s" : ""} waiting for a fill</div>` : ""}
-    <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span><span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span></li>`).join("")}</ul>`;
+    <div class="now-detail">${esc(a.detail || "")}${a.updated_at ? ` <span class="muted">· ${ago(a.updated_at)}</span>` : ""}</div>
+    ${s.open_orders.length && !s.controls.emergency_stop ? `<div class="now-orders"><b>${s.open_orders.length}</b> open order${s.open_orders.length > 1 ? "s" : ""} waiting for a fill</div>` : ""}
+    <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span>${actionTime(n)}</li>`).join("")}</ul>`;
 }
 const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
 
@@ -503,12 +515,12 @@ function renderPipeline(s) {
 function renderCheckin(s = state.s, v = s && tradingVerdict(s)) {
   if (!s) return;
   const last = state.journal[0];
-  const next = (s.agent?.next_actions || [])[0];
+  const next = displayedActivity(s).next_actions?.[0];
   $("#checkin").className = `checkin ${esc(v.tone)}`;
   $("#checkin").innerHTML = `<div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(v.text)}</p></div>
     <dl class="checkin-rows">
       ${last ? `<div><dt>Latest</dt><dd><a href="#journal" data-nav="journal">${rich(journalPresentation(last).title)}</a> <span class="muted num">${ago(last.ts)}</span></dd></div>` : ""}
-      ${next ? `<div><dt>Next</dt><dd>${esc(next.what)} <span class="muted num">${until(next.at) === "now" ? "now" : "in " + until(next.at)}</span></dd></div>` : ""}
+      ${next ? `<div><dt>Next</dt><dd>${esc(next.what)} ${actionTime(next)}</dd></div>` : ""}
     </dl>`;
 }
 function evidenceLinks(ev) {
@@ -632,6 +644,14 @@ const RESEARCH_SORT = {
   ret: (e) => e.test?.total_return, sharpe: (e) => e.test?.sharpe, trades: (e) => e.test?.n_trades,
   gates: (e) => e.gates ? (e.gates.checks?.length || 9) - (e.gates.failed?.length || 0) : null,
 };
+const RESEARCH_LABELS = { id: "Experiment #", title: "Hypothesis", status: "Status", ret: "Test return",
+  sharpe: "Sharpe", trades: "Trades", gates: "Gates passed" };
+const textSort = (key) => key === "title" || key === "status";
+function changeResearchSort(key, reverse = false) {
+  if (!Object.hasOwn(RESEARCH_SORT, key)) return;
+  state.researchSort = { key, dir: reverse ? -state.researchSort.dir : textSort(key) ? 1 : -1 };
+  drawResearch();
+}
 function sortedResearch(rows) {
   const { key, dir } = state.researchSort, get = RESEARCH_SORT[key];
   return [...rows].sort((x, y) => {
@@ -652,9 +672,16 @@ function drawResearch(body = $("#tab-body")) {
   if (!ex.length) { body.innerHTML = emptyState("The next idea starts here.", "No experiments yet. The first research cycle begins once the worker has market data. Every hypothesis will have a frozen test and a recorded decision."); return; }
   const passed = ex.filter((e) => e.status === "passed").length;
   const { key, dir } = state.researchSort;
+  const direction = textSort(key) ? (dir > 0 ? "A to Z" : "Z to A") : (dir > 0 ? "Low to high" : "High to low");
+  const focused = document.activeElement;
+  const sortFocus = focused.matches("#research-sort, #research-direction") ? `#${focused.id}` :
+    focused.matches(".research-tbl [data-sort]") ? `[data-sort="${focused.dataset.sort}"]` : null;
   const th = (k, label, cls = "") => `<th class="${cls}" aria-sort="${k === key ? (dir > 0 ? "ascending" : "descending") : "none"}"><button type="button" class="sort" data-sort="${k}">${label}<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${k !== key ? "M2 4l3-3 3 3M2 6l3 3 3-3" : dir > 0 ? "M2 6l3-3 3 3" : "M2 4l3 3 3-3"}"/></svg></button></th>`;
   body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
     <span class="summary-count"><span class="${passed ? "up" : ""}">${passed}</span> passed gates</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} missed gates</span></div>
+    <div class="phone-sort"><label for="research-sort">Sort by</label><select class="sel" id="research-sort">
+      ${Object.entries(RESEARCH_LABELS).map(([k, label]) => `<option value="${k}"${k === key ? " selected" : ""}>${label}</option>`).join("")}</select>
+      <button class="btn small" type="button" id="research-direction" aria-label="Reverse sort order, currently ${direction}">${direction} <span aria-hidden="true">${dir > 0 ? "↑" : "↓"}</span></button></div>
     <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr>${th("id", "#")}${th("title", "Hypothesis")}${th("status", "Status")}${th("ret", "Test return", "r")}
     ${th("sharpe", "Sharpe", "r")}${th("trades", "Trades", "r")}${th("gates", "Gates")}</tr></thead><tbody>
     ${sortedResearch(ex).map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
@@ -662,6 +689,7 @@ function drawResearch(body = $("#tab-body")) {
       <td class="r num ${signCls(e.test?.total_return)}" data-label="Test return">${pct(e.test?.total_return)}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
       <td class="r num" data-label="Trades">${e.test?.n_trades ?? "–"}</td><td class="gates" data-label="Gates">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
     <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates${isOperator() ? ", or to start it as a probe" : ""}.</div>`;
+  if (sortFocus) body.querySelector(sortFocus)?.focus({ preventScroll: true });
 }
 async function renderStrategies(body, version, quiet) {
   const st = await api("/api/strategies");
@@ -920,13 +948,14 @@ document.addEventListener("click", async (e) => {
     toast(m, { tone: "good", detail: d }); refresh();
   } catch (err) { fail(err); } finally { setTimeout(() => { ctl.disabled = false; }, 3000); }
 });
+$("#tab-body").addEventListener("change", (e) => {
+  if (e.target.id === "research-sort") changeResearchSort(e.target.value);
+});
 $("#tab-body").addEventListener("click", async (e) => {
+  if (e.target.closest("#research-direction")) { changeResearchSort(state.researchSort.key, true); return; }
   const sort = e.target.closest("[data-sort]");
   if (sort) {
-    const k = sort.dataset.sort, cur = state.researchSort;
-    // numbers start high-first, names A to Z; a second click reverses
-    state.researchSort = { key: k, dir: cur.key === k ? -cur.dir : ["title", "status"].includes(k) ? 1 : -1 };
-    drawResearch(); $(`#tab-body [data-sort="${k}"]`)?.focus();
+    changeResearchSort(sort.dataset.sort, sort.dataset.sort === state.researchSort.key);
     return;
   }
   const preset = e.target.closest("[data-gate-preset]");
@@ -957,8 +986,8 @@ $("#tab-body").addEventListener("click", async (e) => {
 });
 
 // ---------------------------------------------------------------- drawers
-let closeDrawer = null, drawerRequest = 0, drawerOrigin = "";
-const recordRoute = /^#(experiment|strategy|order)-(\d+)$/;
+let closeDrawer = null, drawerRequest = 0, drawerOrigin = null;
+const recordRoute = /^#(experiment|strategy|order|llm)-(\d+)$/;
 
 async function drawerRecord(path) {
   const request = ++drawerRequest, hash = location.hash;
@@ -970,15 +999,20 @@ async function drawerRecord(path) {
     return null;
   }
 }
-function drawer(title, html, hash = "") {
-  const previousHash = closeDrawer ? drawerOrigin : recordRoute.test(location.hash) ? "" : location.hash;
+function drawer(title, html, hash) {
+  const replacing = Boolean(closeDrawer);
+  const previousHash = replacing ? drawerOrigin : recordRoute.test(location.hash) ? null : location.hash;
   if (closeDrawer) closeDrawer({ keepHash: true });
   const previousFocus = document.activeElement;
   drawerOrigin = previousHash;
   $("#drawer-root").innerHTML = `<div class="drawer-bg"></div><div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><div class="drawer-h"><h2 id="drawer-title">${esc(title)}</h2>
     <button class="btn small" id="drawer-close">Close</button></div><div class="drawer-scroll"><div class="drawer-b">${html}</div></div><div class="drawer-edge" aria-hidden="true"></div></div>`;
-  // Each record drawer has its own address (#experiment-2), so it can be bookmarked or sent.
-  if (hash && location.hash !== hash) history.replaceState(null, "", hash);
+  // One history entry per open drawer. Switching records inside it keeps Back
+  // pointed at the original workspace. A direct bookmark has no such entry.
+  if (location.hash !== hash) {
+    if (replacing) history.replaceState(history.state, "", hash);
+    else history.pushState({ qdDrawerFrom: previousHash }, "", hash);
+  }
   const panel = $(".drawer"), scroller = $(".drawer-scroll", panel), body = $(".drawer-b", panel);
   const tableEdges = [...panel.querySelectorAll(".metrics-scroll")].map((frame) => {
     const scroll = $(".tbl-scroll", frame);
@@ -996,13 +1030,18 @@ function drawer(title, html, hash = "") {
   const size = new ResizeObserver(updateEdge);
   size.observe(scroller); size.observe(body);
   scroller.addEventListener("scroll", updateEdge, { passive: true });
+  let goingBack = false;
   const close = ({ keepHash = false, restoreFocus = true } = {}) => {
     drawerRequest++;
-    if (!keepHash && location.hash !== previousHash) history.replaceState(null, "", previousHash || location.pathname + location.search);
+    if (!keepHash && typeof history.state?.qdDrawerFrom === "string" && location.hash === hash) {
+      if (!goingBack) { goingBack = true; history.back(); }
+      return; // hashchange closes the drawer after Back (or Escape/Close).
+    }
+    if (!keepHash) history.replaceState(null, "", previousHash || location.pathname + location.search);
     if (state.charts.exp) { state.charts.exp.chart.remove(); state.charts.exp = null; }
     size.disconnect();
     document.removeEventListener("keydown", onKey);
-    $("#drawer-root").innerHTML = ""; $("#app").inert = false; closeDrawer = null;
+    $("#drawer-root").innerHTML = ""; $("#app").inert = false; closeDrawer = null; drawerOrigin = null;
     if (restoreFocus) (previousFocus?.isConnected && previousFocus !== document.body ? previousFocus : $("#overview")).focus({ preventScroll: true });
   };
   const onKey = (ev) => {
@@ -1144,12 +1183,13 @@ async function openOrder(id) {
       ${fills.map((f) => `<div style="font-size:13px;margin-top:6px">Fill ${dt(f.ts)}: ${qty(f.qty)} @ ${px(f.price)} (bid ${px(f.ref_bid)} / ask ${px(f.ref_ask)}; ${esc(f.price_basis)}; impact ${num(f.slippage_bps, 1)} bp; fee ${money(f.fee, 2)})</div>`).join("")}</div>`, `#order-${o.id}`);
 }
 async function openLLM(id) {
+  if (!isOperator()) return;
   const c = await drawerRecord(`/api/llm_calls/${encodeURIComponent(id)}`);
   if (!c) return;
   drawer(`LLM call #${c.id}: ${c.purpose}`, `<div class="section secondary" style="font-size:13px">${esc(c.served_model || c.model)} · ${dt(c.ts)} · ${c.input_tokens} in / ${c.output_tokens} out
     (${c.cache_read_tokens} cached) · ${money(c.cost_usd, 4)} · ${esc(c.status)} ${esc(c.error || "")}</div>
     <div class="section"><h4>Inputs given to the model</h4><pre class="pre" style="font-size:12px">${esc(c.request?.user || "")}</pre></div>
-    <div class="section"><h4>Response</h4><pre class="pre" style="font-size:12px">${esc(c.response || "")}</pre></div>`);
+    <div class="section"><h4>Response</h4><pre class="pre" style="font-size:12px">${esc(c.response || "")}</pre></div>`, `#llm-${c.id}`);
 }
 document.addEventListener("click", async (e) => {
   const pr = e.target.closest("[data-probe]");
@@ -1255,20 +1295,53 @@ function entryHTML(j, fresh) {
       ${long || links.length ? `<div class="entry-refs">${long ? `<button type="button" class="entry-more" data-more aria-expanded="false">Show more</button>` : ""}${links.join("")}</div>` : ""}</div></div>`;
 }
 function renderFeed(freshIds = new Set()) {
+  const feed = $("#feed");
   const kinds = activeKinds();
   const query = $("#journal-search").value.trim();
   const matches = state.journal.filter((j) => (!kinds.size || kinds.has(j.kind)) && (!query || journalMatches(j, query)));
   const items = matches.slice(0, 300);
+  // Don't evict the row under the keyboard just because it slid past the display cap.
+  const focusedRow = document.activeElement.closest("#feed [data-jid]");
+  if (focusedRow && matches.length > items.length) {
+    const index = matches.findIndex((j) => String(j.id) === focusedRow.dataset.jid);
+    if (index >= items.length) items.push(matches[index]);
+  }
   const results = $("#journal-results");
   const summary = query ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} in loaded entries${matches.length > items.length ? ` · showing ${items.length}` : ""}` :
     matches.length > items.length ? `Showing ${items.length} of ${matches.length} loaded entries` : "";
   if (results.textContent !== summary) results.textContent = summary;
+  if (!items.length) {
+    const text = query ? "No matches. Try a different search or change the filters." : `No journal entries${state.filter.size ? " for these filters" : " yet"}.`;
+    if (feed.firstElementChild?.className !== "empty" || feed.textContent !== text) feed.innerHTML = `<div class="empty">${text}</div>`;
+    return;
+  }
+  // Journal records are immutable. Leave retained nodes attached (including their
+  // buttons, expanded bodies and text selection) and insert only the new records.
+  const previous = new Map([...feed.children].map((node) => [node.dataset.jid || node.dataset.dayStart, node]));
+  const desired = [], template = document.createElement("template");
   let lastDay = null;
-  $("#feed").innerHTML = items.length ? items.map((j) => {
-    const d = dayKey(j.ts), head = d !== lastDay ? `<div class="log-day" role="separator">${esc(day(j.ts))}</div>` : "";
-    lastDay = d;
-    return head + entryHTML(j, freshIds.has(j.id));
-  }).join("") : `<div class="empty">${query ? "No matches. Try a different search or change the filters." : `No journal entries${state.filter.size ? " for these filters" : " yet"}.`}</div>`;
+  for (const j of items) {
+    const d = dayKey(j.ts);
+    if (d !== lastDay) {
+      const key = `day-${j.id}`;
+      let heading = previous.get(key);
+      if (!heading) {
+        heading = document.createElement("div"); heading.className = "log-day"; heading.dataset.dayStart = key;
+        heading.setAttribute("role", "separator"); heading.textContent = day(j.ts);
+      }
+      desired.push(heading); previous.delete(key); lastDay = d;
+    }
+    const id = String(j.id);
+    let row = previous.get(id);
+    if (!row) { template.innerHTML = entryHTML(j, freshIds.has(j.id)); row = template.content.firstElementChild; }
+    desired.push(row); previous.delete(id);
+  }
+  previous.forEach((node) => node.remove());
+  let cursor = feed.firstElementChild;
+  for (const node of desired) {
+    if (cursor === node) cursor = cursor.nextElementSibling;
+    else feed.insertBefore(node, cursor);
+  }
 }
 $("#feed").addEventListener("click", (e) => {
   const m = e.target.closest("[data-more]"); if (!m) return;
@@ -1286,6 +1359,7 @@ function connectStream() {
   const es = new EventSource(`/api/stream?after_id=${state.lastId}`);
   state.es = es;
   es.addEventListener("journal", (ev) => {
+    if (state.es !== es) return;
     const j = JSON.parse(ev.data);
     if (j.id <= state.lastId) return;
     state.lastId = j.id; mergeJournal([j]);
@@ -1366,13 +1440,20 @@ new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n
 function openFromHash(event) {
   if ($("#app").classList.contains("hidden")) return;
   const hash = location.hash, key = hash.slice(1);
+  if (closeDrawer && hash === drawerOrigin) {
+    closeDrawer({ keepHash: true });
+    return; // Underlying tab, scroll position and opener are still in place.
+  }
   const tab = Object.hasOwn(HASH_TAB, key) ? HASH_TAB[key] : null;
   if (tab) { goTo(tab, { hash: false }); return true; }
   if (["overview", "pipeline", "journal"].includes(key) || (!hash && event)) { goTo(key || "overview", { hash: false }); return; }
   drawerRequest++;
   closeDrawer?.({ keepHash: true });
   const m = recordRoute.exec(hash);
-  if (m) ({ experiment: openExperiment, strategy: openStrategy, order: openOrder })[m[1]](m[2]).catch(fail);
+  if (m) {
+    if (m[1] === "llm" && !isOperator()) { setHash("research", true); goTo("research", { hash: false }); return true; }
+    ({ experiment: openExperiment, strategy: openStrategy, order: openOrder, llm: openLLM })[m[1]](m[2]).catch(fail);
+  }
 }
 window.addEventListener("hashchange", openFromHash);
 

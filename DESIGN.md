@@ -293,6 +293,7 @@ Tags, not pills.
 
 ### Check-in band (Signature)
 The first answer on every screen: one verdict line at headline size beside "Latest" and "Next" rows, in the top pane of the grid, tinted 8% toward its state hue (blue working, green clear, amber warning, red halted, violet probing) with a 3px state edge on its left.
+“Next” and Agent activity both follow the current desk controls. A stopped, paused or offline desk shows what it is waiting for instead of counting down to a stale worker schedule.
 
 ### Kill cell (Signature)
 The emergency stop lives alone at the far right of the top bar, after the theme toggle and Pause, behind a 1px Seam Strong divider, using the dashed danger button at 650 weight. Clear emergency stop replaces it in place when the desk is stopped. Every destructive action opens a confirmation that states what will and will not happen, and initially focuses Cancel.
@@ -304,13 +305,16 @@ The pipeline's five stages as one seam-divided strip: a single 6px outer border,
 The account line is Ink at 2.5px and the only series with a last-value label; it turns Live Cyan, with a faint cyan area, only while positions are open. Benchmarks are 1.5px muted greys, QQQ dashed and BTC-USD dotted, with no last-value labels. Axes and the crosshair readout are mono at 12px; only dashed horizontal seam gridlines; ticks read 24-hour times, a short date ("Nov 19") where the day changes. The library logo is off; the legend ends with a muted credit link to TradingView Lightweight Charts.
 
 ### Journal entry
+Live updates leave retained entries and their focused controls in place.
 A log line, not a card: a 40px mono column of 24-hour times, a full kind label (blue for hypothesis, research, decision and review; violet for tests and probes; dim grey for intents, orders and fills; red for risk; amber for data), then a 13.5px title at 600. Body, author and record links sit underneath, starting at the kind column. Entries divide by seams, and a sticky day divider opens each date. Intents say "intent, not a fill". Long bodies expand in place. Search covers loaded entries, and the browser remembers selected filters.
 
 ### Research table
 Every column header is a button that sorts the loaded rows in place (aria-sort on the header, a small arrow that turns Keyword Blue on the active column). Numbers start high-first and names A to Z; a second click reverses; missing values always sink to the bottom.
+On phones, a “Sort by” selector and direction button expose the same ordering above the stacked rows.
 
 ### Shortcuts and addresses
 `?` opens a keyboard list in the confirmation-dialog style with mono keycaps: `/` ask (operator only), `O` overview, `J` journal, `1`–`5` records tabs, `T` theme. Desk controls have no single-key shortcuts. Each records tab has an address (`#research`, `#strategies`, `#orders`, `#market`, `#limits`). Changing to a workspace address closes an open record drawer.
+Opening a drawer from the desk adds one browser history entry. Back closes it, Forward reopens it, and browsing another record inside it keeps Back pointed at the workspace. Overview returns to the top with the phone navigation rail in view.
 
 ### Experiment drawer
 Lead with the decision, sealed-test return and gate outcomes. The rationale, passing checks, frozen rules and full results expand on demand. Wide results scroll independently with an edge cue; CAGR appears only for windows of at least 90 days.

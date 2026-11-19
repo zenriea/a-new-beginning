@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { deskHealth, equityComparison, equityInRange, journalMatches, journalPresentation, limitUsage, showAnnualizedReturn } from "../web/ui-model.mjs";
+import { deskHealth, displayedActivity, equityComparison, equityInRange, journalMatches, journalPresentation, limitUsage, showAnnualizedReturn } from "../web/ui-model.mjs";
 
 const normal = () => ({
   controls: { emergency_stop: false, system_halt: false, drawdown_halt: false, paused: false },
@@ -93,6 +93,22 @@ test("All retains every real snapshot without inventing history", () => {
 
 test("a stale account has an empty recent range rather than relabelled old data", () => {
   assert.deepEqual(equityInRange(rows, "day", now + 2 * 86400), []);
+});
+
+test("check-in and activity ignore a retained worker schedule through stop, clear and resume", () => {
+  const s = normal();
+  s.agent = { activity: "waiting", next_actions: [{ what: "Next signal evaluation", at: 12345 }] };
+  s.controls.emergency_stop = s.controls.paused = true;
+  assert.equal(displayedActivity(s).activity, "stopped");
+  assert.deepEqual(displayedActivity(s).next_actions, [{ what: "Waiting for the emergency stop to be cleared." }]);
+  s.controls.emergency_stop = false;
+  assert.equal(displayedActivity(s).activity, "paused");
+  assert.equal(displayedActivity(s).next_actions[0].at, undefined);
+  s.controls.paused = false;
+  assert.deepEqual(displayedActivity(s).next_actions, [{ what: "Next signal evaluation", at: 12345 }]);
+  s.worker.alive = false;
+  assert.equal(displayedActivity(s).activity, "offline");
+  assert.equal(displayedActivity(s).next_actions[0].at, undefined);
 });
 
 test("benchmark comparison uses both series' first and last chart snapshots", () => {
