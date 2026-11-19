@@ -427,12 +427,15 @@ def next_actions() -> list[dict]:
     for v in RESEARCH_VENUES:
         what, at = _next_research_at(v, now)
         out.append({"what": what, "at": at})
-    out.append({"what": "Next crypto 15-minute bar, then signal evaluation", "at": _next_bar_at("CRYPTO", now)})
+    out.append({"what": "Next crypto 15-minute bar, then signal evaluation", "at": _next_bar_at("CRYPTO", now),
+                "venue": "CRYPTO", "kind": "signal"})
     try:
         if venues.is_open("NASDAQ", now):
-            out.append({"what": "Next stock 15-minute bar, then signal evaluation", "at": _next_bar_at("NASDAQ", now)})
+            out.append({"what": "Next stock 15-minute bar, then signal evaluation", "at": _next_bar_at("NASDAQ", now),
+                        "venue": "NASDAQ", "kind": "signal"})
         else:
-            out.append({"what": "Stock market opens (queued orders become eligible)", "at": venues.next_open(now)})
+            out.append({"what": "Stock market opens (queued orders become eligible)", "at": venues.next_open(now),
+                        "venue": "NASDAQ", "kind": "market_open"})
     except Exception:
         pass
     day = now - now % 86400 + sch["review_hour_utc"] * 3600

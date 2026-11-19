@@ -394,7 +394,9 @@ def _pipeline(now: float) -> dict:
             "profitable": sum(1 for c in cands if c["test_return"] > 0),
             "profitable_current_bar": sum(1 for c in cands if c["test_return"] > 0 and not c["bar_size_mismatch"]),
             "gate_failures": sorted(({"gate": k, "n": v} for k, v in fails.items()), key=lambda x: -x["n"]),
-            "candidates": cands[:3], "live": counts, "probe": settings.get("probe")}
+            "candidates": cands[:3],  # includes blocked records for the desk verdict
+            "review_candidates": [c for c in cands if c["operator_blocker"] is None][:3],
+            "live": counts, "probe": settings.get("probe")}
 
 
 @app.get("/api/strategies", dependencies=[Depends(require_auth)])

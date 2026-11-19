@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-chats";
+  checkinSummary, holdoutLabel, journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=forward-performance";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -123,7 +123,7 @@ function notifyFromJournal(j) {
   const failed = j.kind === "system" && /failed|paused|could not/i.test(t);
   if (!(research || failed || j.kind === "fill" || j.kind === "risk")) return;
   const tone = j.kind === "risk" || failed ? "bad" : kind === "probe" ? "probe" : /^(Allocating|New strategy live)/.test(t) || j.kind === "fill" ? "good" : "info";
-  const body = friendlyGates(j.body || "");
+  const body = Array.isArray(refs.trade_checks) ? "See the journal for recorded evidence and the analyst’s rationale." : friendlyGates(j.body || "");
   toast(friendlyGates(t), { tone, detail: body.slice(0, 160) + (body.length > 160 ? "…" : ""), exp: refs.experiment_id });
 }
 const CTL_MSG = { research_nasdaq: ["NASDAQ research started", "Takes about a minute. You'll get a notification with the result."],
@@ -497,38 +497,47 @@ function renderPipeline(s) {
   ];
   const maxFail = Math.max(1, ...p.gate_failures.map((g) => g.n));
   const probe = p.probe;
+  const activeProbes = s.strategies.filter((strategy) => strategy.probe);
+  const review = p.review_candidates ?? p.candidates.filter((c) => !c.operator_blocker);
   $("#pipeline-window").textContent = `last ${p.window_days} days`;
   renderCheckin(s, v);
   $("#pipeline-body").innerHTML = `
     <ol class="funnel">${steps.map(([label, n, sub], i) => `<li class="${n > 0 ? "has" : ""}${i === steps.length - 1 && n > 0 ? " goal" : ""}">
       <span class="funnel-n num">${n}</span><span class="funnel-label">${label}</span><small>${esc(sub)}</small></li>`).join("")}</ol>
     <div class="pipeline-grid">
-      <div><h3>Closest to trading</h3>
-        ${p.candidates.length ? `<ul class="cands">${p.candidates.map((c) => `<li>
+      <div><h3>Active paper probes</h3>
+        ${activeProbes.length ? `<ul class="cands">${activeProbes.map((s) => `<li><div class="cand-main">
+          <a href="#" data-strat="${s.id}">${esc(s.name)}</a>
+          <small>${esc(s.venue)} · Forward paper test · ${esc(s.status)}</small></div></li>`).join("")}</ul>`
+          : `<p class="muted">No paper probes running.</p>`}
+        <h3>Candidates for review</h3>
+        ${review.length ? `<ul class="cands">${review.map((c) => `<li>
           <div class="cand-main"><a href="#" data-exp="${c.id}">#${c.id} ${esc(c.title)}</a>
             <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}${c.passed && !c.allocated ? " · not allocated" : ""}</small></div>
-          <span class="cand-ret num ${signCls(c.test_return)}">${pct(c.test_return, 1)}</span>
+          <div class="cand-result"><span class="cand-ret num ${signCls(c.test_return)}">Test ${pct(c.test_return, 1)}</span>
+            <small>${holdoutLabel(c.holdout_reuse_count, c.deflation_window_days)}</small></div>
+          ${c.failed.length ? `<span class="muted cand-note">Failed: ${c.failed.map((g) => esc(gateLabel(g))).join(", ")}</span>` : ""}
           ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
             `<button class="btn small ${c.test_return > 0 && !c.probe_blocker ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Automatic probe skipped: " + c.probe_blocker : "Start a manual probe now with a small paper allocation")}">Start manual probe…</button>`}</li>`).join("")}</ul>`
-          : `<p class="muted">No finished experiments in this window.</p>`}</div>
+          : `<p class="muted">No recent experiments are available for a new manual probe.</p>`}</div>
       <div><h3>What blocks ideas</h3>
         ${p.gate_failures.length ? `<ul class="bars">${p.gate_failures.slice(0, 6).map((g) => `<li><span>${esc(gateLabel(g.gate))}</span>
           <span class="bar" aria-hidden="true"><i style="width:${(g.n / maxFail * 100).toFixed(0)}%"></i></span><span class="num">${g.n}<span class="sr-only"> experiments</span></span></li>`).join("")}</ul>`
           : `<p class="muted">No gate failures recorded.</p>`}
         <p class="probe-rule">${probe.enabled ? `<b>Automatic probes on.</b> An idea with ${probe.min_test_return === 0 ? "a positive sealed-test return" : `a sealed-test return above ${pct(probe.min_test_return)}`} may get ${pct(probe.allocation_pct, 0, false)} of equity for up to ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day} per market per day).`
-          : `<b>Probes off.</b> Only ideas that pass every gate trade.`}${isOperator() ? ` <a href="#limits" data-nav="system">Change</a>` : ""}</p></div>
+          : `<b>Automatic probes off.</b> Eligible experiments can still be started manually.`}${isOperator() ? ` <a href="#limits" data-nav="system">Change</a>` : ""}</p></div>
     </div>`;
 }
 // Phone check-in: is it trading, why, what happened last, what happens next. Shown above the KPIs on narrow screens.
 function renderCheckin(s = state.s, v = s && tradingVerdict(s)) {
   if (!s) return;
   const last = state.journal[0];
-  const next = displayedActivity(s).next_actions?.[0];
+  const { text, next, nextLabel } = checkinSummary(s, v);
   $("#checkin").className = `checkin ${esc(v.tone)}`;
-  $("#checkin").innerHTML = `<div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(v.text)}</p></div>
+  $("#checkin").innerHTML = `<div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(text)}</p></div>
     <dl class="checkin-rows">
       ${last ? `<div><dt>Latest</dt><dd><a href="#journal" data-nav="journal">${rich(journalPresentation(last).title)}</a> <span class="muted num">${ago(last.ts)}</span></dd></div>` : ""}
-      ${next ? `<div><dt>Next</dt><dd>${esc(next.what)} ${actionTime(next)}</dd></div>` : ""}
+      ${next ? `<div><dt>${esc(nextLabel)}</dt><dd>${esc(next.what)} ${actionTime(next)}</dd></div>` : ""}
     </dl>`;
 }
 function evidenceLinks(ev) {
@@ -710,7 +719,7 @@ async function renderStrategies(body, version, quiet) {
       <td>${holdingCell(s.symbols)}</td>
       <td><span class="status ${esc(s.status)}">${esc(s.status)}</span></td>
       <td class="r num">${money(s.allocation)}<div class="muted cell-sub">approved ${money(s.approved_allocation)}</div></td>
-      <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted cell-sub">${s.live.days_live}d live</div></td>
+      <td class="r num ${signCls(s.live.return)}">${s.live.fills === 0 ? "No fills yet" : pct(s.live.return)}<div class="muted cell-sub">${s.live.days_live}d live</div></td>
       <td class="r num">${pct(s.expectations?.test?.total_return)}</td><td class="r num">${s.live.fills}</td>
       <td class="r num">${s.live.avg_slippage_bps == null ? "–" : num(s.live.avg_slippage_bps, 1) + " bp"}</td>
       <td>${s.status === "retired" || !isOperator() ? "" : `<button class="btn small danger" data-retire="${s.id}">Retire…</button>`}</td></tr>`).join("")}</tbody></table></div>`;
@@ -1175,6 +1184,7 @@ async function openExperiment(id) {
     ${e.error ? `<div class="alert critical section"><span class="icon">${icon.alert}</span><div>${esc(e.error)}</div></div>` : ""}
     ${e.test ? `<div class="section"><h3>Sealed test · net of costs</h3><dl class="test-headline">
       <div><dt>Net return</dt><dd>${pct(t.total_return)}</dd></div><div><dt>Max drawdown</dt><dd>${pct(t.max_drawdown)}</dd></div>
+      <div><dt>Historical test window</dt><dd>${holdoutLabel(e.leakage?.holdout_reuse_count, e.leakage?.deflation_window_days)}</dd></div>
       <div><dt>Trades</dt><dd>${t.n_trades ?? "–"}</dd></div></dl>${w?.test ? `<p class="muted cell-sub">${dateSpan(w.test.start, w.test.end)}</p>` : ""}</div>` : ""}
     <div class="section"><h3>Acceptance gates: ${checks.length ? gateCount(checks.length, missed.length) : "not evaluated"}</h3>
       ${missed.length ? '<p class="muted cell-sub">Missed checks</p>' + gateRows(missed) : ""}
@@ -1238,9 +1248,11 @@ async function openStrategy(id) {
     <div class="section"><h4>Exit plan & invalidation</h4><div class="pre">${rich(s.exit_plan)}</div><div class="secondary small-text" style="margin-top:6px">Invalidation: ${kv(s.invalidation)}</div></div>
     <div class="section"><h4>Rules (frozen)</h4><div style="font-size:13px">Entry <code>${esc(sp.entry || "code")}</code><br>Exit <code>${esc(sp.exit || "code")}</code><br>
       <span class="secondary">params ${kv(sp.fixed_params)}</span></div></div>
-     <div class="section"><h4>Live vs sealed test</h4>${metricsTable([["Sealed test", s.expectations?.test, s.expectations?.windows?.test]], { cagr: showAnnualizedReturn(s.expectations?.windows?.test) })}
-      <div class="secondary" style="font-size:13px;margin-top:8px">Live: ${pct(s.live.return)} over ${s.live.days_live} days on ${money(s.allocation)} · realised ${money(s.live.realized, 2)} ·
-      unrealised ${money(s.live.unrealized, 2)} · fees ${money(s.live.fees, 2)} · avg slippage ${s.live.avg_slippage_bps ?? "–"} bp · avg spread ${s.live.avg_spread_bps ?? "–"} bp</div></div>
+     <div class="section"><h4>Forward paper performance</h4>${s.live.fills === 0
+       ? `<p>No fills yet. The ${money(s.allocation)} allocation is a trading budget.</p>`
+       : `<div class="secondary">Paper return: ${pct(s.live.return)} over ${s.live.days_live} days on ${money(s.allocation)} · realised ${money(s.live.realized, 2)} ·
+      unrealised ${money(s.live.unrealized, 2)} · fees ${money(s.live.fees, 2)} · avg slippage ${s.live.avg_slippage_bps ?? "-"} bp · avg spread ${s.live.avg_spread_bps ?? "-"} bp</div>`}</div>
+     <div class="section"><h4>Historical sealed test</h4>${metricsTable([["Sealed test", s.expectations?.test, s.expectations?.windows?.test]], { cagr: showAnnualizedReturn(s.expectations?.windows?.test) })}</div>
     <div class="section"><h4>Reviews</h4>${(s.reviews || []).map((r) => `<div style="padding:8px 0;border-top:1px solid var(--border)"><b>${esc(r.kind)}</b> <span class="muted">${dt(r.ts)} · ${authorLabel(r.author)}</span>
       <div class="pre secondary" style="font-size:13px">${rich(r.rationale)}</div></div>`).join("") || `<div class="muted">No reviews yet (daily).</div>`}</div>`, `#strategy-${s.id}`);
 }
@@ -1359,12 +1371,19 @@ function entryHTML(j, fresh) {
   if (refs.strategy_id) links.push(`<a href="#" data-strat="${refs.strategy_id}">${kind === "probe" ? "probe" : "strategy"} #${refs.strategy_id}</a>`);
   if (refs.order_id) links.push(`<a href="#" data-order="${refs.order_id}">order #${refs.order_id}</a>`);
   if (j.llm_call_id && isOperator()) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
-  const long = (j.body || "").length > 420;
+  const checks = refs.trade_checks;
+  const grounded = Array.isArray(checks);
+  const long = !grounded && (j.body || "").length > 420;
+  const evidence = grounded && checks.length ? `<b>Recorded trade counts</b><ul>${checks.map((c) =>
+    `<li><a href="#" data-exp="${esc(c.experiment_id)}">Experiment #${esc(c.experiment_id)}</a>: ${esc(c.trades)} trades; ${c.trades >= c.minimum ? "met" : "below"} the minimum of ${esc(c.minimum)}.</li>`).join("")}</ul>` :
+    "No cited trade-count check available.";
   return `<div class="entry k-${esc(kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
     <time class="entry-time" datetime="${esc(new Date(j.ts * 1000).toISOString())}" title="${esc(dt(j.ts))}">${esc(clock24(j.ts))}</time>
     <span class="kind ${esc(kind)}">${esc(cap(kind || "entry"))}</span>
     <div class="entry-title">${rich(title)}</div>
-    <div class="entry-main"><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
+    <div class="entry-main">${grounded ? `<div class="entry-evidence">${evidence}</div>
+      <details><summary>Analyst rationale</summary><div class="entry-body">${rich(j.body)}</div></details>` :
+      `<div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>`}
       <div class="entry-meta"><span class="author">${authorLabel(j.author)}</span>${j.kind === "intent" ? '<span class="muted">intent, not a fill</span>' : ""}</div>
       ${long || links.length ? `<div class="entry-refs">${long ? `<button type="button" class="entry-more" data-more aria-expanded="false">Show more</button>` : ""}${links.join("")}</div>` : ""}</div></div>`;
 }

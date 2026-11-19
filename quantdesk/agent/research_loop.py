@@ -9,6 +9,7 @@ and decided *before* outcomes were known:
 from __future__ import annotations
 
 import logging
+import re
 import traceback
 
 from .. import clock, db, settings
@@ -55,12 +56,11 @@ def portfolio_summary() -> dict:
             "active_strategies": strats}
 
 
-def _prior_test_windows(venue: str) -> list[tuple[int, int]]:
+def _prior_test_windows(venue: str, days: int) -> list[tuple[int, int]]:
     """Test windows of recent experiments, used to deflate significance for holdout reuse.
 
     Only experiments from the last ``research.deflation_window_days`` count: counting every
     experiment ever run makes the deflated-PSR bar rise without limit as the desk keeps working."""
-    days = settings.get("research").get("deflation_window_days", 7)
     since = clock.now() - days * 86400
     out = []
     for r in db.q("SELECT windows FROM experiments WHERE venue=? AND frozen_at IS NOT NULL AND test IS NOT NULL "
@@ -124,8 +124,22 @@ def record_unexpected_failure(venue: str, exc: BaseException) -> None:
 
 
 def _record_no_idea(venue: str, prop: dict, author: str, call_id, observation_id: int) -> dict:
-    journal.write("research", f"{venue}: nothing worth testing right now", prop["why"], author=author,
-                  llm_call_id=call_id, refs={"observation_id": observation_id})
+    # Snapshot cited checks so later gate changes cannot rewrite the journal.
+    ids = list(dict.fromkeys(int(n) for n in re.findall(
+        r"\b(?:exp|experiment):(\d{1,18})\b", prop["why"], re.I)))[:32]
+    evidence = []
+    for eid in ids:
+        row = db.q1("SELECT gates FROM experiments WHERE id=? AND venue=? AND status IN ('passed','failed')",
+                    (eid, venue))
+        if row is None:
+            continue
+        checks = (db.loads(row["gates"], {}) or {}).get("checks") or []
+        gate = next((g for g in checks if g.get("name") == "test_trades" and g.get("op") == ">="), {})
+        count, minimum = gate.get("value"), gate.get("threshold")
+        if type(count) is int and type(minimum) is int:
+            evidence.append({"experiment_id": eid, "trades": count, "minimum": minimum})
+    journal.write("research", f"{venue}: no experiment proposed", prop["why"], author=author,
+                  llm_call_id=call_id, refs={"observation_id": observation_id, "trade_checks": evidence})
     db.ex("INSERT INTO decisions(ts, kind, subject_type, subject_id, rationale, details, author, llm_call_id) "
           "VALUES(?,?,?,?,?,?,?,?)", (clock.now(), "no_trade", "venue", None, prop["why"],
                                     db.dumps({"venue": venue}), author, call_id))
@@ -223,8 +237,10 @@ def research_cycle(venue: str, analyst=None) -> dict:
               (clock.now(), db.dumps(fr["chosen_params"]), db.dumps(fr["windows"]), eid))
 
     try:
-        res = run_experiment(spec, settings.get("costs")[venue], rs, bench, _prior_test_windows(venue),
+        days = rs["deflation_window_days"]
+        res = run_experiment(spec, settings.get("costs")[venue], rs, bench, _prior_test_windows(venue, days),
                              cfg.llm_knowledge_cutoff, on_freeze=on_freeze, llm_authored=(author == "llm"))
+        res["leakage"]["deflation_window_days"] = days
     except (ExperimentError, Exception) as e:
         log.error("experiment %s failed: %s", eid, traceback.format_exc())
         db.ex("UPDATE experiments SET status='error', error=?, completed_at=? WHERE id=?", (str(e)[:1000], clock.now(), eid))
@@ -389,8 +405,11 @@ def ranked_candidates(since: float) -> list[dict]:
             continue
         g = db.loads(e["gates"], {}) or {}
         live = db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND status IN ('active','incubating')", (e["id"],))
+        leakage = db.loads(e["leakage"], {}) or {}
         out.append({"id": e["id"], "title": e["title"], "venue": e["venue"], "status": e["status"],
                     "test_return": t["total_return"], "sharpe": t.get("sharpe"), "trades": t.get("n_trades"),
+                    "holdout_reuse_count": leakage.get("holdout_reuse_count"),
+                    "deflation_window_days": leakage.get("deflation_window_days"),
                     "failed": g.get("failed") or [], "n_checks": len(g.get("checks") or []) or 9,
                     "passed": e["status"] == "passed", "allocated": bool(live),
                     "bar_size_mismatch": bar_size_mismatch(e),

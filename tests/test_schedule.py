@@ -191,4 +191,6 @@ def test_status_during_a_cycle_does_not_show_stale_plan_for_that_venue(desk, mon
     monkeypatch.setattr(research_loop, "research_cycle", watching)
     thread.tick()
     venue, plan = seen[0]
-    assert venue == "CRYPTO" and "CRYPTO" not in plan
+    actions = db.loads(plan, [])
+    assert venue == "CRYPTO" and all("CRYPTO" not in a["what"] for a in actions)
+    assert any(a.get("venue") == venue and a.get("kind") == "signal" for a in actions)
