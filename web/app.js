@@ -144,6 +144,23 @@ function markNavigation(key) {
     if (active) item.setAttribute("aria-current", "location"); else item.removeAttribute("aria-current");
   });
 }
+const menuToggle = $("#desk-menu-toggle");
+const compactNav = matchMedia("(max-width: 900px)");
+function setDeskMenu(open) {
+  menuToggle.setAttribute("aria-expanded", String(open));
+}
+menuToggle.addEventListener("click", () => setDeskMenu(menuToggle.getAttribute("aria-expanded") !== "true"));
+$(".sidebar").addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || menuToggle.getAttribute("aria-expanded") !== "true") return;
+  event.preventDefault();
+  event.stopPropagation();
+  setDeskMenu(false);
+  menuToggle.focus();
+});
+compactNav.addEventListener("change", () => {
+  if (compactNav.matches && $("#desk-menu").contains(document.activeElement)) menuToggle.focus();
+  setDeskMenu(false);
+});
 // Every records tab has its own address (#limits opens Limits & system), so a tab can be bookmarked or sent.
 const TAB_HASH = { research: "research", strategies: "strategies", orders: "orders", market: "market", system: "limits" };
 const HASH_TAB = Object.fromEntries(Object.entries(TAB_HASH).map(([k, v]) => [v, k]));
@@ -174,6 +191,7 @@ document.addEventListener("click", (event) => {
   goTo(link.dataset.nav || "overview");
 });
 function goTo(key, { hash = true } = {}) {
+  setDeskMenu(false);
   drawerRequest++;
   closeDrawer?.({ keepHash: true, restoreFocus: false });
   if (key === "system" && !isOperator()) { key = "research"; setHash("research", true); hash = false; }
@@ -185,7 +203,6 @@ function goTo(key, { hash = true } = {}) {
   if (target) {
     if (key !== "pipeline") {
       window.scrollTo({ top: 0, behavior: "instant" });
-      $(".sidebar").scrollLeft = 0;
     } else target.scrollIntoView({ behavior: "instant", block: "start" });
     target.focus({ preventScroll: true });
   }
@@ -1576,7 +1593,7 @@ function edgeCue(el) {
   window.addEventListener("resize", update);
   update();
 }
-edgeCue($(".sidebar")); edgeCue($("#tabs"));
+edgeCue($("#tabs"));
 // Move the same status elements, so reading and focus order match the phone layout.
 const phone = matchMedia("(max-width: 640px)");
 const statusPanels = [$("#statusbar"), $("#alerts"), $("#connection-alert")];
