@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-views";
+  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-universe";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -832,6 +832,17 @@ async function renderSystem(body, version) {
           <span class="muted form-status" id="limits-status" role="status">No unsaved changes.</span></div>
         <p class="muted ceilings">Hard ceilings set in config.py: position ≤ ${pct(sys.ceilings.ceiling_max_position_pct, 0, false)}, gross ≤ ${pct(sys.ceilings.ceiling_max_gross_pct, 0, false)} (no leverage),
           order ≤ ${money(sys.ceilings.ceiling_max_order_usd)}, AI ≤ ${money(sys.ceilings.ceiling_monthly_llm_usd)}/month.</p></form></div>
+    <div class="section"><h3>Research universe</h3>
+      <p class="secondary section-lead">Symbols the analyst may research and strategies may trade. Separate with commas or new lines.
+        Removing a symbol does not close positions in it; live strategies keep their tested symbols until retired.</p>
+      <form id="universe" novalidate><div class="form-grid">${UNIVERSE_VENUES.map(([venue, label]) => `<div class="field" data-venue="${venue}">
+        <label for="universe-${venue}">${label} <span class="muted num" id="universe-${venue}-n">${sys.settings.universe[venue].length}</span></label>
+        <textarea id="universe-${venue}" spellcheck="false" autocapitalize="characters" aria-describedby="universe-${venue}-err">${esc(sys.settings.universe[venue].join(", "))}</textarea>
+        <div class="field-err" id="universe-${venue}-err"></div></div>`).join("")}</div>
+        <div class="form-bar"><button class="btn primary" type="submit" id="universe-save" disabled>Review changes</button>
+          <button class="btn ghost" type="button" id="universe-reset" disabled>Discard</button>
+          <button class="btn ghost" type="button" id="universe-defaults">Fill in defaults</button>
+          <span class="muted form-status" id="universe-status" role="status">No unsaved changes.</span></div></form></div>
     <div class="section"><h3>Controls</h3>
       <div class="control-groups"><div><p class="muted control-label">Research</p><div class="button-row">
         <button class="btn" data-ctl="research_nasdaq">Run NASDAQ research now</button><button class="btn" data-ctl="research_crypto">Run crypto research now</button></div></div>
@@ -857,6 +868,54 @@ async function renderSystem(body, version) {
   form.addEventListener("change", () => updateLimitDraft(form));
   $("#limits-reset").addEventListener("click", () => renderTab());
   form.addEventListener("submit", (e) => { e.preventDefault(); saveLimits(form); });
+  const uform = $("#universe");
+  uform.addEventListener("input", () => updateUniverseDraft(uform));
+  $("#universe-reset").addEventListener("click", () => renderTab());
+  $("#universe-defaults").addEventListener("click", () => {
+    for (const [venue] of UNIVERSE_VENUES) $(`#universe-${venue}`).value = sys.defaults.universe[venue].join(", ");
+    updateUniverseDraft(uform);
+  });
+  uform.addEventListener("submit", (e) => { e.preventDefault(); saveUniverse(uform); });
+}
+const UNIVERSE_VENUES = [["NASDAQ", "US stocks and ETFs"], ["CRYPTO", "Crypto (SYMBOL-USD)"]];
+function readUniverse() {
+  return UNIVERSE_VENUES.map(([venue]) => {
+    const after = parseSymbols($(`#universe-${venue}`).value), before = state.sys.settings.universe[venue];
+    return { venue, after, ...symbolDiff(before, after) };
+  });
+}
+function updateUniverseDraft() {
+  const rows = readUniverse(), changed = rows.filter((r) => r.added.length || r.removed.length);
+  for (const r of rows) {
+    $(`#universe-${r.venue}-n`).textContent = r.after.length;
+    $(`[data-venue="${r.venue}"]`).classList.toggle("changed", Boolean(r.added.length || r.removed.length));
+    setFieldError($(`#universe-${r.venue}`), r.after.length ? "" : "Keep at least one symbol.");
+  }
+  const empty = rows.some((r) => !r.after.length);
+  $("#universe-save").disabled = !changed.length || empty;
+  $("#universe-reset").disabled = !changed.length;
+  $("#universe-status").textContent = !changed.length ? "No unsaved changes." :
+    changed.map((r) => `${r.venue}: +${r.added.length} −${r.removed.length}`).join(" · ");
+}
+async function saveUniverse() {
+  const changed = readUniverse().filter((r) => r.added.length || r.removed.length);
+  if (!changed.length) return;
+  const list = (label, xs) => xs.length ? `<li><span>${label}</span><span class="num">${esc(xs.join(", "))}</span></li>` : "";
+  const ok = await confirmDialog({ title: "Save the research universe?", confirm: "Save universe",
+    body: changed.map((r) => `<h4>${esc(r.venue)}</h4><ul class="change-list">${list("Added", r.added)}${list("Removed", r.removed)}</ul>`).join("") +
+      `<p class="muted">Applies to the next research cycle. Open positions and live strategies are not changed.</p>` });
+  if (!ok) return;
+  $("#universe-save").disabled = true;
+  try {
+    await api("/api/settings/universe", { body: Object.fromEntries(changed.map((r) => [r.venue, r.after])) });
+    toast("Research universe saved", { tone: "good", detail: changed.map((r) => `${r.venue}: ${r.after.length} symbols`).join(" · ") });
+    renderTab();
+  } catch (err) {
+    const venue = UNIVERSE_VENUES.find(([v]) => err.message.includes(v))?.[0];
+    if (venue) setFieldError($(`#universe-${venue}`), `Not saved: ${err.message}`);
+    fail(err, "Nothing was saved.");
+    $("#universe-save").disabled = false;
+  }
 }
 // Reads the form against the stored values: which fields changed, which are invalid, and how.
 function readLimits(form) {

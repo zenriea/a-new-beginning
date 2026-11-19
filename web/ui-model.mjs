@@ -157,6 +157,16 @@ export function tradingVerdict(s) {
     (top ? ` Most common failure: ${gateLabel(top.gate)} (${top.n}×).` : "") };
 }
 
+// ---------------------------------------------------------------- research universe
+// "aapl, msft\nspy" -> ["AAPL", "MSFT", "SPY"]: upper-cased, split on commas or whitespace, duplicates dropped.
+export function parseSymbols(text) {
+  return [...new Set(String(text ?? "").toUpperCase().split(/[\s,;]+/).filter(Boolean))];
+}
+export function symbolDiff(before, after) {
+  const b = new Set(before), a = new Set(after);
+  return { added: after.filter((s) => !b.has(s)), removed: before.filter((s) => !a.has(s)) };
+}
+
 // ---------------------------------------------------------------- operator limits
 // Stored values are fractions; the form shows percentages. `loosens` says which direction relaxes
 // a control: +1 when raising it loosens, -1 when lowering it loosens, 0 when neither is riskier.

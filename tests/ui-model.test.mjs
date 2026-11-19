@@ -282,3 +282,10 @@ test("an uninvested account is not said to beat or trail the benchmark", () => {
   assert.equal(equityComparison(rows, 15).uninvested, false);   // a fill inside the range
   assert.equal(equityComparison([rows[0], { ...rows[1], gross: 500 }], null).uninvested, false);
 });
+
+test("universe text parses to clean symbols and a diff", async () => {
+  const { parseSymbols, symbolDiff } = await import("../web/ui-model.mjs");
+  assert.deepEqual(parseSymbols(" aapl, msft\nSPY;; aapl  btc-usd "), ["AAPL", "MSFT", "SPY", "BTC-USD"]);
+  assert.deepEqual(parseSymbols(""), []);
+  assert.deepEqual(symbolDiff(["QQQ", "TQQQ", "AAPL"], ["QQQ", "AAPL", "MSFT"]), { added: ["MSFT"], removed: ["TQQQ"] });
+});
