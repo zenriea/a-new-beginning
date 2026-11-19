@@ -436,6 +436,7 @@ class Router:
         self.primary = primary if primary.available else None
         self.helpers = helpers
         self.last: LLM | None = None
+        self.notify = None  # optional progress(step, detail) callback, set per call by the caller
 
     @property
     def available(self) -> bool:
@@ -452,13 +453,20 @@ class Router:
     def call(self, purpose, system, user, schema, max_tokens=16000, chain=None):
         chain = self._chain(purpose) if chain is None else chain
         err: Exception = LLMError(f"{purpose}: no model available")
-        for llm in chain:
+        for i, llm in enumerate(chain):
+            if self.notify:
+                self.notify("model", f"Asking {llm.model}" + (f" ({llm.route['name']})" if llm.route else ""))
             try:
                 out = llm.call(purpose, system, user, schema, max_tokens)
                 self.last = llm
+                if self.notify:
+                    self.notify("answered", f"{llm.model} answered")
                 return out
             except (LLMError, BudgetExceeded) as e:
                 log.warning("%s via %s failed (%s); trying next model", purpose, llm.model, e)
+                if self.notify:
+                    more = " - trying the next model" if i + 1 < len(chain) else ""
+                    self.notify("model_failed", f"{llm.model} failed: {str(e)[:160]}{more}")
                 err = e
         raise err
 

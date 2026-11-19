@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
@@ -34,6 +35,8 @@ from ..config import DEFAULT_SETTINGS, GATE_PRESETS, SETTING_BOUNDS, load_config
 from ..marketdata import store
 from ..research.sandbox import isolation_report
 from ..trading import ledger, live, oms
+
+log = logging.getLogger(__name__)
 
 WEB = Path(__file__).resolve().parents[2] / "web"
 SESSION_TTL = 12 * 3600
@@ -547,6 +550,49 @@ async def ask(body: AskBody):
         raise HTTPException(400, "empty question")
     from ..agent.qa import ask as do_ask
     return await run_in_threadpool(do_ask, q)
+
+
+@app.post("/api/ask/stream", dependencies=[Depends(require_write)])
+async def ask_stream(body: AskBody):
+    """Same as /api/ask, but streams each step as one JSON line, then the answer."""
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(400, "empty question")
+    from ..agent.qa import ask as do_ask
+    loop = asyncio.get_running_loop()
+    events: asyncio.Queue = asyncio.Queue()
+    t0 = time.monotonic()
+
+    def progress(step: str, detail: str = ""):
+        loop.call_soon_threadsafe(events.put_nowait, {"type": "step", "step": step, "detail": detail,
+                                                      "t": round(time.monotonic() - t0, 2)})
+
+    async def work():
+        try:
+            result = await run_in_threadpool(do_ask, q, progress)
+            await events.put({"type": "answer", **result})
+        except Exception as e:  # noqa: BLE001 - surfaced to the operator, not swallowed
+            log.exception("ask failed")
+            await events.put({"type": "error", "detail": str(e)[:300] or e.__class__.__name__})
+        await events.put(None)
+
+    task = asyncio.create_task(work())
+
+    async def gen():
+        try:
+            while (ev := await events.get()) is not None:
+                yield json.dumps(ev, default=str) + "\n"
+        finally:
+            await task
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/questions", dependencies=[Depends(require_operator)])
+async def questions(limit: int = Query(50, ge=1, le=200), before_id: int | None = Query(None, ge=1)):
+    from ..agent.qa import history
+    return await run_in_threadpool(history, limit, before_id)
 
 
 @app.post("/api/control/{action}", dependencies=[Depends(require_write)])

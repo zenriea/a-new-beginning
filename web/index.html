@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400..700&display=swap">
-  <link rel="stylesheet" href="/static/app.css?v=20261119-universe">
+  <link rel="stylesheet" href="/static/app.css?v=20261119-chats">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%2379c0ff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -144,7 +144,8 @@
            <p id="journal-results" class="journal-results muted" role="status"></p>
           <div class="feed" id="feed"></div>
           <div class="ask operator-only">
-            <label class="ask-label" for="ask-input">Ask the desk <span class="muted ask-note">answers cite stored records</span></label>
+            <div class="ask-head"><label class="ask-label" for="ask-input">Ask the desk <span class="muted ask-note">answers cite stored records</span></label>
+              <button class="btn small" type="button" id="btn-chats" aria-haspopup="dialog">History</button></div>
             <form id="ask-form">
               <input id="ask-input" placeholder="What’s behind the latest decision?" maxlength="500">
               <button class="btn ask-submit" type="submit" aria-label="Ask about desk records"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
@@ -160,6 +161,6 @@
 
   <div id="drawer-root"></div>
   <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-  <script type="module" src="/static/app.js?v=20261119-universe"></script>
+  <script type="module" src="/static/app.js?v=20261119-chats"></script>
 </body>
 </html>

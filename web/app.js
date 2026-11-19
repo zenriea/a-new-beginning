@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-universe";
+  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-chats";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -1068,7 +1068,7 @@ async function drawerRecord(path) {
 }
 function drawer(title, html, hash) {
   const replacing = Boolean(closeDrawer);
-  const previousHash = replacing ? drawerOrigin : recordRoute.test(location.hash) ? null : location.hash;
+  const previousHash = replacing ? drawerOrigin : recordRoute.test(location.hash) || location.hash === "#chats" ? null : location.hash;
   if (closeDrawer) closeDrawer({ keepHash: true });
   const previousFocus = document.activeElement;
   drawerOrigin = previousHash;
@@ -1452,20 +1452,88 @@ const SUGGEST = [["Current research", "What are you researching right now?"], ["
 $("#suggest").innerHTML = SUGGEST.map(([label, q]) => `<button class="fchip" data-q="${esc(q)}">${esc(label)}</button>`).join("");
 $("#suggest").addEventListener("click", (e) => { const b = e.target.closest("[data-q]"); if (b) askQuestion(b.dataset.q); });
 $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); const q = $("#ask-input").value.trim(); if (q) askQuestion(q); });
-async function askQuestion(q) {
-  $("#ask-input").value = q;
-  $("#answer").innerHTML = `<div class="q">${esc(q)}</div><div class="muted">Looking through the records…</div>`;
-  try {
-    const a = await api("/api/ask", { body: { question: q } });
-    const cites = (a.citations || []).map((c) => {
-      const [t, id] = c.split(":");
-      return t === "experiment" ? `<a href="#" data-exp="${esc(id)}">${esc(c)}</a>` : t === "strategy" ? `<a href="#" data-strat="${esc(id)}">${esc(c)}</a>` :
-        t === "order" ? `<a href="#" data-order="${esc(id)}">${esc(c)}</a>` : esc(c);
-    }).join(", ");
-    $("#answer").innerHTML = `<div class="q">${esc(q)}</div><div class="pre" style="margin-top:4px">${rich(a.answer)}</div>
-      <div class="muted" style="font-size:12px;margin-top:6px">${authorLabel(a.author)} · sources: ${cites || "none"}${a.unknowns ? ` · ${esc(a.unknowns)}` : ""}</div>`;
-  } catch (err) { $("#answer").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+const STEP_LABEL = { symbols: "Reading the question", account: "Account & positions", orders: "Orders & fills", strategies: "Strategies",
+  research: "Research records", gathered: "Records collected", rules: "Rules engine", model: "Asking the AI", model_failed: "Model failed",
+  answered: "Answer received", fallback: "Falling back to rules", verify: "Checking citations" };
+const responder = (a) => a.author === "llm" ? `AI analyst${a.model ? ` (${esc(a.model)})` : ""}` : authorLabel(a.author);
+function citeLinks(list) {
+  return (list || []).map((c) => {
+    const [t, id] = c.split(":");
+    return t === "experiment" ? `<a href="#" data-exp="${esc(id)}">${esc(c)}</a>` : t === "strategy" ? `<a href="#" data-strat="${esc(id)}">${esc(c)}</a>` :
+      t === "order" ? `<a href="#" data-order="${esc(id)}">${esc(c)}</a>` : esc(c);
+  }).join(", ");
 }
+function answerHTML(a) {
+  return `<div class="pre" style="margin-top:4px">${rich(a.answer)}</div>
+    <div class="muted" style="font-size:12px;margin-top:6px">${responder(a)} · ${dt(a.ts)} · sources: ${citeLinks(a.citations) || "none"}${a.unknowns ? ` · ${esc(a.unknowns)}` : ""}</div>`;
+}
+function renderSteps(steps, done) {
+  return `<ol class="ask-steps" aria-label="Progress">${steps.map((st, i) => {
+    const live = !done && i === steps.length - 1, bad = st.step === "model_failed" || st.step === "fallback";
+    return `<li class="${live ? "live" : bad ? "bad" : "ok"}"><span class="step-mark" aria-hidden="true"></span><span><b>${esc(STEP_LABEL[st.step] || st.step)}</b> <span class="muted">${esc(st.detail || "")}</span></span><span class="muted step-t">${st.t.toFixed(1)}s</span></li>`;
+  }).join("")}</ol>`;
+}
+let askRun = 0;
+async function askQuestion(q) {
+  const run = ++askRun, started = performance.now();
+  $("#ask-input").value = q;
+  const steps = [{ step: "symbols", detail: "Sending the question", t: 0 }];
+  const box = $("#answer");
+  const paint = (done = false, tail = "") => {
+    if (run !== askRun) return;
+    box.innerHTML = `<div class="q">${esc(q)}</div>${done ? `<details class="ask-trace"><summary>${steps.length} steps · ${((performance.now() - started) / 1000).toFixed(1)}s</summary>${renderSteps(steps, true)}</details>`
+      : `<div role="status" aria-live="polite">${renderSteps(steps, false)}<div class="muted step-elapsed">Working… ${((performance.now() - started) / 1000).toFixed(1)}s</div></div>`}${tail}`;
+  };
+  paint();
+  const tick = setInterval(() => { const el = $(".step-elapsed", box); if (el && run === askRun) el.textContent = `Working… ${((performance.now() - started) / 1000).toFixed(1)}s`; }, 200);
+  try {
+    const r = await fetch("/api/ask/stream", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-QD": "1" }, body: JSON.stringify({ question: q }) });
+    if (r.status === 401) { showLogin(); throw new Error("login required"); }
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "", answer = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "step") { if (steps.length === 1 && steps[0].detail === "Sending the question") steps.length = 0; steps.push(ev); paint(); }
+        else if (ev.type === "error") throw new Error(ev.detail);
+        else if (ev.type === "answer") answer = ev;
+      }
+    }
+    if (!answer) throw new Error("the answer stream ended early");
+    paint(true, answerHTML(answer));
+  } catch (err) { if (run === askRun) paint(true, `<div class="err">${esc(err.message)}</div>`); }
+  finally { clearInterval(tick); }
+}
+
+// ---------------------------------------------------------------- chat history
+async function openChats() {
+  const rows = await drawerRecord("/api/questions?limit=200");
+  if (!rows) return;
+  let lastDay = "";
+  const items = rows.map((c) => {
+    const d = day(c.ts), head = d !== lastDay ? `<h3 class="chat-day">${esc(d)}</h3>` : "";
+    lastDay = d;
+    return `${head}<article class="chat-item"><div class="chat-meta"><span class="badge ${c.author === "llm" ? "ok" : ""}">${responder(c)}</span><span class="muted num">${dt(c.ts)}</span></div>
+      <div class="q">${esc(c.question)}</div><div class="pre chat-answer">${rich(c.answer || "")}</div>
+      <div class="muted chat-src">sources: ${citeLinks(c.citations) || "none"}${c.unknowns ? ` · ${esc(c.unknowns)}` : ""}</div>
+      <button class="btn small" data-reask="${esc(c.question)}">Ask again</button></article>`;
+  }).join("");
+  drawer("Chat history", rows.length ? `<p class="muted">${rows.length} question${rows.length === 1 ? "" : "s"}, newest first.</p><div class="chat-list">${items}</div>`
+    : `<p class="muted">No questions yet. Ask the desk from the journal panel.</p>`, "#chats");
+  $(".chat-list")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-reask]"); if (!b) return;
+    const q = b.dataset.reask; closeDrawer?.(); askQuestion(q); $("#ask-input").scrollIntoView({ block: "nearest" });
+  });
+}
+$("#btn-chats").addEventListener("click", () => { if (location.hash === "#chats") openChats().catch(fail); else location.hash = "chats"; });
 
 // ---------------------------------------------------------------- main loop
 // Strips that scroll sideways on phones show a fade on the side that has more items.
@@ -1523,6 +1591,10 @@ function openFromHash(event) {
   if (["overview", "pipeline", "journal"].includes(key) || (!hash && event)) { goTo(key || "overview", { hash: false }); return; }
   drawerRequest++;
   closeDrawer?.({ keepHash: true });
+  if (hash === "#chats") {
+    if (isOperator()) openChats().catch(fail); else setHash("research", true);
+    return true;
+  }
   const m = recordRoute.exec(hash);
   if (m) {
     if (m[1] === "llm" && !isOperator()) { setHash("research", true); goTo("research", { hash: false }); return true; }

@@ -242,6 +242,8 @@ def test_viewer_password_gives_a_read_only_session(viewer_client):
         assert c.post(path, headers=w).status_code == 403, path
     assert c.post("/api/settings/risk", json={"max_gross_pct": 0.5}, headers=w).status_code == 403
     assert c.post("/api/ask", json={"question": "why?"}, headers=w).status_code == 403
+    assert c.post("/api/ask/stream", json={"question": "why?"}, headers=w).status_code == 403
+    assert c.get("/api/questions").status_code == 403
     from quantdesk import settings
     assert settings.get("agent")["paused"] is not True
     assert c.post("/api/logout").status_code == 403                  # logout still needs the CSRF header
@@ -282,3 +284,26 @@ def test_rejects_unsafe_viewer_password(env, monkeypatch, admin, viewer):
     from quantdesk.config import load_config
     with pytest.raises(ValueError, match="QD_VIEWER_PASSWORD"):
         load_config(reload=True)
+
+
+def test_ask_stream_reports_progress_and_lands_in_history(client):
+    import json
+    client.post("/api/login", json={"password": "correct horse"})
+    w = {"X-QD": "1"}
+    assert client.post("/api/ask/stream", json={"question": "why?"}).status_code == 403   # CSRF header required
+    r = client.post("/api/ask/stream", json={"question": "What are you researching right now?"}, headers=w)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-ndjson")
+    events = [json.loads(line) for line in r.text.splitlines() if line.strip()]
+    steps = [e["step"] for e in events if e["type"] == "step"]
+    assert steps[:2] == ["symbols", "account"] and "gathered" in steps and steps[-1] == "verify"
+    assert all(e["t"] >= 0 for e in events if e["type"] == "step")
+    answer = events[-1]
+    assert answer["type"] == "answer" and answer["author"] == "rules" and answer["answer"] and answer["ts"]
+    hist = client.get("/api/questions").json()
+    assert hist[0]["id"] == answer["id"] and hist[0]["question"] == "What are you researching right now?"
+    assert hist[0]["author"] == "rules" and hist[0]["answer"] == answer["answer"] and hist[0]["ts"] == answer["ts"]
+    client.post("/api/ask", json={"question": "Why cash?"}, headers=w)
+    hist = client.get("/api/questions").json()
+    assert [h["question"] for h in hist[:2]] == ["Why cash?", "What are you researching right now?"]
+    assert [h["question"] for h in client.get(f"/api/questions?before_id={hist[0]['id']}").json()][:1] == \
+        ["What are you researching right now?"]
