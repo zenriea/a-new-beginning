@@ -19,9 +19,15 @@ def _symbols_in(question: str) -> list[str]:
     return found
 
 
-def gather(question: str) -> dict:
+def _noop(step: str, detail: str = "") -> None:
+    pass
+
+
+def gather(question: str, progress=_noop) -> dict:
     syms = _symbols_in(question)
+    progress("symbols", f"Symbols in the question: {', '.join(syms)}" if syms else "No specific symbols mentioned")
     rec: dict = {"now": clock.now(), "symbols_mentioned": syms}
+    progress("account", "Reading account balance and open positions")
     eb = ledger.equity_breakdown()
     rec["account"] = {"equity": round(eb["equity"], 2), "cash": round(eb["cash"], 2), "gross": round(eb["gross"], 2)}
     pos = ledger.sleeve_positions()
@@ -29,6 +35,7 @@ def gather(question: str) -> dict:
         pos = [p for p in pos if p["symbol"] in syms]
     rec["positions"] = [{"id": f"position:{p['strategy_id']}:{p['symbol']}", **p} for p in pos]
     sids = {p["strategy_id"] for p in pos}
+    progress("orders", "Reading recent orders and fills")
     oq = "SELECT * FROM orders " + (f"WHERE symbol IN ({','.join('?' * len(syms))}) " if syms else "") + "ORDER BY id DESC LIMIT 12"
     orders = [dict(r) for r in db.q(oq, syms)]
     rec["orders"] = [{"id": f"order:{o['id']}", "symbol": o["symbol"], "side": o["side"], "qty": o["qty"],
@@ -41,6 +48,7 @@ def gather(question: str) -> dict:
                                           ids)] if ids else []
     for f in rec["fills"]:
         f["id"] = f"fill:{f['id']}"
+    progress("strategies", "Reading strategies and their exit rules")
     strat_rows = db.q(f"SELECT * FROM strategies WHERE id IN ({','.join('?' * len(sids))})", list(sids)) if sids else \
         db.q("SELECT * FROM strategies WHERE status IN ('active','incubating') ORDER BY id DESC LIMIT 5")
     rec["strategies"] = []
@@ -53,6 +61,7 @@ def gather(question: str) -> dict:
                                   "params": spec.get("fixed_params"), "stop_loss_pct": spec.get("stop_loss_pct"),
                                   "take_profit_pct": spec.get("take_profit_pct"), "max_hold_bars": spec.get("max_hold_bars"),
                                   "experiment_id": s["experiment_id"]})
+    progress("research", "Reading recent experiments, beliefs and journal entries")
     exps = db.q("SELECT e.id, e.status, e.test, e.gates, h.title FROM experiments e JOIN hypotheses h ON h.id=e.hypothesis_id "
                 "ORDER BY e.id DESC LIMIT 6")
     rec["recent_experiments"] = [{"id": f"experiment:{e['id']}", "title": e["title"], "status": e["status"],
@@ -106,21 +115,50 @@ def deterministic_answer(question: str, rec: dict) -> dict:
             "unknowns": "Demo mode: answer assembled from records by rules (no LLM)."}
 
 
-def ask(question: str) -> dict:
+def _model_of(call_id) -> str | None:
+    if not call_id:
+        return None
+    r = db.q1("SELECT model, served_model FROM llm_calls WHERE id=?", (call_id,))
+    return (r["served_model"] or r["model"]) if r else None
+
+
+def ask(question: str, progress=_noop) -> dict:
     question = question.strip()[:1000]
-    rec = gather(question)
+    rec = gather(question, progress)
+    n = sum(len(rec.get(k) or []) for k in ("positions", "orders", "fills", "strategies", "recent_experiments",
+                                             "beliefs", "recent_journal"))
+    progress("gathered", f"Collected {n} records")
     analyst = get_analyst()
     try:
-        ans, call_id = analyst.answer(question, rec)
+        if analyst.author == "rules":
+            progress("rules", "No AI model configured: answering from records by rules")
+        ans, call_id = analyst.answer(question, rec, progress)
         author = analyst.author
     except (BudgetExceeded, LLMError) as e:
+        progress("fallback", f"AI unavailable ({str(e)[:160]}); answering by rules")
         ans, call_id, author = deterministic_answer(question, rec), None, "rules"
         ans["unknowns"] = f"LLM unavailable ({e}); answered from records by rules."
+    progress("verify", "Checking every citation against the records")
     known = set()
     for k in ("positions", "orders", "fills", "strategies", "recent_experiments", "beliefs", "recent_journal"):
         for r in rec.get(k, []):
             known.add(str(r.get("id")))
     ans["citations"] = [c for c in ans.get("citations", []) if c in known]  # drop citations to nonexistent records
+    ts = clock.now()
     qid = db.ex("INSERT INTO questions(ts, question, answer, refs, author, llm_call_id) VALUES(?,?,?,?,?,?)",
-                (clock.now(), question, ans["answer"], db.dumps(ans), author, call_id))
-    return {"id": qid, "author": author, **ans}
+                (ts, question, ans["answer"], db.dumps(ans), author, call_id))
+    return {"id": qid, "ts": ts, "author": author, "model": _model_of(call_id), **ans}
+
+
+def history(limit: int = 50, before_id: int | None = None) -> list[dict]:
+    """Past questions, newest first, with who answered each one."""
+    where, args = ("WHERE q.id < ?", [before_id]) if before_id else ("", [])
+    rows = db.q("SELECT q.*, c.model AS model, c.served_model AS served_model FROM questions q "
+                f"LEFT JOIN llm_calls c ON c.id = q.llm_call_id {where} ORDER BY q.id DESC LIMIT ?", args + [limit])
+    out = []
+    for r in rows:
+        refs = db.loads(r["refs"], {}) or {}
+        out.append({"id": r["id"], "ts": r["ts"], "question": r["question"], "answer": r["answer"],
+                    "author": r["author"], "model": r["served_model"] or r["model"],
+                    "citations": refs.get("citations", []), "unknowns": refs.get("unknowns")})
+    return out

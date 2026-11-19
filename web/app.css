@@ -370,6 +370,24 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .answer { margin-top: 10px; font-size: 13.5px; max-height: 280px; overflow-y: auto; }
 .answer:not(:empty) { background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
 .answer .q { font-weight: 650; }
+.ask-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ask-head .ask-label { margin-bottom: 0; flex: 1; min-width: 0; }
+.ask-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; font-size: 12.5px; }
+.ask-steps li { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: baseline; }
+.step-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--good-mark); align-self: center; }
+.ask-steps li.live .step-mark { background: var(--accent); animation: blink 1s infinite; }
+.ask-steps li.bad .step-mark { background: var(--critical-mark); }
+.step-t { font-size: 11.5px; }
+.step-elapsed { font-size: 12px; margin-top: 6px; }
+.ask-trace { margin-top: 6px; font-size: 12px; }
+.ask-trace summary { cursor: pointer; color: var(--text-secondary); }
+.chat-list { display: grid; gap: 12px; }
+.chat-item { border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; display: grid; gap: 6px; font-size: 13.5px; }
+.chat-item .q { font-weight: 650; }
+.chat-item .btn { justify-self: start; }
+.chat-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+.chat-src { font-size: 12px; }
+.chat-day { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 6px 0 -4px; }
 .suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .suggest .fchip { background: var(--surface-1); font-size: 12px; }
 

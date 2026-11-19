@@ -62,9 +62,16 @@ class LLMAnalyst:
     def review(self, ctx: dict) -> tuple[dict, int]:
         return self.llm.call("review", prompts.SYSTEM, prompts.review_prompt(ctx), prompts.REVIEW_SCHEMA, max_tokens=8000)
 
-    def answer(self, question: str, records: dict) -> tuple[dict, int]:
-        return self.llm.call("question", prompts.SYSTEM, prompts.answer_prompt(question, records),
-                             prompts.ANSWER_SCHEMA, max_tokens=6000)
+    def answer(self, question: str, records: dict, progress=None) -> tuple[dict, int]:
+        if progress is None or not hasattr(self.llm, "notify"):
+            return self.llm.call("question", prompts.SYSTEM, prompts.answer_prompt(question, records),
+                                 prompts.ANSWER_SCHEMA, max_tokens=6000)
+        self.llm.notify = progress
+        try:
+            return self.llm.call("question", prompts.SYSTEM, prompts.answer_prompt(question, records),
+                                 prompts.ANSWER_SCHEMA, max_tokens=6000)
+        finally:
+            self.llm.notify = None
 
 
 # ----------------------------------------------------------------------------- demo
@@ -201,7 +208,7 @@ class RulesAnalyst:
             text += "Within expectations; too early to conclude anything. Continuing unchanged."
         return {"action": action, "journal": text, "new_allocation_pct": None, "lessons": [], "beliefs": []}, None
 
-    def answer(self, question: str, records: dict) -> tuple[dict, None]:
+    def answer(self, question: str, records: dict, progress=None) -> tuple[dict, None]:
         from .qa import deterministic_answer
         return deterministic_answer(question, records), None
 
