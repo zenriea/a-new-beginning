@@ -514,7 +514,7 @@ function renderPipeline(s) {
         ${review.length ? `<ul class="cands">${review.map((c) => `<li>
           <div class="cand-main"><a href="#" data-exp="${c.id}">#${c.id} ${esc(c.title)}</a>
             <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}${c.passed && !c.allocated ? " · not allocated" : ""}</small></div>
-          <div class="cand-result"><span class="cand-ret num ${signCls(c.test_return)}">Test ${pct(c.test_return, 1)}</span>
+           <div class="cand-result"><span class="cand-ret num ${signCls(c.test_return)}">Historical ${pct(c.test_return, 1)}</span>
             <small>${holdoutLabel(c.holdout_reuse_count, c.deflation_window_days)}</small></div>
           ${c.failed.length ? `<span class="muted cand-note">Failed: ${c.failed.map((g) => esc(gateLabel(g))).join(", ")}</span>` : ""}
           ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
@@ -696,14 +696,15 @@ function drawResearch(body = $("#tab-body")) {
   const th = (k, label, cls = "") => `<th class="${cls}" aria-sort="${k === key ? (dir > 0 ? "ascending" : "descending") : "none"}"><button type="button" class="sort" data-sort="${k}">${label}<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${k !== key ? "M2 4l3-3 3 3M2 6l3 3 3-3" : dir > 0 ? "M2 6l3-3 3 3" : "M2 4l3 3 3-3"}"/></svg></button></th>`;
   body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
     <span class="summary-count"><span class="${passed ? "up" : ""}">${passed}</span> passed gates</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} missed gates</span></div>
+    <p class="research-note">Historical screens use past data, which may overlap earlier tests. Forward paper results come from running frozen rules on new market data.</p>
     <div class="phone-sort"><label for="research-sort">Sort by</label><select class="sel" id="research-sort">
       ${Object.entries(RESEARCH_LABELS).map(([k, label]) => `<option value="${k}"${k === key ? " selected" : ""}>${label}</option>`).join("")}</select>
       <button class="btn small" type="button" id="research-direction" aria-label="Reverse sort order, currently ${direction}">${direction} <span aria-hidden="true">${dir > 0 ? "↑" : "↓"}</span></button></div>
-    <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr>${th("id", "#")}${th("title", "Hypothesis")}${th("status", "Status")}${th("ret", "Test return", "r")}
+    <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr>${th("id", "#")}${th("title", "Hypothesis")}${th("status", "Status")}${th("ret", "Historical return", "r")}
     ${th("sharpe", "Sharpe", "r")}${th("trades", "Trades", "r")}${th("gates", "Gates")}</tr></thead><tbody>
     ${sortedResearch(ex).map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
       <td data-label="Status">${expStatus(e.status)}${e.strategy_id ? `<div class="cell-sub"><span class="${e.strategy_probe ? "probe-chip" : "strategy-chip"}">${e.strategy_probe ? `probe #${e.strategy_id} · forward test` : `strategy #${e.strategy_id}`}</span></div>` : ""}</td>
-      <td class="r num ${signCls(e.test?.total_return)}" data-label="Test return">${pct(e.test?.total_return)}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
+      <td class="r" data-label="Historical return"><span class="num ${signCls(e.test?.total_return)}">${pct(e.test?.total_return)}</span>${e.test ? `<div class="muted cell-sub">${holdoutLabel(e.leakage?.holdout_reuse_count, e.leakage?.deflation_window_days)}</div>` : ""}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
       <td class="r num" data-label="Trades">${e.test?.n_trades ?? "–"}</td><td class="gates" data-label="Gates">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
     <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates${isOperator() ? ", or to start it as a probe" : ""}.</div>`;
   if (sortFocus) body.querySelector(sortFocus)?.focus({ preventScroll: true });
@@ -1182,7 +1183,8 @@ async function openExperiment(id) {
         ${(dec.details?.lessons || []).length ? `<h4>Recorded lessons</h4><ul class="notes">${dec.details.lessons.map((l) => `<li>${rich(l)}</li>`).join("")}</ul>` : ""}
         ${probeDecision && probeDecision !== dec ? `<h4>Separate probe decision</h4><div class="pre">${rich(probeDecision.rationale)}</div>` : ""}</details></div>` : ""}
     ${e.error ? `<div class="alert critical section"><span class="icon">${icon.alert}</span><div>${esc(e.error)}</div></div>` : ""}
-    ${e.test ? `<div class="section"><h3>Sealed test · net of costs</h3><dl class="test-headline">
+    ${e.test ? `<div class="section"><h3>Historical screen · net of costs</h3>
+      <p class="muted cell-sub">The rules were frozen before this experiment's test. The same dates may have informed earlier experiments, so this is not forward paper evidence.</p><dl class="test-headline">
       <div><dt>Net return</dt><dd>${pct(t.total_return)}</dd></div><div><dt>Max drawdown</dt><dd>${pct(t.max_drawdown)}</dd></div>
       <div><dt>Historical test window</dt><dd>${holdoutLabel(e.leakage?.holdout_reuse_count, e.leakage?.deflation_window_days)}</dd></div>
       <div><dt>Trades</dt><dd>${t.n_trades ?? "–"}</dd></div></dl>${w?.test ? `<p class="muted cell-sub">${dateSpan(w.test.start, w.test.end)}</p>` : ""}</div>` : ""}
