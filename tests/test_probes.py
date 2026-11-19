@@ -48,6 +48,12 @@ def test_gates_passing_cannot_be_vetoed_by_the_analyst(env, monkeypatch):
     s = db.q1("SELECT * FROM strategies WHERE id=?", (out["strategy_id"],))
     assert s["approved_allocation"] == 5000 and s["thesis"] and s["exit_plan"]
     assert "cannot block a passing test" in db.q1("SELECT rationale FROM decisions ORDER BY id DESC")["rationale"]
+    entry = db.q1("SELECT refs FROM journal WHERE title LIKE 'Allocating capital:%'")
+    test = db.loads(db.q1("SELECT test FROM experiments WHERE id=?", (out["experiment_id"],))["test"])
+    assert db.loads(entry["refs"])["decision_evidence"] == {
+        "outcome": "allocate", "test_return": test["total_return"], "test_trades": test["n_trades"],
+        "gates_passed": True, "failed_gates": [],
+    }
 
 
 def test_profitable_but_failed_experiment_starts_a_probe(env):

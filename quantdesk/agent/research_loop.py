@@ -319,7 +319,12 @@ def _decide(venue, eid, hid, prop, spec, res, gres, obs, bench, rs, analyst) -> 
         body += "\n\nRecorded lessons: " + " | ".join(dec["lessons"])
     if decision == "revise" and dec.get("revision_idea"):
         body += f"\nNext: {dec['revision_idea']}"
-    journal.write("decision", title, body, refs={"experiment_id": eid, "decision_id": did}, author=dauthor, llm_call_id=dcall)
+    evidence = {"outcome": decision, "test_return": res["test"].get("total_return"),
+                "test_trades": res["test"].get("n_trades"), "gates_passed": gres["passed"],
+                "failed_gates": gres["failed"]}
+    journal.write("decision", title, body,
+                  refs={"experiment_id": eid, "decision_id": did, "decision_evidence": evidence},
+                  author=dauthor, llm_call_id=dcall)
     out = {"status": "done", "experiment_id": eid, "decision": decision}
     if decision == "allocate":
         out["strategy_id"] = create_strategy(hid, eid, prop, spec, res, dec, dauthor, dcall)

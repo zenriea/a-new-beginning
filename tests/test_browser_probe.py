@@ -12,6 +12,7 @@ from test_probes import _experiment
 def test_cash_only_probe_from_overview_to_detail(env, monkeypatch):
     pw = pytest.importorskip("playwright.sync_api")
     from quantdesk import db
+    from quantdesk.agent import journal
     import quantdesk.api.app as appmod
     from quantdesk.worker import acquire_lock
 
@@ -19,6 +20,11 @@ def test_cash_only_probe_from_overview_to_detail(env, monkeypatch):
     sid = make_strategy(allocation=3000)
     db.ex("UPDATE strategies SET probe=1, expectations=? WHERE id=?",
           (db.dumps({"test": {"total_return": 0.12}}), sid))
+    jid = journal.write("decision", "Not promoted: Test idea", "Analyst interpretation",
+                        refs={"experiment_id": 1, "decision_evidence": {
+                            "outcome": "reject", "test_return": -0.12, "test_trades": 9,
+                            "gates_passed": False, "failed_gates": ["deflated_psr"],
+                        }})
     monkeypatch.setattr(appmod, "cfg", env)
     client = TestClient(appmod.app)
 
@@ -45,6 +51,14 @@ def test_cash_only_probe_from_overview_to_detail(env, monkeypatch):
         pw.expect(drawer).to_contain_text("No fills yet. The $3,000 allocation is a trading budget.")
         historical = drawer.get_by_role("heading", name="Historical sealed test").locator("..")
         pw.expect(historical).to_contain_text("12.0")
+        page.goto("http://desk.test/#journal")
+        decision = page.locator(f'#feed [data-jid="{jid}"]')
+        pw.expect(decision.locator(".entry-evidence")).to_contain_text("Trades: 9")
+        pw.expect(decision.locator(".entry-evidence")).to_contain_text("Deflated PSR")
+        pw.expect(decision.locator(".entry-evidence")).to_contain_text("No regular allocation.")
+        pw.expect(decision.get_by_text("Analyst interpretation")).not_to_be_visible()
+        decision.get_by_text("Analyst rationale").click()
+        pw.expect(decision.get_by_text("Analyst interpretation")).to_be_visible()
         browser.close()
 
 

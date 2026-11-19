@@ -1374,9 +1374,17 @@ function entryHTML(j, fresh) {
   if (refs.order_id) links.push(`<a href="#" data-order="${refs.order_id}">order #${refs.order_id}</a>`);
   if (j.llm_call_id && isOperator()) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
   const checks = refs.trade_checks;
-  const grounded = Array.isArray(checks);
+  const decision = refs.decision_evidence;
+  const next = decision?.outcome === "allocate" ? "Admitted to regular paper trading, subject to allocation limits." :
+    decision?.outcome === "revise" ? "Revision recorded. No regular allocation for these rules." :
+    decision?.outcome === "reject" ? "No regular allocation. Any paper probe is a separate decision." : null;
+  const grounded = Array.isArray(checks) || !!next;
   const long = !grounded && (j.body || "").length > 420;
-  const evidence = grounded && checks.length ? `<b>Recorded trade counts</b><ul>${checks.map((c) =>
+  const evidence = next ? `<b>Recorded test result</b>
+    <p>Historical return after costs: ${pct(decision.test_return)} · Trades: ${esc(decision.test_trades ?? "–")}.
+    ${decision.gates_passed ? "All gates passed." : `Missed gates: ${decision.failed_gates.map((g) => esc(gateLabel(g))).join(", ")}.`}</p>
+    <p><b>Next:</b> ${next}</p>` :
+    checks?.length ? `<b>Recorded trade counts</b><ul>${checks.map((c) =>
     `<li><a href="#" data-exp="${esc(c.experiment_id)}">Experiment #${esc(c.experiment_id)}</a>: ${esc(c.trades)} trades; ${c.trades >= c.minimum ? "met" : "below"} the minimum of ${esc(c.minimum)}.</li>`).join("")}</ul>` :
     "No cited trade-count check available.";
   return `<div class="entry k-${esc(kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
