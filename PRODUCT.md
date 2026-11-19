@@ -9,7 +9,7 @@ web
 ## Users
 
 - **Operator (primary):** the owner who deploys QuantDesk (Railway, Docker or a VPS) and runs it. They watch what the autonomous analyst is doing, review its hypotheses, experiments and trades, start probes, set limits and gates, and use Pause / Emergency stop. They use it on desktop and phone about equally: deep reviews of research records, drawers and limits at a desk, and frequent short check-ins on a phone ("is it trading, why or why not, is anything wrong").
-- **Viewers (secondary):** people the operator shows results to. They look at outcomes and the reasoning behind them but never change settings. *Open decision:* the app currently has a single operator password and no read-only viewer role, so viewers today see the operator's screen or screenshots.
+- **Viewers (secondary):** people the operator shares results with. An optional separate viewer password opens the read-only desk: viewers can inspect results and reasoning but cannot operate the desk, edit limits, run the analyst, or see model inputs.
 
 ## Product Purpose
 

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { deskHealth, equityInRange, limitUsage } from "../web/ui-model.mjs";
+import { deskHealth, displayedActivity, equityComparison, equityInRange, journalMatches, journalPresentation, limitUsage, showAnnualizedReturn } from "../web/ui-model.mjs";
 
 const normal = () => ({
   controls: { emergency_stop: false, system_halt: false, drawdown_halt: false, paused: false },
@@ -95,6 +95,60 @@ test("a stale account has an empty recent range rather than relabelled old data"
   assert.deepEqual(equityInRange(rows, "day", now + 2 * 86400), []);
 });
 
+test("check-in and activity ignore a retained worker schedule through stop, clear and resume", () => {
+  const s = normal();
+  s.agent = { activity: "waiting", next_actions: [{ what: "Next signal evaluation", at: 12345 }] };
+  s.controls.emergency_stop = s.controls.paused = true;
+  assert.equal(displayedActivity(s).activity, "stopped");
+  assert.deepEqual(displayedActivity(s).next_actions, [{ what: "Waiting for the emergency stop to be cleared." }]);
+  s.controls.emergency_stop = false;
+  assert.equal(displayedActivity(s).activity, "paused");
+  assert.equal(displayedActivity(s).next_actions[0].at, undefined);
+  s.controls.paused = false;
+  assert.deepEqual(displayedActivity(s).next_actions, [{ what: "Next signal evaluation", at: 12345 }]);
+  s.worker.alive = false;
+  assert.equal(displayedActivity(s).activity, "offline");
+  assert.equal(displayedActivity(s).next_actions[0].at, undefined);
+});
+
+test("benchmark comparison uses both series' first and last chart snapshots", () => {
+  const snapshots = [{ ts: 1, equity: 100, benchmark_equity: 50 }, { ts: 2, equity: 110, benchmark_equity: 60 }];
+  const result = equityComparison(snapshots);
+  assert.ok(Math.abs(result.account - 0.1) < 1e-12);
+  assert.ok(Math.abs(result.benchmark - 0.2) < 1e-12);
+  assert.ok(Math.abs(result.difference + 0.1) < 1e-12);
+  assert.equal(equityComparison(snapshots.slice(0, 1)), null);
+  assert.equal(equityComparison([{ ...snapshots[0], benchmark_equity: null }, snapshots[1]]), null);
+});
+
+test("CAGR is never shown for an unknown window or one shorter than 90 days", () => {
+  const start = 100, end = start + 90 * 86400;
+  assert.equal(showAnnualizedReturn(), false);
+  assert.equal(showAnnualizedReturn({ start, end: end - 1 }), false);
+  assert.equal(showAnnualizedReturn({ start, end }), true);
+});
+
+test("journal display distinguishes both historical and new probes from promotion decisions", () => {
+  assert.deepEqual(journalPresentation({ kind: "decision", title: "Rejected: Momentum" }),
+    { kind: "decision", title: "Not promoted: Momentum" });
+  assert.deepEqual(journalPresentation({ kind: "decision", title: "Rejected: Momentum", author: "rules",
+    body: "Failed gates: test_sharpe, test_trades. I am rejecting it." }),
+    { kind: "decision", title: "Not promoted (missed 2 gates): Momentum" });
+  assert.deepEqual(journalPresentation({ kind: "decision", title: "New probe live: Momentum" }),
+    { kind: "probe", title: "Probe started: Momentum" });
+  assert.deepEqual(journalPresentation({ kind: "decision", title: "Probe started: Momentum", refs: { probe: true } }),
+    { kind: "probe", title: "Probe started: Momentum" });
+  assert.deepEqual(journalPresentation({ kind: "order", title: "Rejected: Momentum" }),
+    { kind: "order", title: "Rejected: Momentum" });
+});
+
+test("journal search matches displayed titles, text, kinds and record IDs without case sensitivity", () => {
+  const entry = { kind: "decision", title: "Rejected: Momentum", body: "Missed test_sharpe.", refs: { experiment_id: 17 } };
+  assert.equal(journalMatches(entry, "  NOT promoted  #17 "), true);
+  assert.equal(journalMatches(entry, "Decision sharpe"), true);
+  assert.equal(journalMatches(entry, "momentum #71"), false);
+});
+
 test("trading verdict explains why nothing trades", async () => {
   const { tradingVerdict } = await import("../web/ui-model.mjs");
   const base = () => ({ controls: { emergency_stop: false, paused: false }, worker: { alive: true }, positions: [],
@@ -164,7 +218,7 @@ test("a paused desk never reads as waiting to trade, in any live state", async (
     assert.match(v.text, /^Paused: no research and no new entries\./);
     assert.doesNotMatch(v.text, /Waiting for entry|Trading:/);
   }
-  assert.match(tradingVerdict(mk({ strategies: 0, probes: 1 }, [])).text, /1 probe keeps its sleeve/);
+  assert.match(tradingVerdict(mk({ strategies: 0, probes: 1 }, [])).text, /1 probe keeps its allocation/);
   assert.match(tradingVerdict(mk({ strategies: 1, probes: 0 }, [{}, {}])).text, /2 open positions are held/);
 });
 

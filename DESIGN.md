@@ -183,12 +183,12 @@ A graphite neutral ladder carries the page; saturated syntax hues appear only wh
 
 ### Secondary
 - **Live Cyan** (live-cyan): capital that is live right now, and nothing else. It draws the account equity line (with a faint area fill) only while positions are open, the "Live" funnel cell, and the live count in the rail. A 13% tint (live-soft) backs the live funnel cell.
-- **Number Violet** (number-violet): probes. Probe chips, the probe verdict, probe counts and test entries in the journal. Probes are activity, never success, so they never borrow green.
+- **Number Violet** (number-violet): probes. Probe chips, the probe verdict, probe counts, and probe and test entries in the journal. Probes are activity, never success, so they never borrow green.
 
 ### Tertiary (state)
 - **String Green** (string-green, mark string-green-mark): passed evidence and nothing else. The passed-gates count and a ledger that reconciles (the one green text style), passed gate marks, passed and active status tags, strategy chips, and the check-in verdict when a strategy that passed every gate is live.
 - **Warning Amber** (warning-amber, mark warning-amber-mark): demo and synthetic modes, running or pending work, limit changes that loosen, honesty caveats.
-- **Destructive Red** (destructive-red, mark destructive-red-mark): failed gates, risk entries, errors, halted desk, and destructive controls. Each state hue has a text value and a brighter or deeper "mark" value for dots, bars and fills, plus a 9 to 14% tint for backgrounds. **On Danger** (on-danger) is the text and icon colour on a filled red surface (hovered danger button, confirm button, critical alert icon) in both themes; **On Warning** (on-warning) is the same for the filled amber warning alert icon.
+- **Destructive Red** (destructive-red, mark destructive-red-mark): risk entries, errors, halted desk, and destructive controls. Routine missed gates use neutral bars and chips with a small red tick or dot. **On Danger** (on-danger) is the text and icon colour on a filled red surface (hovered danger button, confirm button, critical alert icon) in both themes; **On Warning** (on-warning) is the same for the filled amber warning alert icon.
 - **Benchmarks:** muted greys, never a hue. Benchmark Grey (benchmark-grey) draws the equity benchmark (QQQ by default) dashed, and sell markers on price charts; Benchmark Grey Dim (benchmark-grey-dim) draws the BTC-USD benchmark dotted, and the dots of intent, order and fill entries in the journal.
 
 ### Neutral
@@ -238,7 +238,7 @@ A fixed 232px left rail, a sticky 64px top bar (desk health at the left; then, a
 
 Spacing steps on 4px: 4, 8, 12, 16, 20, 24, 32. Panel headers are 48px tall with 20px side padding; panel bodies pad 18px 20px 20px.
 
-Responsive behaviour: at 1260px the journal drops below the main column. At 900px the rail becomes a horizontally scrolling strip with fade masks on the side that has more. At 640px the top bar holds desk health, theme, Pause and Stop on one row with 44px targets, quiet status tags collapse behind a "+N status" tag, the account strip goes 2 by 2, the funnel wraps 3 over 2 with seams between every cell and its chevrons hidden, and the research table becomes stacked rows. Container queries on the main column (760px, 680px) reflow the desk pair, pipeline grid and account strip independently of the viewport.
+Responsive behaviour: at 1260px the journal drops below the main column. At 900px the rail becomes a horizontally scrolling strip with fade masks on the side that has more. At 640px the verdict follows the compact top bar, ahead of status tags and alerts. Quiet tags collapse behind “more statuses”; mode tags, warnings and a closed NASDAQ stay visible. The account strip goes 2 by 2, the funnel wraps 3 over 2, and the research table becomes stacked rows. At 475px, desk health occupies its own compact one-line row above the 44px operator controls. Container queries on the main column (760px, 680px) reflow the desk pair, pipeline grid and account strip independently of the viewport.
 
 ## Elevation & Depth
 
@@ -270,8 +270,8 @@ Quiet, rectangular, deliberate.
 ### Tags
 Tags, not pills.
 - **Style:** 4px radius, Panel Raised fill, 1px seam, 12px Hanken Grotesk at 550 with tabular numerals, a 6px status dot where state applies (Keyword Blue when healthy). Status tags take a state tint and state text: green for passed and active, amber for running and submitted, red for rejected, errored and retired (retired is also struck through); failed experiments stay neutral with only a red dot. The PAPER tag is outlined in Ink Muted on Panel, set in mono capitals at 600 in Ink, and always shown first.
-- **Gate chips:** failed gates are outlined in a red seam, not filled.
-- **Journal kind tags:** uppercase mono at 0.04em, tinted from the entry's state hue; intents are dashed and unfilled.
+- **Gate chips:** neutral chips with a small red dot; additional missed gates expand in place.
+- **Journal kind tags:** full labels in mono, tinted from the entry's state hue; intents are dashed and unfilled.
 - **Filter chips:** outlined; the selected chip takes a blue tint and blue text.
 
 ### Cards / Containers
@@ -293,9 +293,10 @@ Tags, not pills.
 
 ### Check-in band (Signature)
 The first answer on every screen: one verdict line at headline size beside "Latest" and "Next" rows, in the top pane of the grid, tinted 8% toward its state hue (blue working, green clear, amber warning, red halted, violet probing) with a 3px state edge on its left.
+“Next” and Agent activity both follow the current desk controls. A stopped, paused or offline desk shows what it is waiting for instead of counting down to a stale worker schedule.
 
 ### Kill cell (Signature)
-The emergency stop lives alone at the far right of the top bar, after the theme toggle and Pause, behind a 1px Seam Strong divider with 16px of empty space on each side, using the dashed danger button at 650 weight. Clear emergency stop replaces it in place when the desk is stopped. Every destructive action opens a confirmation dialog that states exactly what will and will not happen.
+The emergency stop lives alone at the far right of the top bar, after the theme toggle and Pause, behind a 1px Seam Strong divider, using the dashed danger button at 650 weight. Clear emergency stop replaces it in place when the desk is stopped. Every destructive action opens a confirmation that states what will and will not happen, and initially focuses Cancel.
 
 ### Funnel (Signature)
 The pipeline's five stages as one seam-divided strip: a single 6px outer border, 1px seams between cells, and a small chevron (a 7px rotated square with two Seam Strong edges) sitting on each seam to show flow. Each cell holds a 24px mono count (Ink Muted at zero, Ink once it has items), a 12.5px stage label and a 12px note. The last cell, Live, takes the live-soft tint and a Live Cyan count.
@@ -304,13 +305,19 @@ The pipeline's five stages as one seam-divided strip: a single 6px outer border,
 The account line is Ink at 2.5px and the only series with a last-value label; it turns Live Cyan, with a faint cyan area, only while positions are open. Benchmarks are 1.5px muted greys, QQQ dashed and BTC-USD dotted, with no last-value labels. Axes and the crosshair readout are mono at 12px; only dashed horizontal seam gridlines; ticks read 24-hour times, a short date ("Nov 19") where the day changes. The library logo is off; the legend ends with a muted credit link to TradingView Lightweight Charts.
 
 ### Journal entry
-A log line, not a card: a 40px mono column of 24-hour times, a short mono kind label (OBS, RES, HYP, TEST, DEC, INT, ORD, FILL, REV, RISK, DATA, SYS; full name for screen readers and on hover) tinted from the entry's state hue (blue for hypothesis, research, decision and review; violet for tests; dim grey for intents, orders and fills; red for risk; amber for data), then a 13.5px title at 600. Body, author and record links sit underneath, starting at the kind column. Entries divide by seams, and a sticky small-caps day divider ("Nov 19, 2026") opens each date. Intents keep a dashed label and say "intent, not a fill". Long bodies clamp with a fade and expand in place.
+Live updates leave retained entries and their focused controls in place.
+A log line, not a card: a 40px mono column of 24-hour times, a full kind label (blue for hypothesis, research, decision and review; violet for tests and probes; dim grey for intents, orders and fills; red for risk; amber for data), then a 13.5px title at 600. Body, author and record links sit underneath, starting at the kind column. Entries divide by seams, and a sticky day divider opens each date. Intents say "intent, not a fill". Long bodies expand in place. Search covers loaded entries, and the browser remembers selected filters.
 
 ### Research table
 Every column header is a button that sorts the loaded rows in place (aria-sort on the header, a small arrow that turns Keyword Blue on the active column). Numbers start high-first and names A to Z; a second click reverses; missing values always sink to the bottom.
+On phones, a “Sort by” selector and direction button expose the same ordering above the stacked rows.
 
 ### Shortcuts and addresses
-`?` opens a keyboard list in the confirmation-dialog style with mono keycaps: `/` ask, `O` overview, `J` journal, `1`-`5` records tabs, `T` theme, `P` pause. Emergency stop has no key, and `P` never resumes. Each records tab has an address (`#research`, `#strategies`, `#orders`, `#market`, `#limits`) that the rail links to and the URL follows.
+`?` opens a keyboard list in the confirmation-dialog style with mono keycaps: `/` ask (operator only), `O` overview, `J` journal, `1`–`5` records tabs, `T` theme. Desk controls have no single-key shortcuts. Each records tab has an address (`#research`, `#strategies`, `#orders`, `#market`, `#limits`). Changing to a workspace address closes an open record drawer.
+Opening a drawer from the desk adds one browser history entry. Back closes it, Forward reopens it, and browsing another record inside it keeps Back pointed at the workspace. Overview returns to the top with the phone navigation rail in view.
+
+### Experiment drawer
+Lead with the decision, sealed-test return and gate outcomes. The rationale, passing checks, frozen rules and full results expand on demand. Wide results scroll independently with an edge cue; CAGR appears only for windows of at least 90 days.
 
 ### Read-only view
 Signed in with the viewer password, the same screen shows results only: the Pause button, the kill cell, Ask the desk, the Limits & system tab and every probe, retire, re-judge and model-input control are absent, not disabled. A Keyword Blue outlined "VIEW ONLY" tag follows the PAPER tag.

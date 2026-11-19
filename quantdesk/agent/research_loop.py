@@ -251,7 +251,9 @@ def _decide(venue, eid, hid, prop, spec, res, gres, obs, bench, rs, analyst) -> 
     _save_beliefs(dec.get("beliefs", []), venue, dauthor, dcall)
     hstatus = {"reject": "rejected", "revise": "revise", "allocate": "allocated"}[decision]
     db.ex("UPDATE hypotheses SET status=?, updated_at=? WHERE id=?", (hstatus, clock.now(), hid))
-    title = {"reject": f"Rejected: {prop['title']}", "revise": f"Revising: {prop['title']}",
+    missed = len(gres["failed"])
+    gate_note = f" (missed {missed} gate{'s' if missed != 1 else ''})" if missed else ""
+    title = {"reject": f"Not promoted{gate_note}: {prop['title']}", "revise": f"Revising: {prop['title']}",
              "allocate": f"Allocating capital: {prop['title']}"}[decision]
     body = dec["journal"]
     if dec.get("lessons"):
@@ -476,12 +478,13 @@ def create_strategy(hid, eid, prop, spec, res, dec, author, call_id, probe: bool
         start = (f"No room under the total-allocation limit ({lim['max_total_allocation_pct']:.0%} of equity), so it "
                  "starts trading automatically when other strategies free up capital.")
     else:
-        title = f"New {kind} live: {spec['name']} v{v}"
+        title = f"{'Probe started' if probe else 'New strategy live'}: {spec['name']} v{v}"
         start = (f"Trading starts with ${start_alloc:,.0f} on the next bar close"
                  + (f" (reduced from ${full:,.0f} by the total-allocation limit)." if start_alloc < full - 1 else
                     "." if probe else f" (incubation size, {rs['incubation_fraction']:.0%})."))
     journal.write("decision", title,
                   f"Approved ${approved:,.0f}. {start}{note}\nThesis: {dec.get('thesis')}\n"
                   f"Exit plan: {dec.get('exit_plan')}\nInvalidation: {inval}",
-                  refs={"strategy_id": sid, "experiment_id": eid}, author=author, llm_call_id=call_id)
+                  refs={"strategy_id": sid, "experiment_id": eid, **({"probe": True} if probe else {})},
+                  author=author, llm_call_id=call_id)
     return sid

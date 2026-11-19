@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
-import { changeDirection, deskHealth, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  limitUsage, LIMIT_FIELDS, sameValue, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-seams";
+import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
+  journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, sameValue, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=20261119-review";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -19,7 +19,11 @@ function kv(obj) {
     esc(Array.isArray(v) ? v.join(", ") : v && typeof v === "object" ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(", ") : v)}</span>`).join("")}</span>`;
 }
 const money = (v, d = 0) => v == null || isNaN(v) ? "–" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
-const pct = (v, d = 2, sign = true) => v == null || isNaN(v) ? "–" : (sign && v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(d) + "%";
+const pct = (v, d = 2, sign = true) => {
+  if (v == null || !Number.isFinite(v)) return "–";
+  const magnitude = Math.abs(v * 100).toFixed(d);
+  return (Number(magnitude) === 0 ? "" : v < 0 ? "−" : sign ? "+" : "") + magnitude + "%";
+};
 const num = (v, d = 2) => v == null || isNaN(v) ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: Math.min(d, 2) > 0 && Math.abs(v) < 1000 ? Math.min(d, 2) : 0 });
 const qty = (v) => v == null ? "–" : Number.isInteger(v) ? v.toLocaleString() : Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
 const px = (v) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: v < 0.01 ? 10 : v < 1 ? 6 : v < 100 ? 4 : 2, minimumFractionDigits: 2 });
@@ -46,7 +50,7 @@ function until(ts) {
   if (s < 86400) return (s / 3600).toFixed(1) + "h";
   return (s / 86400).toFixed(1) + "d";
 }
-const authorLabel = (a) => ({ llm: "AI analyst", rules: "Rules engine", system: "System", operator: "You" }[a] || a);
+const authorLabel = (a) => esc(({ llm: "AI analyst", rules: "Rules engine", system: "System", operator: "Operator" }[a] || a));
 
 async function api(path, opts = {}) {
   const init = { credentials: "same-origin", headers: {} };
@@ -85,9 +89,8 @@ function toast(msg, opts = {}) {
 }
 const fail = (err, detail) => toast(err?.message || String(err), { tone: "bad", detail });
 
-// A confirmation that states consequences. `focus: "confirm"` only where acting is the safe direction
-// (stopping trading); everything that adds risk opens with Cancel focused.
-function confirmDialog({ title, body = "", confirm, tone = "primary", focus = "cancel" }) {
+// A confirmation that states consequences. Enter on opening cancels; choose the action to confirm.
+function confirmDialog({ title, body = "", confirm, tone = "primary" }) {
   return new Promise((resolve) => {
     const d = document.createElement("dialog");
     d.className = `confirm-dialog ${tone}`;
@@ -99,7 +102,7 @@ function confirmDialog({ title, body = "", confirm, tone = "primary", focus = "c
     d.addEventListener("close", () => { resolve(d.returnValue === "ok"); d.remove(); });
     document.body.appendChild(d);
     d.showModal();
-    d.querySelector(focus === "confirm" ? "[value=ok]" : "[value=cancel]").focus();
+    d.querySelector("[value=cancel]").focus();
   });
 }
 const icon = {
@@ -112,11 +115,11 @@ const icon = {
 // Journal entries worth interrupting the operator for (research outcomes, trades, risk).
 function notifyFromJournal(j) {
   if (j.author === "operator") return;  // the operator's own action already got its confirmation
-  const t = j.title || "", refs = j.refs || {};
+  const { kind, title: t } = journalPresentation(j), refs = j.refs || {};
   const research = j.kind === "research" || j.kind === "decision" || (j.kind === "test" && /^Re-judged/.test(t));
   const failed = j.kind === "system" && /failed|paused|could not/i.test(t);
   if (!(research || failed || j.kind === "fill" || j.kind === "risk")) return;
-  const tone = j.kind === "risk" || failed ? "bad" : /^(Allocating|New (strategy|probe) live)/.test(t) || j.kind === "fill" ? "good" : "info";
+  const tone = j.kind === "risk" || failed ? "bad" : kind === "probe" ? "probe" : /^(Allocating|New strategy live)/.test(t) || j.kind === "fill" ? "good" : "info";
   const body = friendlyGates(j.body || "");
   toast(friendlyGates(t), { tone, detail: body.slice(0, 160) + (body.length > 160 ? "…" : ""), exp: refs.experiment_id });
 }
@@ -141,9 +144,12 @@ function markNavigation(key) {
 // Every records tab has its own address (#limits opens Limits & system), so a tab can be bookmarked or sent.
 const TAB_HASH = { research: "research", strategies: "strategies", orders: "orders", market: "market", system: "limits" };
 const HASH_TAB = Object.fromEntries(Object.entries(TAB_HASH).map(([k, v]) => [v, k]));
-function setHash(hash) {
+function setHash(hash, replace = false) {
   const url = hash ? `#${hash}` : location.pathname + location.search;
-  if (location.hash !== (hash ? `#${hash}` : "")) history.replaceState(null, "", url);
+  if (location.hash !== (hash ? `#${hash}` : "")) {
+    if (replace) history.replaceState(null, "", url);
+    else history.pushState(null, "", url);
+  }
 }
 function selectTab(key, { hash = true } = {}) {
   if (key === "system" && !isOperator()) key = "research";
@@ -158,16 +164,25 @@ function selectTab(key, { hash = true } = {}) {
   state.tab = key; markNavigation(key); renderTab();
 }
 document.addEventListener("click", (event) => {
-  const link = event.target.closest("[data-nav]");
+  const link = event.target.closest("[data-nav], .skip-link");
   if (!link) return;
   event.preventDefault();
-  goTo(link.dataset.nav);
+  goTo(link.dataset.nav || "overview");
 });
-function goTo(key) {
-  if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key);
-  else { markNavigation(key); setHash(key === "overview" ? "" : key); }
+function goTo(key, { hash = true } = {}) {
+  drawerRequest++;
+  closeDrawer?.({ keepHash: true, restoreFocus: false });
+  if (key === "system" && !isOperator()) { key = "research"; setHash("research", true); hash = false; }
+  if (!["overview", "journal", "pipeline"].includes(key)) selectTab(key, { hash });
+  else { markNavigation(key); if (hash) setHash(key === "overview" ? "" : key); }
   const target = $(key === "overview" ? "#overview" : key === "journal" ? "#journal" : key === "pipeline" ? "#pipeline" : "#records");
-  if (target) { target.scrollIntoView({ behavior: "instant", block: "start" }); target.focus({ preventScroll: true }); }
+  if (target) {
+    if (key === "overview") {
+      window.scrollTo({ top: 0, behavior: "instant" });
+      $(".sidebar").scrollLeft = 0;
+    } else target.scrollIntoView({ behavior: "instant", block: "start" });
+    target.focus({ preventScroll: true });
+  }
 }
 
 // ---------------------------------------------------------------- auth
@@ -176,7 +191,8 @@ function stopUpdates() {
   if (state.es) { state.es.close(); state.es = null; }
 }
 function showLogin() {
-  stopUpdates(); if (closeDrawer) closeDrawer();
+  stopUpdates(); drawerRequest++; closeDrawer?.({ keepHash: true, restoreFocus: false });
+  $("#feed").replaceChildren(); state.journal = [];
   $("#app").classList.add("hidden"); $("#login-view").classList.remove("hidden");
 }
 $("#login-form").addEventListener("submit", async (e) => {
@@ -222,14 +238,18 @@ function renderBadges(s) {
   if (s.mode.market_data === "synthetic") badge("warn", "SYNTHETIC market data");
   badge(s.worker.alive ? "ok" : "bad", `Worker ${s.worker.alive ? "running" : "offline"}`, { quiet: s.worker.alive });
   const n = s.sessions.NASDAQ;
-  badge(n.open ? "ok" : "", `NASDAQ ${n.open ? "open · closes in " + until(n.closes_at) : "closed · opens in " + (n.opens_at ? until(n.opens_at) : "?")}`, { quiet: true });
+  badge(n.open ? "ok" : "", `NASDAQ ${n.open ? "open · closes in " + until(n.closes_at) : "closed"}${
+    !n.open && n.opens_at ? `<span class="session-next"> · opens in ${until(n.opens_at)}</span>` : ""}`, {
+    quiet: n.open, title: !n.open && n.opens_at ? `Opens in ${until(n.opens_at)}` : "" });
   badge("ok", "Crypto 24/7", { quiet: true });
   const bud = s.budget, broke = bud.day_remaining <= 0 || bud.month_remaining <= 0;
   badge(broke ? "bad" : "", `AI spend $${bud.month_spent.toFixed(2)} / $${bud.monthly_cap}`,
     { quiet: !broke, dot: broke, title: `AI spend this month (today $${bud.day_spent.toFixed(2)} of $${bud.daily_cap})` });
   const quiet = b.filter((x) => x.includes(" quiet")).length;
   const expanded = $("#badges").classList.contains("expanded");
-  $("#badges").innerHTML = b.join("") + (quiet ? `<button type="button" class="badge badge-more" aria-expanded="${expanded}">${expanded ? "Less" : `+${quiet} status`}</button>` : "");
+  const restoreBadgeFocus = document.activeElement === $("#badges .badge-more");
+  $("#badges").innerHTML = b.join("") + (quiet ? `<button type="button" class="badge badge-more" aria-expanded="${expanded}">${expanded ? "Fewer statuses" : `${quiet} more statuses`}</button>` : "");
+  if (restoreBadgeFocus) $("#badges .badge-more")?.focus({ preventScroll: true });
   const c = s.controls;
   $("#btn-pause").innerHTML = `<span>${c.paused ? "Resume" : "Pause"}<span class="lbl-long"> agent</span></span>`;
   $("#btn-pause").setAttribute("aria-label", c.paused ? "Resume agent" : "Pause agent");
@@ -246,7 +266,7 @@ function renderBadges(s) {
   $("#nav-live-count").classList.toggle("probe", live > 0 && !strategies);
   const health = deskHealth(s);
   $("#desk-health").className = `desk-health ${health.tone}`;
-  $("#desk-health").innerHTML = `<span class="health-indicator"></span><div><b>${esc(health.label)}</b><small>Updated ${esc(clock24(Date.now() / 1000, true))}</small></div>`;
+  $("#desk-health").innerHTML = `<span class="health-indicator" aria-hidden="true"></span><div><b>${esc(health.label)}</b><small>Updated ${esc(clock24(Date.now() / 1000, true))}</small></div>`;
   $("#desk-health").title = health.label;
 }
 $("#badges").addEventListener("click", (e) => {
@@ -291,7 +311,7 @@ $("#btn-pause").addEventListener("click", async () => {
 });
 $("#btn-stop").addEventListener("click", async () => {
   const orders = state.s?.open_orders.length ?? 0;
-  const ok = await confirmDialog({ title: "Stop all agent trading?", tone: "danger", confirm: "Stop trading", focus: "confirm",
+  const ok = await confirmDialog({ title: "Stop all agent trading?", tone: "danger", confirm: "Stop trading",
     body: `<ul class="confirm-list"><li>Halts research, new orders and fills.</li><li>Cancels ${orders} open order${orders === 1 ? "" : "s"}.</li>
       <li>Keeps every position. Use Flatten all afterwards to close them.</li></ul>` });
   if (!ok) return;
@@ -320,6 +340,7 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest("[data-ack-demo]")) return;
   try { localStorage.setItem("qd-demo-ack", "1"); } catch {}
   if (state.s) renderAlerts(state.s);
+  $("#checkin").focus({ preventScroll: true });
 });
 
 // ---------------------------------------------------------------- KPIs
@@ -327,7 +348,6 @@ function renderKPIs(s) {
   const a = s.account;
   // With nothing invested the four tiles only say "$0": shrink them to a strip so the verdict leads.
   $("#kpis").classList.toggle("compact", !a.gross && !s.positions.length && !s.open_orders.length);
-  const excess = a.benchmark_return != null ? a.return - a.benchmark_return : null;
   const usage = limitUsage(a.exposure, s.limits.max_gross_pct), drawdown = limitUsage(a.drawdown, s.limits.max_drawdown_pct);
   const track = (value) => `<div class="metric-track ${value >= 100 ? "bad" : value >= 80 ? "warn" : ""}" aria-hidden="true"><span style="width:${value}%"></span></div>`;
   const k = [
@@ -338,9 +358,10 @@ function renderKPIs(s) {
   ];
   $("#kpis").innerHTML = k.map(([l, v, sub, icon, meter]) => `<div class="kpi"><div class="label">${l}${outlineIcon(icon)}</div><div class="value">${v}</div><div class="sub">${sub}</div>${meter}</div>`).join("");
   $("#performance-stats").innerHTML = `
-    <div class="performance-stat"><div class="label">vs. ${esc(a.benchmark_symbol)} buy &amp; hold</div><div class="value ${signCls(excess)}">${excess == null ? "–" : pct(excess)}</div><small>Since inception · percentage-point difference</small></div>
+    <div class="performance-stat"><div class="label">vs. ${esc(a.benchmark_symbol)} buy &amp; hold</div><div class="value" id="equity-difference">–</div><small id="equity-comparison"></small></div>
     <div class="performance-stat"><div class="label">Fees paid</div><div class="value">${money(a.fees_paid, 2)}</div><small>${s.counts.fills} fills · ${s.counts.orders} orders</small></div>
     <div class="performance-stat"><div class="label">Crypto exposure</div><div class="value">${money(a.crypto_gross)}</div><small>Equity high-water mark ${money(a.peak)}</small></div>`;
+  renderEquityComparison(equityInRange(state.equityRows, state.equityRange, Date.now() / 1000));
 }
 
 // ---------------------------------------------------------------- equity chart
@@ -387,6 +408,15 @@ async function loadEquity() {
   state.equityRows = await api("/api/equity");
   renderEquity();
 }
+function renderEquityComparison(rows) {
+  if (!$("#equity-difference")) return;
+  const comparison = equityComparison(rows);
+  $("#equity-difference").textContent = comparison ? pct(comparison.difference).replace("%", " pp") : "–";
+  $("#equity-comparison").textContent = comparison ? `Chart range · Account ${pct(comparison.account)} · Benchmark ${pct(comparison.benchmark)}` : "Needs two chart snapshots with benchmark values.";
+}
+function dateSpan(start, end) {
+  return day(start) === day(end) ? day(start) : `${day(start)} – ${day(end)}`;
+}
 function renderEquity() {
   const rows = equityInRange(state.equityRows, state.equityRange, Date.now() / 1000);
   const values = rows.flatMap((r) => [r.equity, r.benchmark_equity, r.crypto_benchmark_equity]).filter((v) => v != null);
@@ -416,7 +446,9 @@ function renderEquity() {
   $("#equity-legend").innerHTML = [[live ? "--live" : "--text-primary", "Account (net of costs)", ""], ["--series-2", `${bs} buy & hold`, "dashed"], ["--series-3", "BTC-USD buy & hold", "dotted"]]
     .map(([v, l, k]) => `<span><span class="sw ${k}" style="--sw:var(${v})"></span>${esc(l)}</span>`).join("") +
     `<a class="chart-credit" href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener">Charts: TradingView Lightweight Charts</a>`;
-  $("#equity-since").textContent = rows.length ? `${day(rows[0].ts)} — ${day(rows[rows.length - 1].ts)}` : "No recorded marks in this period";
+  $("#equity-since").textContent = rows.length ? dateSpan(rows[0].ts, rows.at(-1).ts) : "No recorded marks in this period";
+  $("#equity-chart").setAttribute("aria-label", `Account equity, ${bs} and BTC-USD benchmarks · ${$("#equity-since").textContent}`);
+  renderEquityComparison(rows);
 }
 $("#equity-ranges").addEventListener("click", (event) => {
   const button = event.target.closest("[data-range]");
@@ -429,14 +461,16 @@ $("#equity-ranges").addEventListener("click", (event) => {
 });
 
 // ---------------------------------------------------------------- desk view
+const actionTime = (n) => n.at == null ? "" :
+  `<span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span>`;
 function renderNow(s) {
-  const a = s.agent || {};
+  const a = displayedActivity(s);
   const nexts = (a.next_actions || []).slice(0, 4);
   $("#now").innerHTML = `
     <div class="now-activity act-${esc(a.activity || "starting")}">${esc(cap(a.activity || "starting"))}</div>
-    <div class="now-detail">${esc(a.detail || "")} <span class="muted">· ${ago(a.updated_at)}</span></div>
-    ${s.open_orders.length ? `<div class="now-orders"><b>${s.open_orders.length}</b> open order${s.open_orders.length > 1 ? "s" : ""} waiting for a fill</div>` : ""}
-    <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span><span class="muted num">${until(n.at) === "now" ? "now" : "in " + until(n.at)}</span></li>`).join("")}</ul>`;
+    <div class="now-detail">${esc(a.detail || "")}${a.updated_at ? ` <span class="muted">· ${ago(a.updated_at)}</span>` : ""}</div>
+    ${s.open_orders.length && !s.controls.emergency_stop ? `<div class="now-orders"><b>${s.open_orders.length}</b> open order${s.open_orders.length > 1 ? "s" : ""} waiting for a fill</div>` : ""}
+    <ul class="next-list">${nexts.map((n) => `<li><span>${esc(n.what)}</span>${actionTime(n)}</li>`).join("")}</ul>`;
 }
 const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
 
@@ -471,9 +505,9 @@ function renderPipeline(s) {
           : `<p class="muted">No finished experiments in this window.</p>`}</div>
       <div><h3>What blocks ideas</h3>
         ${p.gate_failures.length ? `<ul class="bars">${p.gate_failures.slice(0, 6).map((g) => `<li><span>${esc(gateLabel(g.gate))}</span>
-          <span class="bar"><i style="width:${(g.n / maxFail * 100).toFixed(0)}%"></i></span><span class="num">${g.n}</span></li>`).join("")}</ul>`
+          <span class="bar" aria-hidden="true"><i style="width:${(g.n / maxFail * 100).toFixed(0)}%"></i></span><span class="num">${g.n}<span class="sr-only"> experiments</span></span></li>`).join("")}</ul>`
           : `<p class="muted">No gate failures recorded.</p>`}
-        <p class="probe-rule">${probe.enabled ? `<b>Probes on.</b> An idea that made more than ${pct(probe.min_test_return, 1)} on its sealed test gets ${pct(probe.allocation_pct, 0, false)} of equity for ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day}/venue/day).`
+        <p class="probe-rule">${probe.enabled ? `<b>Probes on.</b> An idea with ${probe.min_test_return === 0 ? "a positive sealed-test return" : `a sealed-test return above ${pct(probe.min_test_return)}`} may get ${pct(probe.allocation_pct, 0, false)} of equity for up to ${probe.lifetime_days} days (max ${probe.max_active} at once, ${probe.per_venue_per_day} per market per day).`
           : `<b>Probes off.</b> Only ideas that pass every gate trade.`}${isOperator() ? ` <a href="#limits" data-nav="system">Change</a>` : ""}</p></div>
     </div>`;
 }
@@ -481,12 +515,12 @@ function renderPipeline(s) {
 function renderCheckin(s = state.s, v = s && tradingVerdict(s)) {
   if (!s) return;
   const last = state.journal[0];
-  const next = (s.agent?.next_actions || [])[0];
+  const next = displayedActivity(s).next_actions?.[0];
   $("#checkin").className = `checkin ${esc(v.tone)}`;
   $("#checkin").innerHTML = `<div class="verdict ${esc(v.tone)}"><span class="verdict-dot" aria-hidden="true"></span><p>${esc(v.text)}</p></div>
     <dl class="checkin-rows">
-      ${last ? `<div><dt>Latest</dt><dd><a href="#journal" data-nav="journal">${rich(last.title)}</a> <span class="muted num">${ago(last.ts)}</span></dd></div>` : ""}
-      ${next ? `<div><dt>Next</dt><dd>${esc(next.what)} <span class="muted num">${until(next.at) === "now" ? "now" : "in " + until(next.at)}</span></dd></div>` : ""}
+      ${last ? `<div><dt>Latest</dt><dd><a href="#journal" data-nav="journal">${rich(journalPresentation(last).title)}</a> <span class="muted num">${ago(last.ts)}</span></dd></div>` : ""}
+      ${next ? `<div><dt>Next</dt><dd>${esc(next.what)} ${actionTime(next)}</dd></div>` : ""}
     </dl>`;
 }
 function evidenceLinks(ev) {
@@ -588,9 +622,10 @@ function gatesCell(e) {
   if (!e.gates) return `<span class="muted">${e.error ? "could not run" : "not evaluated"}</span>`;
   const failed = e.gates?.failed || [], total = e.gates?.checks?.length || 9;
   if (!failed.length) return `<span class="passed-text">${gateCount(total, 0)}</span>`;
-  const shown = failed.slice(0, 2), rest = failed.slice(2);
-  return `<span class="gate-count">${gateCount(total, failed.length)}</span><div class="chips" aria-label="Failed gates: ${esc(failed.map(gateLabel).join(", "))}">${
-    shown.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}${rest.length ? `<span class="gchip more">+${rest.length} more</span>` : ""}</div>`;
+  const chips = (names) => `<div class="chips">${names.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}</div>`;
+  const rest = failed.slice(2);
+  return `<span class="gate-count">${gateCount(total, failed.length)}</span>${chips(failed.slice(0, 2))}
+    ${rest.length ? `<details class="gate-more"><summary>${rest.length} more missed ${rest.length === 1 ? "gate" : "gates"}</summary>${chips(rest)}</details>` : ""}`;
 }
 // Experiment statuses in plain words. "failed" means it missed a gate, not that the code broke.
 const EXP_STATUS = { failed: "Missed gates", passed: "Passed gates", running: "Running", error: "Could not run", interrupted: "Interrupted" };
@@ -609,6 +644,14 @@ const RESEARCH_SORT = {
   ret: (e) => e.test?.total_return, sharpe: (e) => e.test?.sharpe, trades: (e) => e.test?.n_trades,
   gates: (e) => e.gates ? (e.gates.checks?.length || 9) - (e.gates.failed?.length || 0) : null,
 };
+const RESEARCH_LABELS = { id: "Experiment #", title: "Hypothesis", status: "Status", ret: "Test return",
+  sharpe: "Sharpe", trades: "Trades", gates: "Gates passed" };
+const textSort = (key) => key === "title" || key === "status";
+function changeResearchSort(key, reverse = false) {
+  if (!Object.hasOwn(RESEARCH_SORT, key)) return;
+  state.researchSort = { key, dir: reverse ? -state.researchSort.dir : textSort(key) ? 1 : -1 };
+  drawResearch();
+}
 function sortedResearch(rows) {
   const { key, dir } = state.researchSort, get = RESEARCH_SORT[key];
   return [...rows].sort((x, y) => {
@@ -629,9 +672,16 @@ function drawResearch(body = $("#tab-body")) {
   if (!ex.length) { body.innerHTML = emptyState("The next idea starts here.", "No experiments yet. The first research cycle begins once the worker has market data. Every hypothesis will have a frozen test and a recorded decision."); return; }
   const passed = ex.filter((e) => e.status === "passed").length;
   const { key, dir } = state.researchSort;
+  const direction = textSort(key) ? (dir > 0 ? "A to Z" : "Z to A") : (dir > 0 ? "Low to high" : "High to low");
+  const focused = document.activeElement;
+  const sortFocus = focused.matches("#research-sort, #research-direction") ? `#${focused.id}` :
+    focused.matches(".research-tbl [data-sort]") ? `[data-sort="${focused.dataset.sort}"]` : null;
   const th = (k, label, cls = "") => `<th class="${cls}" aria-sort="${k === key ? (dir > 0 ? "ascending" : "descending") : "none"}"><button type="button" class="sort" data-sort="${k}">${label}<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${k !== key ? "M2 4l3-3 3 3M2 6l3 3 3-3" : dir > 0 ? "M2 6l3-3 3 3" : "M2 4l3 3 3-3"}"/></svg></button></th>`;
   body.innerHTML = `<div class="research-summary"><span class="summary-total"><b>${ex.length}</b> experiments in this view</span>
     <span class="summary-count"><span class="${passed ? "up" : ""}">${passed}</span> passed gates</span><span class="summary-count">${ex.filter((e) => e.status === "failed").length} missed gates</span></div>
+    <div class="phone-sort"><label for="research-sort">Sort by</label><select class="sel" id="research-sort">
+      ${Object.entries(RESEARCH_LABELS).map(([k, label]) => `<option value="${k}"${k === key ? " selected" : ""}>${label}</option>`).join("")}</select>
+      <button class="btn small" type="button" id="research-direction" aria-label="Reverse sort order, currently ${direction}">${direction} <span aria-hidden="true">${dir > 0 ? "↑" : "↓"}</span></button></div>
     <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr>${th("id", "#")}${th("title", "Hypothesis")}${th("status", "Status")}${th("ret", "Test return", "r")}
     ${th("sharpe", "Sharpe", "r")}${th("trades", "Trades", "r")}${th("gates", "Gates")}</tr></thead><tbody>
     ${sortedResearch(ex).map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
@@ -639,20 +689,21 @@ function drawResearch(body = $("#tab-body")) {
       <td class="r num ${signCls(e.test?.total_return)}" data-label="Test return">${pct(e.test?.total_return)}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
       <td class="r num" data-label="Trades">${e.test?.n_trades ?? "–"}</td><td class="gates" data-label="Gates">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
     <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates${isOperator() ? ", or to start it as a probe" : ""}.</div>`;
+  if (sortFocus) body.querySelector(sortFocus)?.focus({ preventScroll: true });
 }
 async function renderStrategies(body, version, quiet) {
   const st = await api("/api/strategies");
   if (version !== state.tabVersion || unchanged(st, version, quiet)) return;
   if (!st.length) { body.innerHTML = emptyState("Nothing live yet.", "A strategy goes live when an experiment passes every gate. A probe goes live when an idea made money on its sealed test but missed a gate; you can also start one from any experiment."); return; }
   body.innerHTML = `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>Strategy</th><th>Holding now</th><th>Status</th><th class="r">Allocation</th><th class="r">Live return</th>
-    <th class="r">Expected (test CAGR)</th><th class="r">Fills</th><th class="r">Avg slippage</th><th></th></tr></thead><tbody>
+    <th class="r">Sealed-test return</th><th class="r">Fills</th><th class="r">Avg slippage</th><th></th></tr></thead><tbody>
     ${st.map((s) => `<tr class="clickable" data-strat="${s.id}"><td><b><a href="#" data-strat="${s.id}">${esc(s.name)} v${s.version}</a></b>${s.probe ? ' <span class="probe-chip">probe</span>' : ""}<div class="muted" style="font-size:12px">${esc(s.venue)} · exp #${s.experiment_id}</div>
         <div class="sym-list" title="${esc(s.symbols.map((x) => x.symbol).join(", "))}">Trades ${symbolSummary(s.symbols)}</div></td>
       <td>${holdingCell(s.symbols)}</td>
       <td><span class="status ${esc(s.status)}">${esc(s.status)}</span></td>
       <td class="r num">${money(s.allocation)}<div class="muted cell-sub">approved ${money(s.approved_allocation)}</div></td>
       <td class="r num ${signCls(s.live.return)}">${pct(s.live.return)}<div class="muted cell-sub">${s.live.days_live}d live</div></td>
-      <td class="r num">${pct(s.expectations?.test?.cagr)}</td><td class="r num">${s.live.fills}</td>
+      <td class="r num">${pct(s.expectations?.test?.total_return)}</td><td class="r num">${s.live.fills}</td>
       <td class="r num">${s.live.avg_slippage_bps == null ? "–" : num(s.live.avg_slippage_bps, 1) + " bp"}</td>
       <td>${s.status === "retired" || !isOperator() ? "" : `<button class="btn small danger" data-retire="${s.id}">Retire…</button>`}</td></tr>`).join("")}</tbody></table></div>`;
 }
@@ -759,10 +810,10 @@ async function renderSystem(body, version) {
   const v = (g, k) => sys.settings[g][k];
   const auditDetail = (d) => d == null ? "" : typeof d === "object" ? kv(d) : esc(d);
   body.innerHTML = `
-    <div class="section"><h4>Operating limits</h4>
+    <div class="section"><h3>Operating limits</h3>
       <p class="secondary section-lead">Only you can change these; the agent cannot. Gate profile: <b>${esc(sys.gate_profile)}</b>.
-        Exploratory admits paper experiments, not validated trading edges. Strict requires the causal DSL and stronger screening.
-        Neither profile proves profitability. Causal DSL required: ${sys.settings.gates.require_causal_dsl ? "yes" : "no"}.</p>
+        Exploratory admits paper experiments, not validated trading edges. Strict requires stronger screening and a restricted rules language (causal DSL) that prevents looking ahead.
+        Neither profile proves profitability. Restricted rules required: ${sys.settings.gates.require_causal_dsl ? "yes" : "no"}.</p>
       <div class="button-row"><button class="btn" data-gate-preset="exploratory">Use exploratory gates…</button>
         <button class="btn" data-gate-preset="strict">Use strict gates…</button></div>
       <form id="limits" novalidate>${LIMIT_GROUPS.map(([title, note, groups]) => `<fieldset class="limit-group"><legend>${esc(title)}</legend>
@@ -773,26 +824,26 @@ async function renderSystem(body, version) {
           <span class="muted form-status" id="limits-status" role="status">No unsaved changes.</span></div>
         <p class="muted ceilings">Hard ceilings set in config.py: position ≤ ${pct(sys.ceilings.ceiling_max_position_pct, 0, false)}, gross ≤ ${pct(sys.ceilings.ceiling_max_gross_pct, 0, false)} (no leverage),
           order ≤ ${money(sys.ceilings.ceiling_max_order_usd)}, AI ≤ ${money(sys.ceilings.ceiling_monthly_llm_usd)}/month.</p></form></div>
-    <div class="section"><h4>Controls</h4>
+    <div class="section"><h3>Controls</h3>
       <div class="control-groups"><div><p class="muted control-label">Research</p><div class="button-row">
         <button class="btn" data-ctl="research_nasdaq">Run NASDAQ research now</button><button class="btn" data-ctl="research_crypto">Run crypto research now</button></div></div>
       <div><p class="muted control-label">Positions and halts</p><div class="button-row">
         <button class="btn danger" data-ctl="flatten_all">Flatten all positions…</button>
         ${state.s.controls.drawdown_halt ? `<button class="btn" data-ctl="reset_drawdown_halt">Reset drawdown halt…</button>` : ""}
         ${state.s.controls.system_halt ? `<button class="btn" data-ctl="clear_system_halt">Clear ledger halt…</button>` : ""}</div></div></div></div>
-    <div class="section"><h4>Integrity & isolation</h4><div class="secondary small-text">
+    <div class="section"><h3>Integrity & isolation</h3><div class="secondary small-text">
       Ledger rebuilt from fills: <b class="${sys.integrity.ok ? "passed-text" : "err"}">${sys.integrity.ok ? "matches" : "MISMATCH"}</b> (cash ${money(sys.integrity.cash, 2)}).
       Research-code sandbox: ${esc(sys.sandbox.mode)}, env ${esc(sys.sandbox.env)}, network namespace ${sys.sandbox.network_namespace ? "yes" : "no"},
       ${sys.sandbox.mode === "local" && !sys.sandbox.local_supported ? "<b>Python sandbox unavailable: requires Linux/Docker.</b>" : ""}
       ${sys.sandbox.cpu_seconds}s CPU / ${sys.sandbox.memory_mb} MB. LLM: ${esc(sys.llm.demo ? "demo (no key)" : sys.llm.model + " · effort " + sys.llm.effort)},
       knowledge cutoff assumed ${esc(sys.llm.knowledge_cutoff)}.</div></div>
-    <div class="section"><h4>Recent LLM calls (audit)</h4>${calls.length ? `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>When</th><th>Purpose</th><th>Model</th><th class="r">Tokens in/out</th><th class="r">Cost</th><th>Status</th></tr></thead><tbody>
+    <div class="section"><h3>Recent LLM calls (audit)</h3>${calls.length ? `<div class="tbl-scroll"><table class="tbl"><thead><tr><th>#</th><th>When</th><th>Purpose</th><th>Model</th><th class="r">Tokens in/out</th><th class="r">Cost</th><th>Status</th></tr></thead><tbody>
       ${calls.map((c) => `<tr class="clickable" data-llm="${c.id}"><td class="num"><a href="#" data-llm="${c.id}">${c.id}</a></td><td class="muted">${ago(c.ts)}</td><td>${esc(c.purpose)}</td><td>${esc(c.served_model || c.model)}</td>
       <td class="r num">${c.input_tokens}/${c.output_tokens}</td><td class="r num">${money(c.cost_usd, 4)}</td><td>${esc(c.status)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="muted">No LLM calls yet.</div>`}</div>
-    <div class="section"><h4>Jobs</h4><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Job</th><th>Last run</th><th>Status</th><th class="r">Runs</th><th>Error</th></tr></thead><tbody>
+    <div class="section"><h3>Jobs</h3><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Job</th><th>Last run</th><th>Status</th><th class="r">Runs</th><th>Error</th></tr></thead><tbody>
       ${sys.jobs.filter((j) => !j.name.includes(":behind") && !j.name.startsWith("closed_quotes")).map((j) => `<tr><td>${esc(j.name)}</td><td class="muted">${ago(j.last_started_at)}</td><td>${esc(j.last_status || "")}</td><td class="r num">${j.run_count}</td>
       <td class="secondary small-text">${esc(j.last_error || "")}</td></tr>`).join("")}</tbody></table></div></div>
-    <div class="section"><h4>Audit log</h4><ul class="audit">${sys.audit.slice(0, 15).map((a) => `<li><span class="muted num">${dt(a.ts)}</span> <span>${esc(a.actor)} · ${esc(a.action)}</span> ${auditDetail(a.detail)}</li>`).join("") || `<li class="muted">Empty.</li>`}</ul></div>`;
+    <div class="section"><h3>Audit log</h3><ul class="audit">${sys.audit.slice(0, 15).map((a) => `<li><span class="muted num">${dt(a.ts)}</span> <span>${esc(a.actor)} · ${esc(a.action)}</span> ${auditDetail(a.detail)}</li>`).join("") || `<li class="muted">Empty.</li>`}</ul></div>`;
   const form = $("#limits");
   form.addEventListener("input", () => updateLimitDraft(form));
   form.addEventListener("change", () => updateLimitDraft(form));
@@ -843,10 +894,14 @@ function updateLimitDraft(form) {
   $("#limits-status").textContent = errors.length ? `${errors.length} field${errors.length > 1 ? "s need" : " needs"} a valid value.` :
     changes.length ? `${changes.length} unsaved change${changes.length > 1 ? "s" : ""}${loosen ? `, ${loosen} loosening a control` : ""}.` : "No unsaved changes.";
 }
+function revealInvalidField(input) {
+  input.focus({ preventScroll: true });
+  input.closest(".field").scrollIntoView({ block: "center", behavior: "instant" });
+}
 async function saveLimits(form) {
   const { changes, errors } = readLimits(form);
   updateLimitDraft(form);
-  if (errors.length) { errors[0].input.focus(); return; }
+  if (errors.length) { revealInvalidField(errors[0].input); return; }
   if (!changes.length) return;
   const row = (c) => `<li class="${c.dir}"><span>${esc(c.f.label)}</span><span class="num">${esc(formatLimit(c.before, c.f.unit))} → <b>${esc(formatLimit(c.after, c.f.unit))}</b></span>${
     c.dir === "loosens" ? '<span class="dir-tag">loosens</span>' : c.dir === "tightens" ? '<span class="dir-tag quiet">tightens</span>' : ""}</li>`;
@@ -870,7 +925,7 @@ async function saveLimits(form) {
     const m = /\b([a-z_]+)\.([a-z0-9_]+)\b/.exec(err.message);
     const f = m && LIMIT_FIELDS.find((x) => x.g === m[1] && x.k === m[2]);
     const input = f && form.querySelector(`#${fieldId(f)}`);
-    if (input) { setFieldError(input, `Not saved: ${err.message.replace(/^[^\s]+\s*/, "")}`); input.focus(); }
+    if (input) { setFieldError(input, `Not saved: ${err.message.replace(/^[^\s]+\s*/, "")}`); revealInvalidField(input); }
     fail(err, "Nothing was saved. Fix the field and review again.");
     $("#limits-save").disabled = false;
   }
@@ -893,13 +948,14 @@ document.addEventListener("click", async (e) => {
     toast(m, { tone: "good", detail: d }); refresh();
   } catch (err) { fail(err); } finally { setTimeout(() => { ctl.disabled = false; }, 3000); }
 });
+$("#tab-body").addEventListener("change", (e) => {
+  if (e.target.id === "research-sort") changeResearchSort(e.target.value);
+});
 $("#tab-body").addEventListener("click", async (e) => {
+  if (e.target.closest("#research-direction")) { changeResearchSort(state.researchSort.key, true); return; }
   const sort = e.target.closest("[data-sort]");
   if (sort) {
-    const k = sort.dataset.sort, cur = state.researchSort;
-    // numbers start high-first, names A to Z; a second click reverses
-    state.researchSort = { key: k, dir: cur.key === k ? -cur.dir : ["title", "status"].includes(k) ? 1 : -1 };
-    drawResearch(); $(`#tab-body [data-sort="${k}"]`)?.focus();
+    changeResearchSort(sort.dataset.sort, sort.dataset.sort === state.researchSort.key);
     return;
   }
   const preset = e.target.closest("[data-gate-preset]");
@@ -930,27 +986,70 @@ $("#tab-body").addEventListener("click", async (e) => {
 });
 
 // ---------------------------------------------------------------- drawers
-let closeDrawer = null;
-function drawer(title, html, hash = "") {
+let closeDrawer = null, drawerRequest = 0, drawerOrigin = null;
+const recordRoute = /^#(experiment|strategy|order|llm)-(\d+)$/;
+
+async function drawerRecord(path) {
+  const request = ++drawerRequest, hash = location.hash;
+  try {
+    const record = await api(path);
+    return request === drawerRequest && hash === location.hash && !$("#app").classList.contains("hidden") ? record : null;
+  } catch (err) {
+    if (request === drawerRequest && hash === location.hash) throw err;
+    return null;
+  }
+}
+function drawer(title, html, hash) {
+  const replacing = Boolean(closeDrawer);
+  const previousHash = replacing ? drawerOrigin : recordRoute.test(location.hash) ? null : location.hash;
   if (closeDrawer) closeDrawer({ keepHash: true });
   const previousFocus = document.activeElement;
-  const previousHash = /^#(experiment|strategy|order)-\d+$/.test(location.hash) ? "" : location.hash;
-  $("#drawer-root").innerHTML = `<div class="drawer-bg"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="drawer-h"><h3>${esc(title)}</h3>
-    <button class="btn small" id="drawer-close">Close</button></div><div class="drawer-b">${html}</div></div>`;
-  // Each record drawer has its own address (#experiment-2), so it can be bookmarked or sent.
-  if (hash && location.hash !== hash) history.replaceState(null, "", hash);
-  const close = ({ keepHash = false } = {}) => {
-    if (!keepHash && location.hash !== previousHash) history.replaceState(null, "", previousHash || location.pathname + location.search);
+  drawerOrigin = previousHash;
+  $("#drawer-root").innerHTML = `<div class="drawer-bg"></div><div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><div class="drawer-h"><h2 id="drawer-title">${esc(title)}</h2>
+    <button class="btn small" id="drawer-close">Close</button></div><div class="drawer-scroll"><div class="drawer-b">${html}</div></div><div class="drawer-edge" aria-hidden="true"></div></div>`;
+  // One history entry per open drawer. Switching records inside it keeps Back
+  // pointed at the original workspace. A direct bookmark has no such entry.
+  if (location.hash !== hash) {
+    if (replacing) history.replaceState(history.state, "", hash);
+    else history.pushState({ qdDrawerFrom: previousHash }, "", hash);
+  }
+  const panel = $(".drawer"), scroller = $(".drawer-scroll", panel), body = $(".drawer-b", panel);
+  const tableEdges = [...panel.querySelectorAll(".metrics-scroll")].map((frame) => {
+    const scroll = $(".tbl-scroll", frame);
+    const update = () => {
+      frame.classList.toggle("more-left", scroll.scrollLeft > 4);
+      frame.classList.toggle("more-right", scroll.scrollLeft + scroll.clientWidth < scroll.scrollWidth - 4);
+    };
+    scroll.addEventListener("scroll", update, { passive: true });
+    return update;
+  });
+  const updateEdge = () => {
+    panel.classList.toggle("more-below", scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 4);
+    tableEdges.forEach((update) => update());
+  };
+  const size = new ResizeObserver(updateEdge);
+  size.observe(scroller); size.observe(body);
+  scroller.addEventListener("scroll", updateEdge, { passive: true });
+  let goingBack = false;
+  const close = ({ keepHash = false, restoreFocus = true } = {}) => {
+    drawerRequest++;
+    if (!keepHash && typeof history.state?.qdDrawerFrom === "string" && location.hash === hash) {
+      if (!goingBack) { goingBack = true; history.back(); }
+      return; // hashchange closes the drawer after Back (or Escape/Close).
+    }
+    if (!keepHash) history.replaceState(null, "", previousHash || location.pathname + location.search);
     if (state.charts.exp) { state.charts.exp.chart.remove(); state.charts.exp = null; }
+    size.disconnect();
     document.removeEventListener("keydown", onKey);
-    $("#drawer-root").innerHTML = ""; $("#app").inert = false; closeDrawer = null;
-    if (previousFocus?.isConnected) previousFocus.focus();
+    $("#drawer-root").innerHTML = ""; $("#app").inert = false; closeDrawer = null; drawerOrigin = null;
+    if (restoreFocus) (previousFocus?.isConnected && previousFocus !== document.body ? previousFocus : $("#overview")).focus({ preventScroll: true });
   };
   const onKey = (ev) => {
     if (document.querySelector("dialog[open]")) return;  // a confirmation on top owns the keyboard
     if (ev.key === "Escape") close();
     if (ev.key === "Tab") {
-      const items = [...$(".drawer").querySelectorAll("button,a[href],input,select,[tabindex='0']")];
+      const items = [...panel.querySelectorAll("button,a[href],input,select,summary,[tabindex='0']")]
+        .filter((el) => !el.disabled && el.getClientRects().length && !el.closest("details:not([open]) :not(summary)"));
       const first = items[0], last = items[items.length - 1];
       if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last?.focus(); }
       else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first?.focus(); }
@@ -961,31 +1060,51 @@ function drawer(title, html, hash = "") {
   $("#drawer-close").onclick = () => close(); $(".drawer-bg").onclick = () => close();
   document.addEventListener("keydown", onKey); $("#drawer-close").focus();
 }
-function metricsTable(cols) {
+function metricsTable(cols, { cagr = false } = {}) {
   const rows = [["Net return", "total_return", pct], ["CAGR", "cagr", pct], ["Sharpe", "sharpe", (x) => num(x)], ["Max drawdown", "max_drawdown", pct],
     ["Ann. volatility", "ann_vol", (x) => pct(x, 1, false)], ["Trades", "n_trades", (x) => x ?? "–"], ["Win rate", "win_rate", (x) => pct(x, 0, false)],
     ["Exposure", "exposure", (x) => pct(x, 0, false)], ["Cost drag", "cost_drag", (x) => pct(x, 2, false)]];
-  return `<div class="tbl-scroll"><table class="tbl"><thead><tr><th></th>${cols.map(([l]) => `<th class="r">${esc(l)}</th>`).join("")}</tr></thead><tbody>
-    ${rows.map(([l, k, f]) => `<tr><td>${l}</td>${cols.map(([, m]) => `<td class="r num">${m ? f(m[k]) : "–"}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="metrics-scroll"><div class="tbl-scroll" tabindex="0" role="region" aria-label="Scrollable results table"><table class="tbl metrics-tbl"><thead><tr><th scope="col">Metric</th>${cols.map(([l]) => `<th scope="col" class="r">${esc(l)}</th>`).join("")}</tr></thead><tbody>
+    ${rows.filter(([, k]) => cagr || k !== "cagr").map(([l, k, f]) => `<tr><th scope="row">${l}</th>${cols.map(([, m, w]) => `<td class="r num">${m && (k !== "cagr" || showAnnualizedReturn(w)) ? f(m[k]) : "–"}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>`;
 }
 async function openExperiment(id) {
-  const e = await api(`/api/experiments/${id}`);
+  const e = await drawerRecord(`/api/experiments/${encodeURIComponent(id)}`);
+  if (!e) return;
   const h = e.hypothesis || {};
   const w = e.windows;
-  const parts = ["train", "validation", "test"];
-  const tl = w ? `<div class="timeline" aria-hidden="true">${parts.map((k) => `<div class="${k}" style="flex:${w[k].bars}"></div>`).join("")}</div>
+  const parts = ["train", "validation", "test"].filter((k) => w?.[k]);
+  const tl = parts.length ? `<div class="timeline" aria-hidden="true">${parts.map((k) => `<div class="${k}" style="flex:${Number(w[k].bars) || 0}"></div>`).join("")}</div>
     <ul class="timeline-legend">${parts.map((k) => `<li class="${k}"><span class="sw"></span><b>${cap(k)}${k === "test" ? " (sealed)" : ""}</b>
-      <span class="muted">${day(w[k].start)} – ${day(w[k].end)} · ${w[k].bars.toLocaleString()} bars</span></li>`).join("")}</ul>` : "";
+      <span class="muted">${dateSpan(w[k].start, w[k].end)} · ${w[k].bars.toLocaleString()} bars</span></li>`).join("")}</ul>` : "";
   const ch = e.challenge || {};
   const t = e.test || {};
   const g = e.gates;
-  const dec = (e.decisions || []).slice(-1)[0];
+  const decisions = e.decisions || [];
+  const promotion = decisions.findLast((d) => ["reject", "revise", "allocate"].includes(d.kind));
+  const probeDecision = decisions.findLast((d) => d.kind === "probe");
+  const dec = promotion || probeDecision || decisions.at(-1);
   const spec = e.spec || {};
+  const checks = g?.checks || [], missed = checks.filter((c) => !c.pass), passed = checks.filter((c) => c.pass);
+  const decision = ({ reject: "Not promoted", revise: "Revise the idea", allocate: "Paper allocation approved", probe: "Probe approved" })[dec?.kind] || dec?.kind;
+  const gateRows = (rows) => rows.map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? MARK.pass : MARK.fail}</span>
+    <div><b>${esc(gateLabel(c.name))}</b> <span class="num">${c.value == null ? "n/a" : c.name === "test_trades" ? Math.round(c.value) : num(c.value, 3)} ${esc(c.op)} ${c.name === "test_trades" ? Math.round(c.threshold) : num(c.threshold, 3)}</span><div class="muted cell-sub">${rich(c.why)}</div></div></div>`).join("");
   drawer(`Experiment #${e.id}: ${h.title || ""}`, `
     <div class="section">${expStatus(e.status)} <span class="muted">· ${esc(e.venue)} · created ${dt(e.created_at)} · frozen ${dt(e.frozen_at)} · by ${authorLabel(h.author)}</span>
       ${e.strategy ? ` · <a href="#" data-strat="${e.strategy.id}">${e.strategy.probe ? "probe" : "strategy"} ${esc(e.strategy.name)} v${e.strategy.version} (${esc(e.strategy.probe && e.strategy.status === "active" ? "forward test" : e.strategy.status)})</a>` : ""}</div>
-    ${dec ? `<div class="section"><h4>Decision: ${esc(dec.kind)} (${authorLabel(dec.author)}${dec.llm_call_id && isOperator() ? `, <a href="#" data-llm="${dec.llm_call_id}">inputs</a>` : ""})</h4><div class="pre">${rich(dec.rationale)}</div>
-      ${(dec.details?.lessons || []).length ? `<h4 style="margin-top:10px">Recorded lessons</h4><ul style="padding-left:18px">${dec.details.lessons.map((l) => `<li>${rich(l)}</li>`).join("")}</ul>` : ""}</div>` : ""}
+    ${dec ? `<div class="section"><h3>Decision: ${esc(decision)}</h3>
+      ${dec.kind === "reject" && e.strategy?.probe ? '<p class="cell-sub secondary">Not promoted to a regular allocation. The probe is a separate forward paper test.</p>' : ""}
+      <details class="record-details"><summary>Decision rationale and lessons</summary>
+        <p class="muted cell-sub">By ${authorLabel(dec.author)}${dec.llm_call_id && isOperator() ? ` · <a href="#" data-llm="${dec.llm_call_id}">Model inputs</a>` : ""}</p>
+        <div class="pre">${rich(dec.rationale)}</div>
+        ${(dec.details?.lessons || []).length ? `<h4>Recorded lessons</h4><ul class="notes">${dec.details.lessons.map((l) => `<li>${rich(l)}</li>`).join("")}</ul>` : ""}
+        ${probeDecision && probeDecision !== dec ? `<h4>Separate probe decision</h4><div class="pre">${rich(probeDecision.rationale)}</div>` : ""}</details></div>` : ""}
+    ${e.error ? `<div class="alert critical section"><span class="icon">${icon.alert}</span><div>${esc(e.error)}</div></div>` : ""}
+    ${e.test ? `<div class="section"><h3>Sealed test · net of costs</h3><dl class="test-headline">
+      <div><dt>Net return</dt><dd>${pct(t.total_return)}</dd></div><div><dt>Max drawdown</dt><dd>${pct(t.max_drawdown)}</dd></div>
+      <div><dt>Trades</dt><dd>${t.n_trades ?? "–"}</dd></div></dl>${w?.test ? `<p class="muted cell-sub">${dateSpan(w.test.start, w.test.end)}</p>` : ""}</div>` : ""}
+    <div class="section"><h3>Acceptance gates: ${checks.length ? gateCount(checks.length, missed.length) : "not evaluated"}</h3>
+      ${missed.length ? '<p class="muted cell-sub">Missed checks</p>' + gateRows(missed) : ""}
+      ${passed.length ? `<details class="record-details"><summary>${passed.length} passed ${passed.length === 1 ? "check" : "checks"}</summary>${gateRows(passed)}</details>` : ""}</div>
     ${e.test && !e.strategy && e.status !== "running" && isOperator() ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
       <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>
@@ -993,44 +1112,46 @@ async function openExperiment(id) {
       <p>Starts a small, clearly-labelled forward test with ${pct(state.s?.pipeline?.probe.allocation_pct ?? 0.03, 0, false)} of equity for ${state.s?.pipeline?.probe.lifetime_days ?? 14} days.
       Uses the frozen rules and the normal risk checks. ${(e.test.total_return ?? 0) > 0 ? "It made money on its sealed test." : "<b>It lost money on its sealed test</b>, so expect the same unless conditions changed."}</p></div>
       <button class="btn ${(e.test.total_return ?? 0) > 0 ? "primary" : ""}" data-probe="${e.id}" data-lost="${(e.test.total_return ?? 0) > 0 ? 0 : 1}">Start probe…</button></div>` : ""}
-    <div class="section"><h4>Hypothesis (recorded before testing)</h4><div class="pre">${rich(h.rationale)}</div>
+    <details class="record-details section"><summary>Hypothesis, rules and test dates</summary>
+    <div class="section"><h3>Hypothesis (recorded before testing)</h3><div class="pre">${rich(h.rationale)}</div>
       <p><b>Prediction:</b> ${rich(h.prediction)}<br><b>Would drop it if:</b> ${rich(h.falsification)}</p></div>
-    <div class="section"><h4>Rules</h4><dl class="spec">
+    <div class="section"><h3>Rules</h3><dl class="spec">
       <dt>Entry</dt><dd><code>${esc(spec.entry || "custom code")}</code></dd><dt>Exit</dt><dd><code>${esc(spec.exit || "custom code")}</code></dd>
       ${spec.rank_by ? `<dt>Rank by</dt><dd><code>${esc(spec.rank_by)}</code>, top ${esc(spec.top_k)}</dd>` : ""}
       <dt>Universe</dt><dd>${esc((spec.universe || []).join(", ")) || "–"}</dd>
       <dt>Parameter grid</dt><dd>${kv(spec.params)}</dd><dt>Chosen on train</dt><dd><b>${kv(e.chosen_params)}</b></dd>
       <dt>Sizing</dt><dd>${kv(spec.sizing)}${spec.stop_loss_pct ? ` · stop ${pct(spec.stop_loss_pct, 0, false)}` : ""}${spec.max_hold_bars ? ` · max hold ${spec.max_hold_bars} bars` : ""}</dd></dl>
       ${spec.kind === "code" ? `<pre class="pre"><code>${esc(spec.code)}</code></pre>` : ""}</div>
-    ${e.error ? `<div class="alert critical"><span class="icon">${icon.alert}</span><div>${esc(e.error)}</div></div>` : ""}
-    ${w ? `<div class="section"><h4>Chronological split (test window sealed until the spec was frozen)</h4>${tl}</div>` : ""}
-    ${e.test ? `<div class="section"><h4>Results (net of fees, spread, impact)</h4>${metricsTable([["Train", e.train], ["Validation", e.validation], ["Test", t],
-      ["Test ×2 costs", ch.test_cost_x2], ["Test +1 bar delay", ch.test_delay_1bar], [`${t.benchmark_symbol} B&H (test)`, t.benchmark_venue], ["Universe B&H (test)", t.benchmark_universe]])}
-      <div class="muted cell-sub" style="margin-top:6px">PSR ${num(t.psr)} · deflated PSR ${num(t.deflated_psr)} vs. expected max Sharpe of ${e.leakage?.n_trials_for_deflation} zero-skill trial(s) (${num(t.sr_star_annualised)} annualised).</div>
+    ${tl ? `<div class="section"><h3>Chronological split (test window sealed until the rules were frozen)</h3>${tl}</div>` : ""}</details>
+    ${e.test ? `<details class="record-details section" id="test-details"><summary>Detailed results, benchmarks and stress tests</summary>
+    <div class="section"><h3>Results (net of fees, spread, impact)</h3>${metricsTable([["Train", e.train, w?.train], ["Validation", e.validation, w?.validation], ["Test", t, w?.test],
+      ["Test ×2 costs", ch.test_cost_x2, w?.test], ["Test +1 bar delay", ch.test_delay_1bar, w?.test], [`${t.benchmark_symbol} buy & hold`, t.benchmark_venue, w?.test], ["Universe buy & hold", t.benchmark_universe, w?.test]], { cagr: showAnnualizedReturn(w?.test) })}
+      <div class="muted cell-sub" style="margin-top:6px">Probabilistic Sharpe (PSR): ${num(t.psr)} · Deflated PSR: ${num(t.deflated_psr)}. The deflated estimate accounts for trying ${e.leakage?.n_trials_for_deflation ?? "an unknown number of"} ideas (expected best annualised Sharpe from luck: ${num(t.sr_star_annualised)}).</div>
       ${(e.leakage?.n_trials_for_deflation ?? 0) <= 1 ? `<p class="caveat">Deflation counted only ${e.leakage?.n_trials_for_deflation ?? 0} trial, so it barely discounts luck here. Treat deflated PSR as an upper bound.</p>` : ""}
-      ${w && (w.test.end - w.test.start) < 90 * 86400 ? `<p class="caveat">CAGR is annualised from a ${Math.max(1, Math.round((w.test.end - w.test.start) / 86400))}-day test window; short windows exaggerate it. Net return is the measured result.</p>` : ""}</div>
-    <div class="section"><h4>Test window: strategy vs. benchmark (growth of $1)</h4><div class="chart-tip" id="exp-tip" style="padding-left:0"></div><div class="chart-wrap" id="exp-chart" style="height:220px"></div>
-      <div class="chart-legend" style="padding:0"><span><span class="sw" style="--sw:var(--text-primary)"></span>Strategy (net)</span><span><span class="sw dashed" style="--sw:var(--series-2)"></span>${esc(t.benchmark_symbol)} buy & hold</span></div></div>
-    <div class="section"><h4>Acceptance gates: ${g?.checks ? gateCount(g.checks.length, g.checks.filter((c) => !c.pass).length) : "not evaluated"}</h4>${(g?.checks || []).map((c) => `<div class="gate ${c.pass ? "pass" : "fail"}"><span class="mark">${c.pass ? MARK.pass : MARK.fail}</span>
-      <div><b>${esc(gateLabel(c.name))}</b> <span class="num">${c.value == null ? "n/a" : c.name === "test_trades" ? Math.round(c.value) : num(c.value, 3)} ${esc(c.op)} ${c.name === "test_trades" ? Math.round(c.threshold) : num(c.threshold, 3)}</span><div class="muted cell-sub">${rich(c.why)}</div></div></div>`).join("")}</div>
-    <div class="section"><h4>Challenge</h4><div class="secondary" style="font-size:13px">Neighbouring parameters positive: ${pct(ch.neighbor_positive_frac, 0, false)} (median Sharpe ${num(ch.neighbor_median_sharpe)}) ·
+      ${!showAnnualizedReturn(w?.test) ? `<p class="muted cell-sub">Annualised growth (CAGR) is only shown for sealed tests of at least 90 days.</p>` : ""}</div>
+    ${e.equity_curve?.test?.ts?.length ? `<div class="section"><h3>Test window: strategy vs. benchmark (growth of $1)</h3><div class="chart-tip" id="exp-tip" style="padding-left:0"></div><div class="chart-wrap" id="exp-chart" role="img" aria-label="Growth of one dollar on the sealed test: strategy versus benchmark" style="height:220px"></div>
+      <div class="chart-legend" style="padding:0"><span><span class="sw" style="--sw:var(--text-primary)"></span>Strategy (net)</span><span><span class="sw dashed" style="--sw:var(--series-2)"></span>${esc(t.benchmark_symbol)} buy & hold</span></div></div>` : ""}
+    <div class="section"><h3>Stress checks</h3><div class="secondary" style="font-size:13px">Similar settings with positive returns: ${pct(ch.neighbor_positive_frac, 0, false)} (median Sharpe ${num(ch.neighbor_median_sharpe)}) ·
       pre-test sub-periods positive: ${pct(ch.subperiod_positive_frac, 0, false)} · top-5 trades share of pre-test profit: ${ch.top5_concentration_pre_test == null ? "n/a (no profit)" : pct(ch.top5_concentration_pre_test, 0, false)}</div>
       <div class="tbl-scroll" style="margin-top:6px"><table class="tbl"><thead><tr><th>Sub-period</th><th class="r">Return</th><th class="r">Sharpe</th><th class="r">Trades</th></tr></thead><tbody>
-      ${(ch.subperiods || []).map((s) => `<tr><td>${day(s.start)} – ${day(s.end)}</td><td class="r num ${signCls(s.total_return)}">${pct(s.total_return)}</td><td class="r num">${num(s.sharpe)}</td><td class="r num">${s.n_trades}</td></tr>`).join("")}</tbody></table></div></div>
-    <div class="section"><h4>Data limitations & possible leakage</h4><ul class="notes secondary" style="font-size:13px;padding-left:18px">${(e.leakage?.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}`, `#experiment-${e.id}`);
-  if (e.equity_curve?.test?.ts?.length) {
-    const chart = LightweightCharts.createChart($("#exp-chart"), { ...themedChartOptions(), autoSize: true });
+      ${(ch.subperiods || []).map((s) => `<tr><td>${dateSpan(s.start, s.end)}</td><td class="r num ${signCls(s.total_return)}">${pct(s.total_return)}</td><td class="r num">${num(s.sharpe)}</td><td class="r num">${s.n_trades}</td></tr>`).join("")}</tbody></table></div></div>
+    <div class="section"><h3>Data limitations & possible leakage</h3><ul class="notes secondary">${(e.leakage?.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div></details>` : ""}`, `#experiment-${e.id}`);
+  const details = $("#test-details"), el = $("#exp-chart");
+  if (el) details.addEventListener("toggle", () => {
+    if (!details.open || !el.isConnected || state.charts.exp) return;
+    const chart = LightweightCharts.createChart(el, { ...themedChartOptions(), autoSize: true });
     const b = chart.addLineSeries({ color: cssVar("--series-2"), lineWidth: 1.5, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
     const a = chart.addLineSeries({ color: cssVar("--text-primary"), lineWidth: 2, priceLineVisible: false });
-    const toS = (c) => c.ts.map((tt, i) => ({ time: tt, value: c.v[i] })).filter((p, i, arr) => i === 0 || p.time > arr[i - 1].time);
+    const toS = (c) => (c?.ts || []).map((tt, i) => ({ time: tt, value: c.v[i] })).filter((p, i, arr) => i === 0 || p.time > arr[i - 1].time);
     a.setData(toS(e.equity_curve.test)); b.setData(toS(e.equity_curve.test_benchmark)); chart.timeScale().fitContent();
     chart.subscribeCrosshairMove((p) => { const x = p?.time ? p.seriesData.get(a) : null, y = p?.time ? p.seriesData.get(b) : null;
       $("#exp-tip").textContent = x ? `${day(p.time)}  strategy ${num(x.value, 3)}  benchmark ${y ? num(y.value, 3) : "–"}` : ""; });
     state.charts.exp = { chart, theme: () => chart.applyOptions(themedChartOptions()) };
-  }
+  });
 }
 async function openStrategy(id) {
-  const s = await api(`/api/strategies/${encodeURIComponent(id)}`);
+  const s = await drawerRecord(`/api/strategies/${encodeURIComponent(id)}`);
+  if (!s) return;
   const sp = s.spec || {};
   drawer(`Strategy ${s.name} v${s.version}`, `
     <div class="section"><span class="status ${esc(s.status)}">${esc(s.status)}</span>${s.probe ? ' <span class="probe-chip">probe</span>' : ""} <span class="muted">· ${esc(s.venue)} · approved ${dt(s.created_at)} · from <a href="#" data-exp="${s.experiment_id}">experiment #${s.experiment_id}</a></span></div>
@@ -1038,19 +1159,20 @@ async function openStrategy(id) {
       <div class="sym-grid">${s.symbols.map((x) => `<div class="sym ${x.qty > 0 ? "held" : ""}"><b>${esc(x.symbol)}</b>
         <span>${x.qty > 0 ? `${qty(x.qty)} @ ${px(x.avg_cost)} · ${money(x.value)} <span class="${signCls(x.unrealized)}">${money(x.unrealized)}</span>` : "not held"}</span>
         ${x.pending ? `<span class="sym-pend">${esc(x.pending)} order pending</span>` : ""}</div>`).join("")}</div>
-      <div class="muted" style="font-size:12px;margin-top:8px">The rules are checked for every symbol on each 15-minute bar close; it buys whichever symbols signal, sized from its ${money(s.allocation)} sleeve.</div></div>
+       <div class="muted" style="font-size:12px;margin-top:8px">The rules are checked for every symbol on each 15-minute bar close; it buys whichever symbols signal, sized from its ${money(s.allocation)} allocation.</div></div>
     <div class="section"><h4>Thesis (recorded at approval)</h4><div class="pre">${rich(s.thesis)}</div></div>
     <div class="section"><h4>Exit plan & invalidation</h4><div class="pre">${rich(s.exit_plan)}</div><div class="secondary small-text" style="margin-top:6px">Invalidation: ${kv(s.invalidation)}</div></div>
     <div class="section"><h4>Rules (frozen)</h4><div style="font-size:13px">Entry <code>${esc(sp.entry || "code")}</code><br>Exit <code>${esc(sp.exit || "code")}</code><br>
       <span class="secondary">params ${kv(sp.fixed_params)}</span></div></div>
-    <div class="section"><h4>Live vs expected</h4>${metricsTable([["Test (expected)", s.expectations?.test]])}
+     <div class="section"><h4>Live vs sealed test</h4>${metricsTable([["Sealed test", s.expectations?.test, s.expectations?.windows?.test]], { cagr: showAnnualizedReturn(s.expectations?.windows?.test) })}
       <div class="secondary" style="font-size:13px;margin-top:8px">Live: ${pct(s.live.return)} over ${s.live.days_live} days on ${money(s.allocation)} · realised ${money(s.live.realized, 2)} ·
       unrealised ${money(s.live.unrealized, 2)} · fees ${money(s.live.fees, 2)} · avg slippage ${s.live.avg_slippage_bps ?? "–"} bp · avg spread ${s.live.avg_spread_bps ?? "–"} bp</div></div>
     <div class="section"><h4>Reviews</h4>${(s.reviews || []).map((r) => `<div style="padding:8px 0;border-top:1px solid var(--border)"><b>${esc(r.kind)}</b> <span class="muted">${dt(r.ts)} · ${authorLabel(r.author)}</span>
       <div class="pre secondary" style="font-size:13px">${rich(r.rationale)}</div></div>`).join("") || `<div class="muted">No reviews yet (daily).</div>`}</div>`, `#strategy-${s.id}`);
 }
 async function openOrder(id) {
-  const o = await api(`/api/orders/${encodeURIComponent(id)}`);
+  const o = await drawerRecord(`/api/orders/${encodeURIComponent(id)}`);
+  if (!o) return;
   const fills = o.fills;
   drawer(`Order #${o.id}: ${o.side} ${o.symbol}`, `
     <div class="section"><span class="status ${esc(o.status)}">${esc(o.status)}</span> <span class="muted">· ${esc(o.client_order_id)} · origin ${esc(o.origin)}</span></div>
@@ -1061,11 +1183,13 @@ async function openOrder(id) {
       ${fills.map((f) => `<div style="font-size:13px;margin-top:6px">Fill ${dt(f.ts)}: ${qty(f.qty)} @ ${px(f.price)} (bid ${px(f.ref_bid)} / ask ${px(f.ref_ask)}; ${esc(f.price_basis)}; impact ${num(f.slippage_bps, 1)} bp; fee ${money(f.fee, 2)})</div>`).join("")}</div>`, `#order-${o.id}`);
 }
 async function openLLM(id) {
-  const c = await api(`/api/llm_calls/${id}`);
+  if (!isOperator()) return;
+  const c = await drawerRecord(`/api/llm_calls/${encodeURIComponent(id)}`);
+  if (!c) return;
   drawer(`LLM call #${c.id}: ${c.purpose}`, `<div class="section secondary" style="font-size:13px">${esc(c.served_model || c.model)} · ${dt(c.ts)} · ${c.input_tokens} in / ${c.output_tokens} out
     (${c.cache_read_tokens} cached) · ${money(c.cost_usd, 4)} · ${esc(c.status)} ${esc(c.error || "")}</div>
     <div class="section"><h4>Inputs given to the model</h4><pre class="pre" style="font-size:12px">${esc(c.request?.user || "")}</pre></div>
-    <div class="section"><h4>Response</h4><pre class="pre" style="font-size:12px">${esc(c.response || "")}</pre></div>`);
+    <div class="section"><h4>Response</h4><pre class="pre" style="font-size:12px">${esc(c.response || "")}</pre></div>`, `#llm-${c.id}`);
 }
 document.addEventListener("click", async (e) => {
   const pr = e.target.closest("[data-probe]");
@@ -1099,7 +1223,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   const a = e.target.closest("[data-exp],[data-strat],[data-order],[data-llm]");
-  if (!a || a.closest("#tab-body [data-llm]") && !a.matches("a")) return;
+  if (!a || e.target.closest(".gate-more") || a.closest("#tab-body [data-llm]") && !a.matches("a")) return;
   if (a.dataset.exp) { e.preventDefault(); openExperiment(a.dataset.exp).catch(fail); }
   else if (a.dataset.strat) { e.preventDefault(); openStrategy(a.dataset.strat).catch(fail); }
   else if (a.dataset.order) { e.preventDefault(); openOrder(a.dataset.order).catch(fail); }
@@ -1112,73 +1236,133 @@ const KINDS = [["research", "Research", ["observation", "research", "hypothesis"
   ["trades", "Trades", ["intent", "order", "fill"]], ["review", "Reviews", ["review"]], ["risk", "Risk", ["risk"]],
   ["data", "Data", ["data"]], ["system", "System", ["system"]]];
 const activeKinds = () => new Set(KINDS.filter(([k]) => state.filter.has(k)).flatMap(([, , ks]) => ks));
+const FILTER_STORAGE = "qd-journal-filters";
+function restoreJournalFilters() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILTER_STORAGE));
+    if (Array.isArray(saved)) state.filter = new Set(saved.filter((k) => KINDS.some(([key]) => k === key)));
+  } catch {}
+}
 function renderFilters() {
   $("#filters").innerHTML = `<button class="fchip ${state.filter.size ? "" : "on"}" data-k="" aria-pressed="${!state.filter.size}">All</button>` +
     KINDS.map(([k, l]) => `<button class="fchip ${state.filter.has(k) ? "on" : ""}" data-k="${k}" aria-pressed="${state.filter.has(k)}">${l}</button>`).join("");
 }
+function mergeJournal(rows) {
+  const entries = new Map(state.journal.map((j) => [j.id, j]));
+  for (const row of rows) entries.set(row.id, row);
+  state.journal = [...entries.values()].sort((a, b) => b.id - a.id).slice(0, 1000);
+}
+async function loadFilteredJournal() {
+  const kinds = [...activeKinds()];
+  if (!kinds.length) return;
+  const stream = state.es;
+  try {
+    const rows = await api(`/api/journal?limit=200&kind=${encodeURIComponent(kinds.join(","))}`);
+    if (state.es !== stream || !stream) return;
+    mergeJournal(rows);
+    renderFeed();
+  } catch (err) {
+    if (state.es === stream) fail(err, "Could not load older filtered journal entries.");
+  }
+}
 $("#filters").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-k]"); if (!b) return;
   if (!b.dataset.k) state.filter.clear(); else state.filter.has(b.dataset.k) ? state.filter.delete(b.dataset.k) : state.filter.add(b.dataset.k);
+  try { localStorage.setItem(FILTER_STORAGE, JSON.stringify([...state.filter])); } catch {}
   renderFilters(); renderFeed();
-  if (state.filter.size) {  // older matching entries may be beyond the 200 most recent ones loaded at start
-    try {
-      const rows = await api(`/api/journal?limit=200&kind=${[...activeKinds()].join(",")}`);
-      const have = new Set(state.journal.map((j) => j.id));
-      state.journal = state.journal.concat(rows.filter((r) => !have.has(r.id))).sort((x, y) => y.id - x.id);
-      renderFeed();
-    } catch (err) { console.error(err); }
-  }
+  $(`#filters [data-k="${b.dataset.k}"]`)?.focus({ preventScroll: true });
+  $("#feed").scrollTop = 0;
+  await loadFilteredJournal();
 });
-// The journal reads as a log: one aligned time column, a short kind label, then the entry.
-const KIND_SHORT = { observation: "OBS", research: "RES", hypothesis: "HYP", test: "TEST", decision: "DEC", intent: "INT",
-  order: "ORD", fill: "FILL", review: "REV", risk: "RISK", data: "DATA", system: "SYS" };
-const KIND_FULL = { intent: "intent, not a fill" };
+$("#journal-search").addEventListener("input", () => { renderFeed(); $("#feed").scrollTop = 0; });
+// The journal reads as a log: one aligned time column, an explicit kind label, then the entry.
 const dayKey = (ts) => new Date(ts * 1000).toDateString();
 function entryHTML(j, fresh) {
   const refs = j.refs || {};
+  const { kind, title } = journalPresentation(j);
   const links = [];
   if (refs.experiment_id) links.push(`<a href="#" data-exp="${refs.experiment_id}">experiment #${refs.experiment_id}</a>`);
-  if (refs.strategy_id) links.push(`<a href="#" data-strat="${refs.strategy_id}">strategy #${refs.strategy_id}</a>`);
+  if (refs.strategy_id) links.push(`<a href="#" data-strat="${refs.strategy_id}">${kind === "probe" ? "probe" : "strategy"} #${refs.strategy_id}</a>`);
   if (refs.order_id) links.push(`<a href="#" data-order="${refs.order_id}">order #${refs.order_id}</a>`);
   if (j.llm_call_id && isOperator()) links.push(`<a href="#" data-llm="${j.llm_call_id}">model inputs</a>`);
   const long = (j.body || "").length > 420;
-  const short = KIND_SHORT[j.kind] || String(j.kind || "").slice(0, 4).toUpperCase();
-  const full = KIND_FULL[j.kind] || j.kind;
-  return `<div class="entry k-${esc(j.kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
+  return `<div class="entry k-${esc(kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
     <time class="entry-time" datetime="${esc(new Date(j.ts * 1000).toISOString())}" title="${esc(dt(j.ts))}">${esc(clock24(j.ts))}</time>
-    <span class="kind ${esc(j.kind)}" title="${esc(full)}"><span aria-hidden="true">${esc(short)}</span><span class="sr-only">${esc(full)}</span></span>
-    <div class="entry-title">${rich(j.title)}</div>
+    <span class="kind ${esc(kind)}">${esc(cap(kind || "entry"))}</span>
+    <div class="entry-title">${rich(title)}</div>
     <div class="entry-main"><div class="entry-body ${long ? "clamp" : ""}">${rich(j.body)}</div>
       <div class="entry-meta"><span class="author">${authorLabel(j.author)}</span>${j.kind === "intent" ? '<span class="muted">intent, not a fill</span>' : ""}</div>
-      ${long || links.length ? `<div class="entry-refs">${long ? `<a href="#" data-more>more</a>` : ""}${links.join("")}</div>` : ""}</div></div>`;
+      ${long || links.length ? `<div class="entry-refs">${long ? `<button type="button" class="entry-more" data-more aria-expanded="false">Show more</button>` : ""}${links.join("")}</div>` : ""}</div></div>`;
 }
 function renderFeed(freshIds = new Set()) {
+  const feed = $("#feed");
   const kinds = activeKinds();
-  const items = state.journal.filter((j) => !state.filter.size || kinds.has(j.kind)).slice(0, 300);
+  const query = $("#journal-search").value.trim();
+  const matches = state.journal.filter((j) => (!kinds.size || kinds.has(j.kind)) && (!query || journalMatches(j, query)));
+  const items = matches.slice(0, 300);
+  // Don't evict the row under the keyboard just because it slid past the display cap.
+  const focusedRow = document.activeElement.closest("#feed [data-jid]");
+  if (focusedRow && matches.length > items.length) {
+    const index = matches.findIndex((j) => String(j.id) === focusedRow.dataset.jid);
+    if (index >= items.length) items.push(matches[index]);
+  }
+  const results = $("#journal-results");
+  const summary = query ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} in loaded entries${matches.length > items.length ? ` · showing ${items.length}` : ""}` :
+    matches.length > items.length ? `Showing ${items.length} of ${matches.length} loaded entries` : "";
+  if (results.textContent !== summary) results.textContent = summary;
+  if (!items.length) {
+    const text = query ? "No matches. Try a different search or change the filters." : `No journal entries${state.filter.size ? " for these filters" : " yet"}.`;
+    if (feed.firstElementChild?.className !== "empty" || feed.textContent !== text) feed.innerHTML = `<div class="empty">${text}</div>`;
+    return;
+  }
+  // Journal records are immutable. Leave retained nodes attached (including their
+  // buttons, expanded bodies and text selection) and insert only the new records.
+  const previous = new Map([...feed.children].map((node) => [node.dataset.jid || node.dataset.dayStart, node]));
+  const desired = [], template = document.createElement("template");
   let lastDay = null;
-  $("#feed").innerHTML = items.length ? items.map((j) => {
-    const d = dayKey(j.ts), head = d !== lastDay ? `<div class="log-day" role="separator">${esc(day(j.ts))}</div>` : "";
-    lastDay = d;
-    return head + entryHTML(j, freshIds.has(j.id));
-  }).join("") : `<div class="empty">No journal entries${state.filter.size ? " for this filter" : ""} yet.</div>`;
+  for (const j of items) {
+    const d = dayKey(j.ts);
+    if (d !== lastDay) {
+      const key = `day-${j.id}`;
+      let heading = previous.get(key);
+      if (!heading) {
+        heading = document.createElement("div"); heading.className = "log-day"; heading.dataset.dayStart = key;
+        heading.setAttribute("role", "separator"); heading.textContent = day(j.ts);
+      }
+      desired.push(heading); previous.delete(key); lastDay = d;
+    }
+    const id = String(j.id);
+    let row = previous.get(id);
+    if (!row) { template.innerHTML = entryHTML(j, freshIds.has(j.id)); row = template.content.firstElementChild; }
+    desired.push(row); previous.delete(id);
+  }
+  previous.forEach((node) => node.remove());
+  let cursor = feed.firstElementChild;
+  for (const node of desired) {
+    if (cursor === node) cursor = cursor.nextElementSibling;
+    else feed.insertBefore(node, cursor);
+  }
 }
 $("#feed").addEventListener("click", (e) => {
-  const m = e.target.closest("[data-more]"); if (!m) return; e.preventDefault();
-  const body = m.closest(".entry").querySelector(".entry-body"); body.classList.toggle("clamp"); m.textContent = body.classList.contains("clamp") ? "more" : "less";
+  const m = e.target.closest("[data-more]"); if (!m) return;
+  const collapsed = m.closest(".entry").querySelector(".entry-body").classList.toggle("clamp");
+  m.setAttribute("aria-expanded", String(!collapsed)); m.textContent = collapsed ? "Show more" : "Show less";
 });
 async function loadJournal() {
   const rows = await api("/api/journal?limit=200");
   state.journal = rows; state.lastId = rows.length ? rows[0].id : 0; renderFeed(); renderCheckin();
   connectStream();
+  await loadFilteredJournal();
 }
 function connectStream() {
   if (state.es) state.es.close();
   const es = new EventSource(`/api/stream?after_id=${state.lastId}`);
   state.es = es;
   es.addEventListener("journal", (ev) => {
+    if (state.es !== es) return;
     const j = JSON.parse(ev.data);
     if (j.id <= state.lastId) return;
-    state.lastId = j.id; state.journal.unshift(j); state.journal.length = Math.min(state.journal.length, 1000);
+    state.lastId = j.id; mergeJournal([j]);
     renderFeed(new Set([j.id]));
     renderCheckin();
     notifyFromJournal(j);
@@ -1222,6 +1406,16 @@ function edgeCue(el) {
   update();
 }
 edgeCue($(".sidebar")); edgeCue($("#tabs"));
+// Move the same status elements, so reading and focus order match the phone layout.
+const phone = matchMedia("(max-width: 640px)");
+const statusPanels = [$("#statusbar"), $("#alerts"), $("#connection-alert")];
+function placeStatusPanels() {
+  const active = document.activeElement;
+  (phone.matches ? $("#checkin") : $(".topbar")).after(...statusPanels);
+  if (statusPanels.some((panel) => panel.contains(active))) active.focus({ preventScroll: true });
+}
+phone.addEventListener("change", placeStatusPanels);
+placeStatusPanels();
 // The journal pane sticks flush under the top bar, whose height changes with its content and the viewport.
 new ResizeObserver(([e]) => document.documentElement.style.setProperty("--topbar-h", `${Math.round(e.target.getBoundingClientRect().height)}px`))
   .observe($(".topbar"));
@@ -1243,23 +1437,33 @@ function monoFigures(root) {
 new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n) => monoFigures(n.nodeType === 3 ? n.parentElement : n))))
   .observe(document.body, { childList: true, subtree: true });
 // #experiment-2, #strategy-1 and #order-5 open that record's drawer.
-function openFromHash() {
-  const tab = HASH_TAB[location.hash.slice(1)];
-  if (tab) { goTo(tab); return; }
-  const m = /^#(experiment|strategy|order)-(\d+)$/.exec(location.hash);
-  if (!m) return;
-  ({ experiment: openExperiment, strategy: openStrategy, order: openOrder })[m[1]](m[2]).catch(fail);
+function openFromHash(event) {
+  if ($("#app").classList.contains("hidden")) return;
+  const hash = location.hash, key = hash.slice(1);
+  if (closeDrawer && hash === drawerOrigin) {
+    closeDrawer({ keepHash: true });
+    return; // Underlying tab, scroll position and opener are still in place.
+  }
+  const tab = Object.hasOwn(HASH_TAB, key) ? HASH_TAB[key] : null;
+  if (tab) { goTo(tab, { hash: false }); return true; }
+  if (["overview", "pipeline", "journal"].includes(key) || (!hash && event)) { goTo(key || "overview", { hash: false }); return; }
+  drawerRequest++;
+  closeDrawer?.({ keepHash: true });
+  const m = recordRoute.exec(hash);
+  if (m) {
+    if (m[1] === "llm" && !isOperator()) { setHash("research", true); goTo("research", { hash: false }); return true; }
+    ({ experiment: openExperiment, strategy: openStrategy, order: openOrder, llm: openLLM })[m[1]](m[2]).catch(fail);
+  }
 }
 window.addEventListener("hashchange", openFromHash);
 
 // ---------------------------------------------------------------- keyboard shortcuts
-// Single keys, ignored while typing or with a modifier held. Deliberately no key for Emergency stop,
-// and P only pauses (the safe direction); resuming stays a click.
+// Shortcuts navigate or change presentation only. Desk controls are explicit buttons.
 const TAB_KEYS = ["research", "strategies", "orders", "market", "system"];
 const shortcutList = () => [
   ["?", "Show this list"], ["/", isOperator() ? "Ask the desk" : null], ["O", "Overview"], ["J", "Analyst journal"],
   [`1–${isOperator() ? 5 : 4}`, `Records tabs: ${TAB_KEYS.filter((k) => k !== "system" || isOperator()).map((k) => $(`#tabs [data-tab="${k}"]`).textContent).join(", ")}`],
-  ["P", isOperator() ? "Pause the agent (resume with the button)" : null], ["T", "Switch light / dark theme"], ["Esc", "Close a drawer or dialog"],
+  ["T", "Switch light / dark theme"], ["Esc", "Close a drawer or dialog"],
 ].filter(([, what]) => what);
 function showShortcuts() {
   if ($(".confirm-dialog.keys")) return;
@@ -1268,7 +1472,7 @@ function showShortcuts() {
   d.setAttribute("aria-labelledby", "keys-title");
   d.innerHTML = `<form method="dialog"><h2 id="keys-title">Keyboard shortcuts</h2><dl class="key-list">${shortcutList().map(([k, what]) =>
     `<div><dt><kbd>${esc(k)}</kbd></dt><dd>${esc(what)}</dd></div>`).join("")}</dl>
-    <p class="muted key-note">Emergency stop has no shortcut, so a stray key can never halt trading.</p>
+    ${isOperator() ? '<p class="muted key-note">Use the top-bar buttons to pause, resume or open the Emergency stop confirmation. None has a keyboard shortcut.</p>' : ""}
     <div class="confirm-actions"><button class="btn" value="cancel">Close</button></div></form>`;
   d.addEventListener("close", () => d.remove());
   document.body.appendChild(d); d.showModal(); d.querySelector("button").focus();
@@ -1286,10 +1490,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "j") goTo("journal");
   else if (/^[1-5]$/.test(k) && tabs[+k - 1]) goTo(tabs[+k - 1]);
   else if (k === "t") $("#btn-theme").click();
-  else if (k === "p" && isOperator()) {
-    if (state.s?.controls.paused) toast("The agent is already paused", { key: "control", detail: "Resume it with the Resume agent button." });
-    else if (!$("#btn-pause").disabled) $("#btn-pause").click();
-  } else return;
+  else return;
   e.preventDefault();
 });
 async function refresh() {
@@ -1319,12 +1520,13 @@ async function boot() {
   if (!isOperator() && state.tab === "system") state.tab = "research";
   $("#login-view").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  renderFilters();
+  restoreJournalFilters(); renderFilters();
   await refresh();
-  const safe = (fn) => () => fn().catch((err) => { if (err.message !== "login required") fail(err); });
-  await Promise.all([safe(loadEquity)(), safe(loadJournal)(), renderTab()]);
   if ($("#app").classList.contains("hidden")) return;
-  openFromHash();
+  const routedTab = openFromHash();
+  const safe = (fn) => () => fn().catch((err) => { if (err.message !== "login required") fail(err); });
+  await Promise.all([safe(loadEquity)(), safe(loadJournal)(), routedTab ? undefined : renderTab()]);
+  if ($("#app").classList.contains("hidden")) return;
   state.timers.push(setInterval(refresh, 10000), setInterval(safe(loadEquity), 60000),
     setInterval(() => { if (["research", "strategies", "orders"].includes(state.tab) && !$("#drawer-root").innerHTML) renderTab({ quiet: true }); }, 30000));
   } finally { state.booting = false; }
