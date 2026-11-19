@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400..700&display=swap">
-  <link rel="stylesheet" href="/static/app.css?v=20261119-seams">
+  <link rel="stylesheet" href="/static/app.css?v=20261119-polish">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%2379c0ff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -16,9 +16,9 @@
     <div class="card login">
       <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l5-5 4 4 7-8"/></svg></span><div>QuantDesk<small>AI research &amp; paper trading</small></div></div>
       <h1>Welcome back</h1>
-      <div class="secondary">Operator sign-in. Paper trading only, no real money.</div>
+      <div class="secondary">Use your operator or read-only password. Paper trading only, no real money.</div>
       <form id="login-form">
-        <input type="password" id="login-pw" aria-label="Operator password" placeholder="Password" autocomplete="current-password" required>
+        <input type="password" id="login-pw" aria-label="Desk password" placeholder="Password" autocomplete="current-password" required>
         <button class="btn" type="submit">Sign in</button>
         <div id="login-err" class="err" style="margin-top:10px"></div>
       </form>
@@ -64,14 +64,14 @@
           </div>
         </div>
       </header>
-      <div class="statusbar"><div class="badges" id="badges" aria-label="Environment and service status"></div></div>
+       <div class="statusbar" id="statusbar"><div class="badges" id="badges" aria-label="Environment and service status"></div></div>
       <div class="alerts" id="alerts"></div>
       <div class="alert critical hidden" id="connection-alert" role="status"></div>
 
       <main class="layout" id="dashboard">
       <div class="col" id="overview" tabindex="-1">
         <h1 class="sr-only">QuantDesk overview</h1>
-        <section class="checkin" id="checkin" aria-label="Check-in summary"></section>
+         <section class="checkin" id="checkin" aria-label="Check-in summary" tabindex="-1"></section>
         <section class="kpis" id="kpis" aria-label="Performance summary"></section>
 
         <section class="card pipeline-card" id="pipeline" tabindex="-1" aria-labelledby="pipeline-heading">
@@ -91,7 +91,7 @@
             </div></div>
           <div class="performance-meta"><span id="equity-since">Waiting for equity snapshots</span><span>Net of simulated costs</span></div>
           <div class="chart-tip" id="equity-tip"></div>
-          <div class="chart-wrap" id="equity-chart"></div>
+           <div class="chart-wrap" id="equity-chart" role="img" aria-label="Account equity and benchmark chart"></div>
           <div class="chart-range-note hidden" id="equity-range-note" role="status"></div>
           <div class="chart-legend" id="equity-legend"></div>
           <div class="performance-stats" id="performance-stats"></div>
@@ -116,15 +116,32 @@
             <button class="tab" role="tab" id="tab-orders" aria-controls="tab-body" aria-selected="false" tabindex="-1" data-tab="orders">Orders &amp; fills</button>
             <button class="tab" role="tab" id="tab-market" aria-controls="tab-body" aria-selected="false" tabindex="-1" data-tab="market">Market</button>
             <button class="tab operator-only" role="tab" id="tab-system" aria-controls="tab-body" aria-selected="false" tabindex="-1" data-tab="system">Limits &amp; system</button>
-          </div>
-          <div class="card-b" role="tabpanel" tabindex="0" aria-labelledby="tab-research" id="tab-body"></div>
+           </div>
+           <details class="research-glossary">
+             <summary>Research terms</summary>
+             <dl>
+               <dt>Sealed test</dt><dd>Historical data held back until the trading rules and settings are fixed.</dd>
+               <dt>Gates</dt><dd>Checks an idea must pass before it qualifies for a regular paper allocation.</dd>
+               <dt>Probe</dt><dd>A small forward paper test. Starting one does not mean an idea passed its gates or has a proven edge.</dd>
+               <dt>Sharpe and PSR</dt><dd>Sharpe compares return with variability. Probabilistic Sharpe (PSR) estimates how likely Sharpe is to exceed a reference level; deflated PSR also discounts the effect of trying multiple ideas.</dd>
+               <dt>Causal DSL</dt><dd>A restricted language for trading rules that can only use information available at the time of a decision.</dd>
+               <dt>Similar settings</dt><dd>Checks whether small changes to an idea’s settings still yield positive results.</dd>
+             </dl>
+           </details>
+           <div class="card-b" role="tabpanel" tabindex="0" aria-labelledby="tab-research" id="tab-body"></div>
         </section>
       </div>
 
       <aside class="journal-col" id="journal" tabindex="-1" aria-labelledby="journal-heading">
         <div class="card">
-          <div class="card-h"><h2 id="journal-heading">Analyst journal</h2><div class="spacer"></div><span class="badge" id="live-badge"><span class="dot"></span>connecting</span></div>
-          <div class="filters" id="filters"></div>
+           <div class="card-h"><h2 id="journal-heading">Analyst journal</h2><div class="spacer"></div><span class="badge" id="live-badge"><span class="dot"></span>connecting</span></div>
+           <div class="journal-search">
+             <label for="journal-search">Search journal</label>
+             <input type="search" id="journal-search" placeholder="Title, text, or #record ID" autocomplete="off" maxlength="120" aria-describedby="journal-search-note">
+             <p id="journal-search-note" class="muted">Searches entries loaded in this view.</p>
+           </div>
+           <div class="filters" id="filters"></div>
+           <p id="journal-results" class="journal-results muted" role="status"></p>
           <div class="feed" id="feed"></div>
           <div class="ask operator-only">
             <label class="ask-label" for="ask-input">Ask the desk <span class="muted ask-note">answers cite stored records</span></label>
@@ -143,6 +160,6 @@
 
   <div id="drawer-root"></div>
   <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-  <script type="module" src="/static/app.js?v=20261119-seams"></script>
+  <script type="module" src="/static/app.js?v=20261119-polish"></script>
 </body>
 </html>

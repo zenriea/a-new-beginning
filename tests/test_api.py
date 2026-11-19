@@ -52,11 +52,15 @@ def test_static_ui_served(client):
 
 
 def test_refreshed_ui_assets_and_module_are_served(client):
+    import re
     page = client.get("/")
-    assert "20261119-seams" in page.text
     assert 'class="sidebar"' in page.text and 'id="equity-ranges"' in page.text and 'id="pipeline-body"' in page.text
-    for path in ("/static/app.css", "/static/app.js", "/static/ui-model.mjs"):
-        response = client.get(path)
+    assets = dict(re.findall(r'"/static/(app\.(?:css|js))\?v=([\w-]+)"', page.text))
+    assert assets.keys() == {"app.css", "app.js"} and assets["app.css"] == assets["app.js"]
+    module = client.get(f"/static/app.js?v={assets['app.js']}")
+    assert f"./ui-model.mjs?v={assets['app.js']}" in module.text
+    for path in ("app.css", "app.js", "ui-model.mjs"):
+        response = client.get(f"/static/{path}?v={assets['app.js']}")
         assert response.status_code == 200
     assert "javascript" in client.get("/static/ui-model.mjs").headers["content-type"]
 

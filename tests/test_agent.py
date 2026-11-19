@@ -87,6 +87,9 @@ def test_research_cycle_records_in_order_and_enforces_gates(env):
     if not gates["passed"]:
         # no full allocation; a small probe may start if the sealed test was profitable
         assert res["decision"] == "reject" and db.q1("SELECT COUNT(*) n FROM strategies WHERE probe=0")["n"] == 0
+        missed = len(gates["failed"])
+        title = db.q1("SELECT title FROM journal WHERE kind='decision' ORDER BY id LIMIT 1")["title"]
+        assert title == f"Not promoted (missed {missed} gate{'s' if missed != 1 else ''}): Trend"
         test = json.loads(e["test"])
         assert bool(res.get("probe_strategy_id")) == (test["total_return"] > 0 and test["n_trades"] >= 8)
     else:

@@ -10,6 +10,44 @@ export function equityInRange(rows, range, now) {
   return rows.filter((row) => row.ts >= now - seconds);
 }
 
+// Compare the same snapshot endpoints shown in the selected chart range.
+export function equityComparison(rows) {
+  const first = rows[0], last = rows.at(-1);
+  if (!first || first === last || last.ts <= first.ts || !(first.equity > 0) || !(first.benchmark_equity > 0) ||
+      !Number.isFinite(last.equity) || !(last.benchmark_equity > 0)) return null;
+  const account = last.equity / first.equity - 1, benchmark = last.benchmark_equity / first.benchmark_equity - 1;
+  return { account, benchmark, difference: account - benchmark };
+}
+
+export function showAnnualizedReturn(window) {
+  return Number.isFinite(window?.start) && Number.isFinite(window?.end) && window.end - window.start >= 90 * 86400;
+}
+
+// Old journal rows remain immutable. Translate their display copy alongside newly written rows.
+export function journalPresentation(entry) {
+  const title = String(entry.title ?? "");
+  if (entry.kind !== "decision") return { kind: entry.kind, title };
+  if (entry.refs?.probe === true || /^(?:New probe live|Probe (?:started|approved, waiting for room)):/i.test(title)) {
+    return { kind: "probe", title: title.replace(/^New probe live:/i, "Probe started:") };
+  }
+  if (!/^Rejected:/i.test(title)) return { kind: entry.kind, title };
+  const body = String(entry.body ?? "");
+  // Recover an exact count only from the original rules engine or gate override templates.
+  const failed = /\[Risk\/gate engine\] Allocation refused: gates failed \(([a-z0-9_, ]+)\)\./.exec(body)?.[1] ||
+    (entry.author === "rules" ? /Failed gates: ([a-z0-9_, ]+)\. I am rejecting it\./.exec(body)?.[1] : null);
+  const names = failed?.split(", ") || [];
+  const count = names.length && names.every((name) => Object.hasOwn(GATE_LABEL, name)) ? names.length : 0;
+  return { kind: entry.kind, title: title.replace(/^Rejected:/i, count ? `Not promoted (missed ${count} ${count === 1 ? "gate" : "gates"}):` : "Not promoted:") };
+}
+
+export function journalMatches(entry, query) {
+  const { kind, title } = journalPresentation(entry);
+  const refs = Object.entries(entry.refs || {}).flatMap(([key, id]) => [key.replace(/_id$/, ""), `#${id}`]);
+  if (entry.llm_call_id) refs.push("model inputs", `#${entry.llm_call_id}`);
+  const text = [title, entry.title, entry.body, kind, String(entry.author ?? "").replaceAll("_", " "), ...refs].map(friendlyGates).join(" ").toLowerCase();
+  return query.toLowerCase().trim().split(/\s+/).every((word) => text.includes(word));
+}
+
 export function deskHealth(s) {
   const c = s.controls;
   if (c.emergency_stop) return { tone: "bad", label: "Emergency stop active" };
@@ -30,7 +68,7 @@ export function deskHealth(s) {
 // One vocabulary for gate names everywhere, including text the server or the analyst wrote.
 export const GATE_LABEL = {
   validation_sharpe: "Validation Sharpe", test_sharpe: "Test Sharpe", test_trades: "Min trades",
-  test_return_cost_x2: "2× costs", test_sharpe_delay_1bar: "1-bar delay", neighbor_positive_frac: "Nearby params",
+  test_return_cost_x2: "2× costs", test_sharpe_delay_1bar: "1-bar delay", neighbor_positive_frac: "Similar settings",
   subperiod_positive_frac: "Sub-periods", top5_concentration: "Top-5 trades", deflated_psr: "Deflated PSR",
 };
 export const gateLabel = (name) => GATE_LABEL[name] || String(name ?? "").replaceAll("_", " ");
@@ -63,7 +101,7 @@ export function tradingVerdict(s) {
   const n = s.positions.length, held = `${n} open position${n === 1 ? "" : "s"}`;
   // Pause outranks "live": a paused desk must never read as if it is about to trade.
   if (c.paused) return { tone: "warn", text: `Paused: no research and no new entries.${n ? ` ${held} ${n === 1 ? "is" : "are"} held; exits still run.` :
-    live ? ` ${liveLabel(strategies, probes)} keep${live === 1 ? "s" : ""} ${live === 1 ? "its" : "their"} sleeve; exits still run.` : ""}` };
+    live ? ` ${liveLabel(strategies, probes)} keep${live === 1 ? "s" : ""} ${live === 1 ? "its" : "their"} allocation; exits still run.` : ""}` };
   if (n) return { tone: liveTone, text: `Trading: ${held} across ${liveLabel(strategies, probes)}.` +
     (strategies ? "" : " Probes are forward paper tests, not evidence of an edge.") };
   if (live) return { tone: liveTone, text: `${cap(liveLabel(strategies, probes))} live. Waiting for entry signals on the next bar close.` +

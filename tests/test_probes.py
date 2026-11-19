@@ -56,7 +56,9 @@ def test_profitable_but_failed_experiment_starts_a_probe(env):
     assert s["allocation"] == pytest.approx(3000)   # 3% of $100k, no incubation haircut
     assert s["thesis"].startswith("PROBE")
     assert db.q1("SELECT kind FROM decisions WHERE subject_id=? ORDER BY id DESC", (eid,))["kind"] == "probe"
-    assert db.q1("SELECT 1 FROM journal WHERE title LIKE 'New probe live%'")
+    entry = db.q1("SELECT kind, refs FROM journal WHERE title LIKE 'Probe started:%'")
+    assert entry["kind"] == "decision"
+    assert db.loads(entry["refs"]) == {"strategy_id": sid, "experiment_id": eid, "probe": True}
 
 
 def test_losing_experiment_does_not_probe(env):
