@@ -92,6 +92,12 @@ export function friendlyGates(text) {
   return String(text ?? "").replace(GATE_RE, (key) => GATE_LABEL[key]);
 }
 // Always counted the same way: how many passed, out of how many.
+export function holdoutLabel(n, days) {
+  if (!Number.isSafeInteger(n) || n < 0) return "Test window overlap unknown";
+  const scope = Number.isSafeInteger(days) && days > 0 ? `${days}-day lookback` : "lookback not recorded";
+  return `${n} overlapping ${n === 1 ? "test" : "tests"} · ${scope}`;
+}
+
 export function gateCount(total, failed) {
   return `${Math.max(0, total - failed)} of ${total} passed`;
 }
@@ -109,6 +115,20 @@ function singleLiveVenue(s) {
     .filter((x) => x.status === "active" || x.status === "incubating")
     .map((x) => x.venue).filter((v) => Object.hasOwn(MARKET, v)));
   return venues.size === 1 ? [...venues][0] : null;
+}
+
+export function checkinSummary(s, verdict = tradingVerdict(s)) {
+  const actions = displayedActivity(s).next_actions || [];
+  const venue = singleLiveVenue(s);
+  const normal = s.worker.alive && !["paused", "emergency_stop", "drawdown_halt", "system_halt"].some(k => s.controls[k]);
+  const marketEvent = normal && venue && actions.find(a => a.venue === venue && ["signal", "market_open"].includes(a.kind));
+  let text = verdict.text;
+  if (normal && s.positions.length === 0 && s.account?.gross === 0 && Number.isFinite(s.account.cash)) {
+    const cash = s.account.cash.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    text = `All ${cash} is in cash. ${text}`;
+    if (s.counts?.orders === 0 && s.counts?.fills === 0) text += " No orders or fills yet.";
+  }
+  return { text, next: marketEvent || actions[0], nextLabel: marketEvent ? `Next · ${venue}` : "Next desk event" };
 }
 
 // One sentence that answers "why is (or isn't) the desk trading right now?".

@@ -41,6 +41,10 @@ def test_gates_passing_cannot_be_vetoed_by_the_analyst(env, monkeypatch):
     monkeypatch.setattr(RulesAnalyst, "decide", nope)
     out = research_loop.research_cycle("NASDAQ", analyst=RulesAnalyst())
     assert out["decision"] == "allocate"
+    from quantdesk import settings
+    days = settings.get("research")["deflation_window_days"]
+    settings.operator_update("research", {"deflation_window_days": days + 1})
+    assert research_loop.ranked_candidates(0)[0]["deflation_window_days"] == days
     s = db.q1("SELECT * FROM strategies WHERE id=?", (out["strategy_id"],))
     assert s["approved_allocation"] == 5000 and s["thesis"] and s["exit_plan"]
     assert "cannot block a passing test" in db.q1("SELECT rationale FROM decisions ORDER BY id DESC")["rationale"]
@@ -104,15 +108,14 @@ def test_probes_expire(env):
 
 
 def test_deflation_counts_only_recent_trials(env):
-    from quantdesk import clock
+    from quantdesk import clock, settings
     from quantdesk.agent.research_loop import _prior_test_windows
     _experiment(created_at=clock.now() - 30 * 86400)
     _experiment(created_at=clock.now() - 2 * 86400)
     _experiment(created_at=clock.now() - 3600, venue="NASDAQ")
-    assert len(_prior_test_windows("CRYPTO")) == 1
-    from quantdesk import settings
+    assert len(_prior_test_windows("CRYPTO", settings.get("research")["deflation_window_days"])) == 1
     settings.operator_update("research", {"deflation_window_days": 60})
-    assert len(_prior_test_windows("CRYPTO")) == 2
+    assert len(_prior_test_windows("CRYPTO", settings.get("research")["deflation_window_days"])) == 2
 
 
 def test_old_database_gets_probe_column(tmp_path):
@@ -129,6 +132,25 @@ def test_old_database_gets_probe_column(tmp_path):
     db.close_thread_connection()
 
 
+def test_skipped_research_snapshots_cited_trade_checks(env):
+    from quantdesk import db
+    from quantdesk.agent import journal
+    from quantdesk.agent.research_loop import _record_no_idea
+    ids = []
+    for count, venue in ((19, "CRYPTO"), (9, "CRYPTO"), (3, "CRYPTO"), (1, "NASDAQ")):
+        eid = _experiment(trades=count, venue=venue)
+        ids.append(eid)
+        db.ex("UPDATE experiments SET gates=? WHERE id=?", (db.dumps({"checks": [
+            {"name": "test_trades", "op": ">=", "value": count, "threshold": 8}
+        ]}), eid))
+    why = "All below minimum: " + ", ".join(f"experiment:{i}" for i in [*ids, ids[0], 99999])
+    _record_no_idea("CRYPTO", {"why": why}, "llm", None, 1)
+    entry = journal.recent(1)[0]
+    assert entry["body"] == why
+    assert entry["refs"]["trade_checks"] == [
+        {"experiment_id": eid, "trades": count, "minimum": 8} for eid, count in zip(ids, [19, 9, 3])]
+
+
 def test_api_pipeline_and_probe_control(env, monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
@@ -138,8 +160,10 @@ def test_api_pipeline_and_probe_control(env, monkeypatch):
     import quantdesk.api.app as appmod
     c = TestClient(importlib.reload(appmod).app)
     good, bad = _experiment(ret=0.03), _experiment(ret=-0.01, failed=("test_sharpe", "deflated_psr"))
+    db.ex("UPDATE experiments SET leakage=? WHERE id=?", (json.dumps({"holdout_reuse_count": 29}), good))
     p = c.get("/api/state").json()["pipeline"]
     assert p["experiments"] == 2 and p["profitable"] == 1
+    assert {r["id"]: r["holdout_reuse_count"] for r in p["review_candidates"]} == {good: 29, bad: None}
     assert p["gate_failures"][0] == {"gate": "deflated_psr", "n": 2}
     assert p["candidates"][0]["id"] == good and p["candidates"][0]["probe_blocker"] is None
     h = {"X-QD": "1"}
@@ -147,8 +171,17 @@ def test_api_pipeline_and_probe_control(env, monkeypatch):
     assert db.get_meta("probe_requested") == str(bad)
     make_strategy()
     db.ex("UPDATE strategies SET experiment_id=? WHERE id=1", (good,))
+    # A running probe stays visible even after its experiment leaves the research window;
+    # it never consumes one of the three available review slots.
+    db.ex("UPDATE strategies SET probe=1 WHERE id=1")
+    others = [_experiment(ret=ret) for ret in (0.02, 0.01)]
+    state = c.get("/api/state").json()
+    assert [s["id"] for s in state["strategies"] if s["probe"]] == [1]
+    assert {r["id"] for r in state["pipeline"]["review_candidates"]} == {bad, *others}
+    db.ex("UPDATE experiments SET created_at=0 WHERE id=?", (good,))
+    assert c.get("/api/state").json()["pipeline"]["live"]["probes"] == 1
     r = c.post(f"/api/control/probe_{good}", headers=h)
-    assert r.status_code == 409 and "as a strategy" in r.json()["detail"]
+    assert r.status_code == 409 and "as a probe" in r.json()["detail"]
 
 
 def test_strategy_api_lists_symbols_with_holdings(env):

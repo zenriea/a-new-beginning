@@ -289,3 +289,30 @@ test("universe text parses to clean symbols and a diff", async () => {
   assert.deepEqual(parseSymbols(""), []);
   assert.deepEqual(symbolDiff(["QQQ", "TQQQ", "AAPL"], ["QQQ", "AAPL", "MSFT"]), { added: ["MSFT"], removed: ["TQQQ"] });
 });
+import { holdoutLabel } from "../web/ui-model.mjs";
+import { checkinSummary } from "../web/ui-model.mjs";
+
+test("cash-only NASDAQ probe shows its own market event unless paused", () => {
+  const crypto = { what: "Crypto bar", venue: "CRYPTO", kind: "signal" };
+  const stocks = { what: "Stock market opens", venue: "NASDAQ", kind: "market_open" };
+  const s = { ...normal(), positions: [], account: { cash: 100000, gross: 0 }, counts: { orders: 0, fills: 0 },
+    strategies: [{ venue: "NASDAQ", status: "active" }], pipeline: { live: { probes: 1 } },
+    agent: { next_actions: [crypto, stocks] } };
+  assert.equal(checkinSummary(s).next, stocks);
+  assert.match(checkinSummary(s).text, /^All \$100,000 is in cash\..*No orders or fills yet\.$/);
+  s.counts.orders = 1;
+  assert.doesNotMatch(checkinSummary(s).text, /No orders/);
+  s.agent.next_actions.pop();
+  assert.equal(checkinSummary(s).nextLabel, "Next desk event");
+  s.controls.paused = true;
+  assert.match(checkinSummary(s).text, /^Paused/);
+  assert.match(checkinSummary(s).next.what, /resumed/);
+});
+
+test("window overlap distinguishes recorded zero from missing evidence", () => {
+  assert.equal(holdoutLabel(0, 7), "0 overlapping tests · 7-day lookback");
+  assert.equal(holdoutLabel(null), "Test window overlap unknown");
+  assert.equal(holdoutLabel(undefined), "Test window overlap unknown");
+  assert.equal(holdoutLabel(1), "1 overlapping test · lookback not recorded");
+  assert.equal(holdoutLabel(29, 60), "29 overlapping tests · 60-day lookback");
+});
