@@ -334,7 +334,13 @@ function themedChartOptions() {
   return {
     layout: { background: { type: "solid", color: cssVar("--surface-1") }, textColor: cssVar("--text-secondary"), fontFamily: cssVar("--mono") || "monospace", fontSize: 12, attributionLogo: false },
     grid: { vertLines: { visible: false }, horzLines: { color: cssVar("--border"), style: 2 } },
-    rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false, timeVisible: true },
+    rightPriceScale: { borderVisible: false },
+    timeScale: { borderVisible: false, timeVisible: true,
+      // 24-hour times; a day change reads "Nov 19", never a bare day number
+      tickMarkFormatter: (t, type) => { const d = new Date(t * 1000);
+        return type <= 1 ? d.toLocaleDateString(undefined, { month: "short", year: "numeric" })
+          : type === 2 ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+          : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }); } },
     crosshair: { mode: 0 },
     // Enough decimals for the visible range: a flat $100,000 account must not show "$100,000" four times.
     localization: { priceFormatter: (v) => Math.abs(v) >= 1000
@@ -383,6 +389,11 @@ function renderEquity() {
   note.textContent = !state.equityRows.length ? "No equity snapshots yet. The worker records the account once per minute." :
     "No snapshots in this period. Choose All to see the recorded history.";
   c.chart.timeScale().fitContent();
+  // leave room so the first time label is not clipped at the left edge
+  requestAnimationFrame(() => {
+    const ts = c.chart.timeScale(), range = ts.getVisibleLogicalRange();
+    if (range) ts.setVisibleLogicalRange({ from: range.from - Math.max(1, (range.to - range.from) * .03), to: range.to + Math.max(1, (range.to - range.from) * .03) });
+  });
   const bs = state.s?.account.benchmark_symbol || "QQQ";
   const live = (state.s?.positions.length || 0) > 0;
   c.acct.applyOptions({ lineColor: cssVar(live ? "--live" : "--text-primary"), topColor: live ? cssVar("--live-soft") : "rgba(0,0,0,0)" });
@@ -560,7 +571,7 @@ async function renderTab({ quiet = false } = {}) {
 function gatesCell(e) {
   if (!e.gates) return `<span class="muted">${e.error ? "could not run" : "not evaluated"}</span>`;
   const failed = e.gates?.failed || [], total = e.gates?.checks?.length || 9;
-  if (!failed.length) return `<span class="pass">${gateCount(total, 0)}</span>`;
+  if (!failed.length) return `<span class="passed-text">${gateCount(total, 0)}</span>`;
   const shown = failed.slice(0, 2), rest = failed.slice(2);
   return `<span class="gate-count">${gateCount(total, failed.length)}</span><div class="chips" aria-label="Failed gates: ${esc(failed.map(gateLabel).join(", "))}">${
     shown.map((f) => `<span class="gchip">${esc(gateLabel(f))}</span>`).join("")}${rest.length ? `<span class="gchip more">+${rest.length} more</span>` : ""}</div>`;
@@ -731,7 +742,7 @@ async function renderSystem(body, version) {
         ${state.s.controls.drawdown_halt ? `<button class="btn" data-ctl="reset_drawdown_halt">Reset drawdown halt…</button>` : ""}
         ${state.s.controls.system_halt ? `<button class="btn" data-ctl="clear_system_halt">Clear ledger halt…</button>` : ""}</div></div></div></div>
     <div class="section"><h4>Integrity & isolation</h4><div class="secondary small-text">
-      Ledger rebuilt from fills: <b class="${sys.integrity.ok ? "pass" : "err"}">${sys.integrity.ok ? "matches" : "MISMATCH"}</b> (cash ${money(sys.integrity.cash, 2)}).
+      Ledger rebuilt from fills: <b class="${sys.integrity.ok ? "passed-text" : "err"}">${sys.integrity.ok ? "matches" : "MISMATCH"}</b> (cash ${money(sys.integrity.cash, 2)}).
       Research-code sandbox: ${esc(sys.sandbox.mode)}, env ${esc(sys.sandbox.env)}, network namespace ${sys.sandbox.network_namespace ? "yes" : "no"},
       ${sys.sandbox.mode === "local" && !sys.sandbox.local_supported ? "<b>Python sandbox unavailable: requires Linux/Docker.</b>" : ""}
       ${sys.sandbox.cpu_seconds}s CPU / ${sys.sandbox.memory_mb} MB. LLM: ${esc(sys.llm.demo ? "demo (no key)" : sys.llm.model + " · effort " + sys.llm.effort)},
@@ -1148,6 +1159,22 @@ function edgeCue(el) {
   update();
 }
 edgeCue($(".sidebar")); edgeCue($("#tabs"));
+// Figures inside prose (counts, money, times, percentages) render in the mono face; words stay in the UI face.
+const FIGURE = /(^|[\s(·/,:])([−+-]?[#$]?\d[\d,.:]*(?:%| ?bp|[hmsd×])?)(?=$|[\s),·/;.:]|,\s)/g;
+const SKIP = "code, pre, script, style, svg, input, textarea, select, .num, .kpi .value, .funnel-n, .entry-title, .verdict, h2, h3, h4";
+function monoFigures(root) {
+  if (!root || root.nodeType !== 1 || root.closest?.(SKIP)) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) =>
+    !/\d/.test(n.nodeValue) || n.parentElement?.closest(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const html = esc(n.nodeValue).replace(FIGURE, (m, lead, fig) => `${lead}<span class="num">${fig}</span>`);
+    if (html === esc(n.nodeValue)) continue;
+    const span = document.createElement("span"); span.innerHTML = html; n.replaceWith(...span.childNodes);
+  }
+}
+new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n) => monoFigures(n.nodeType === 3 ? n.parentElement : n))))
+  .observe(document.body, { childList: true, subtree: true });
 // #experiment-2, #strategy-1 and #order-5 open that record's drawer.
 function openFromHash() {
   const m = /^#(experiment|strategy|order)-(\d+)$/.exec(location.hash);

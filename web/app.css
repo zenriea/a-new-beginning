@@ -79,7 +79,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .hidden { display: none !important; }
 /* direction is carried by sign and a drawn mark; colour is reserved for state */
 .up, .down { color: var(--text-primary); }
-.pass { color: var(--good); }
+.passed-text { color: var(--good); }
 .err { color: var(--critical); }
 .spacer { flex: 1; }
 
@@ -316,7 +316,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .entry::after { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 1px; background: var(--border); }
 .entry.k-hypothesis, .entry.k-research, .entry.k-observation { --k: var(--accent); }
 .entry.k-test { --k: var(--violet); }
-.entry.k-decision, .entry.k-review { --k: var(--good-mark); }
+.entry.k-decision, .entry.k-review { --k: var(--accent); }
 .entry.k-intent, .entry.k-order, .entry.k-fill { --k: var(--series-3); }
 .entry.k-risk { --k: var(--critical-mark); }
 .entry.k-data { --k: var(--warning-mark); }
@@ -393,7 +393,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .toast { --t: var(--accent); display: flex; gap: 12px; align-items: flex-start; padding: 13px 12px 13px 15px; border-radius: 6px;
   background: var(--surface-2);
   border: 1px solid var(--border-strong); box-shadow: var(--shadow-lg); color: var(--text-primary); animation: toastin .28s cubic-bezier(.2, .8, .2, 1); }
-.toast.good { --t: var(--good-mark); }
+.toast.good { --t: var(--accent); }
 .toast.bad { --t: var(--critical-mark); }
 .toast.clickable { cursor: pointer; }
 .toast.clickable:hover { border-color: var(--t); }
@@ -762,9 +762,8 @@ a { text-underline-offset: 3px; }
 }
 
 /* every figure in the mono face */
-.entry-meta > span:last-child, .desk-health small, .kpi .sub, .cand-main small, .badge, .funnel small, .timeline-legend .muted,
-.now-detail .muted, .evidence, .research-summary, .cell-sub, .ceilings, .form-status, .checkin-rows .muted, .audit .num { font-family: var(--mono); }
-.badge, .kpi .sub, .cand-main small, .cell-sub { letter-spacing: -.01em; }
+/* figure-only elements set whole in mono; everywhere else the figures inside words are wrapped in .num at render */
+.entry-meta > span:last-child, .desk-health small, .timeline-legend .muted, #equity-since, .audit .num { font-family: var(--mono); }
 .mark-svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -1px; }
 .mark-svg.fill { fill: currentColor; stroke: none; width: 10px; height: 10px; margin-right: 3px; }
 .gate .mark .mark-svg { width: 12px; height: 12px; }
