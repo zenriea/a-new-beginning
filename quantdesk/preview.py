@@ -50,7 +50,7 @@ def preview_environment(data_dir: Path, port: int, parent: dict | None = None) -
         "ANTHROPIC_API_KEY": "", "QD_LLM_API_KEY": "",
         "ALPACA_API_KEY_ID": "", "ALPACA_API_SECRET_KEY": "",
         "QD_BIND_HOST": "127.0.0.1", "QD_PORT": str(port),
-        "QD_ADMIN_PASSWORD": "", "QD_COOKIE_SECURE": "0",
+        "QD_ADMIN_PASSWORD": "", "QD_VIEWER_PASSWORD": "", "QD_COOKIE_SECURE": "0",
         "QD_TRUSTED_PROXIES": "", "QD_SANDBOX_MODE": "local",
     })
     return env

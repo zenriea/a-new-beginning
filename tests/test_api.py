@@ -53,7 +53,7 @@ def test_static_ui_served(client):
 
 def test_refreshed_ui_assets_and_module_are_served(client):
     page = client.get("/")
-    assert "20261119-console" in page.text
+    assert "20261119-seams" in page.text
     assert 'class="sidebar"' in page.text and 'id="equity-ranges"' in page.text and 'id="pipeline-body"' in page.text
     for path in ("/static/app.css", "/static/app.js", "/static/ui-model.mjs"):
         response = client.get(path)
@@ -207,3 +207,74 @@ def test_emergency_stop_records_a_receipt_and_bounds_are_published(client):
     assert controls["emergency_stop"] is True and controls["emergency_stop_at"] and controls["emergency_cancelled"] == 0
     bounds = client.get("/api/system").json()["bounds"]
     assert bounds["risk.max_gross_pct"][1] <= 1.0 and bounds["gates.min_test_trades"] == [1, 1000]
+
+
+@pytest.fixture()
+def viewer_client(env, monkeypatch):
+    import importlib
+    monkeypatch.setenv("QD_ADMIN_PASSWORD", "correct horse")
+    monkeypatch.setenv("QD_VIEWER_PASSWORD", "just looking around")
+    from quantdesk.config import load_config
+    load_config(reload=True)
+    import quantdesk.api.app as appmod
+    appmod = importlib.reload(appmod)
+    from fastapi.testclient import TestClient
+    return TestClient(appmod.app)
+
+
+def test_viewer_password_gives_a_read_only_session(viewer_client):
+    c = viewer_client
+    r = c.post("/api/login", json={"password": "just looking around"})
+    assert r.status_code == 200 and r.json()["role"] == "viewer"
+    assert c.get("/api/session").json()["role"] == "viewer"
+    for path in ("/api/state", "/api/equity", "/api/journal", "/api/experiments", "/api/strategies",
+                 "/api/orders", "/api/fills", "/api/universe"):
+        assert c.get(path).status_code == 200, path
+    # operator-only reads: limits, audit log, jobs, model prompts
+    for path in ("/api/system", "/api/llm_calls", "/api/llm_calls/1"):
+        assert c.get(path).status_code == 403, path
+    w = {"X-QD": "1"}
+    for path in ("/api/control/pause", "/api/control/emergency_stop", "/api/gate-presets/strict"):
+        assert c.post(path, headers=w).status_code == 403, path
+    assert c.post("/api/settings/risk", json={"max_gross_pct": 0.5}, headers=w).status_code == 403
+    assert c.post("/api/ask", json={"question": "why?"}, headers=w).status_code == 403
+    from quantdesk import settings
+    assert settings.get("agent")["paused"] is not True
+    assert c.post("/api/logout").status_code == 403                  # logout still needs the CSRF header
+    assert c.post("/api/logout", headers=w).status_code == 200
+    assert c.get("/api/state").status_code == 401
+
+
+def test_operator_session_unchanged_when_viewer_password_is_set(viewer_client):
+    c = viewer_client
+    assert c.post("/api/login", json={"password": "correct horse"}).json()["role"] == "operator"
+    assert c.get("/api/session").json()["role"] == "operator"
+    assert c.get("/api/system").status_code == 200
+    assert c.post("/api/control/pause", headers={"X-QD": "1"}).status_code == 200
+
+
+def test_viewer_cookie_cannot_be_promoted(viewer_client):
+    import quantdesk.api.app as appmod
+    c = viewer_client
+    c.post("/api/login", json={"password": "just looking around"})
+    token = c.cookies.get("qd_session")
+    payload, mac = token.split(".", 1)
+    exp = payload.split("-")[0]
+    for forged in (f"{exp}.{mac}", f"{exp}-operator.{mac}", f"{exp}-admin.{mac}"):
+        c.cookies.clear()
+        c.cookies.set("qd_session", forged)
+        assert c.get("/api/state").status_code == 401, forged
+        assert c.get("/api/system").status_code == 401, forged
+    c.cookies.clear()
+    c.cookies.set("qd_session", token)
+    assert c.get("/api/state").status_code == 200 and c.get("/api/system").status_code == 403
+    assert appmod._role(appmod._sign(int(exp))) == "operator"
+
+
+@pytest.mark.parametrize("admin,viewer", [("correct horse", "correct horse"), ("correct horse", "short"), ("", "just looking around")])
+def test_rejects_unsafe_viewer_password(env, monkeypatch, admin, viewer):
+    monkeypatch.setenv("QD_ADMIN_PASSWORD", admin)
+    monkeypatch.setenv("QD_VIEWER_PASSWORD", viewer)
+    from quantdesk.config import load_config
+    with pytest.raises(ValueError, match="QD_VIEWER_PASSWORD"):
+        load_config(reload=True)

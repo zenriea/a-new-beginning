@@ -846,3 +846,30 @@ body, .sidebar, .topbar { background-image: radial-gradient(circle at 1px 1px, v
   text-transform: uppercase; letter-spacing: .06em; background: var(--surface-1); border-bottom: 1px solid var(--border); }
 .log-day:not(:first-child) { border-top: 1px solid var(--border); }
 @media (max-width: 640px) { .log-day { margin: 0 -16px; padding: 7px 16px; } }
+
+/* sortable research columns: the header is a button, the arrow shows the order */
+.tbl th .sort { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: none; color: inherit;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; border-radius: 4px; }
+.tbl th.r .sort { flex-direction: row-reverse; }
+.tbl th .sort svg { width: 9px; height: 9px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; opacity: .45; }
+.tbl th[aria-sort="ascending"], .tbl th[aria-sort="descending"] { color: var(--text-primary); }
+.tbl th[aria-sort="ascending"] .sort svg, .tbl th[aria-sort="descending"] .sort svg { opacity: 1; color: var(--accent); }
+.tbl th .sort:hover { color: var(--text-primary); }
+
+/* keyboard shortcuts list */
+.key-list { margin: 0; display: grid; gap: 0; border: 1px solid var(--border); border-radius: 5px; }
+.key-list div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 8px 12px; font-size: 13.5px; }
+.key-list div + div { border-top: 1px solid var(--border); }
+.key-list dd { margin: 0; color: var(--text-secondary); }
+kbd { display: inline-block; min-width: 24px; padding: 1px 6px; font: 600 12px var(--mono); text-align: center; color: var(--text-primary);
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; }
+.key-note { margin: 12px 0 0; font-size: 12.5px; }
+.keys-hint { display: inline-flex; align-items: center; gap: 6px; margin: -8px 0 16px; padding: 0; border: 0; background: none;
+  color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; }
+.keys-hint:hover { color: var(--text-primary); }
+.keys-hint kbd { min-width: 20px; padding: 0 5px; }
+@media (hover: none) { .keys-hint { display: none; } }
+
+/* read-only view: people you show results to see the desk, never its controls */
+:root[data-role="viewer"] .operator-only { display: none !important; }
+.badge.viewer { background: var(--surface-1); border-color: var(--accent); color: var(--accent); }

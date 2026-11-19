@@ -30,7 +30,10 @@ def test_workspace_has_unique_targets_and_preserves_accessible_record_tabs():
     page = Page()
     page.feed((ROOT / "web" / "index.html").read_text(encoding="utf-8"))
     assert len(page.ids) == len(set(page.ids))
-    assert all(target in page.ids for target in page.targets)
+    # in-page anchors resolve to an element, or to a records-tab route the app opens (#limits, #orders, ...)
+    routes = {"research", "strategies", "orders", "market", "limits"}
+    assert all(target in page.ids or target in routes for target in page.targets)
+    assert "limits" in page.targets
     assert {tab["data-tab"] for tab in page.tabs} == {"research", "strategies", "orders", "market", "system"}
     assert sum(tab.get("aria-selected") == "true" for tab in page.tabs) == 1
     assert all(tab["aria-controls"] == "tab-body" for tab in page.tabs)
