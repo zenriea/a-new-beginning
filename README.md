@@ -148,6 +148,11 @@ The stock venue is called NASDAQ in the code and UI, but it covers any Alpaca-li
 * **Remote access**: a password login sets an HMAC-signed, expiring, HttpOnly SameSite=Strict
   cookie; writes require an `X-QD` header (CSRF protection); login is rate-limited; strict CSP.
   Without a password only localhost is served. Secrets stay server-side.
+* **Read-only view**: set `QD_VIEWER_PASSWORD` (12+ characters, different from the operator
+  password) to give people you show results to their own login. They see the desk, journal and
+  records, but no controls, limits, audit log or model prompts; the server refuses every write.
+* **Keyboard**: press `?` in the dashboard for shortcuts. Emergency stop deliberately has none.
+  Records tabs have their own addresses, e.g. `/#limits` opens Limits & system.
 * **Grounded language**: every journal entry stores the record IDs it refers to. LLM-written
   entries link to the exact prompt and response (`llm_calls`). Q&A drops citations to records that
   don't exist. Fills, intents, data and risk entries are written by deterministic code, never by

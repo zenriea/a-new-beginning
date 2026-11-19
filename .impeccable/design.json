@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-19T12:00:00Z",
+  "generatedAt": "2026-11-19T18:00:00Z",
   "title": "Design System: QuantDesk",
   "extensions": {
     "colorMeta": {
@@ -343,6 +343,20 @@
           "#e2e2e2",
           "#ffffff"
         ]
+      },
+      "on-warning": {
+        "role": "tertiary",
+        "displayName": "On Warning",
+        "canonical": "#1a1300",
+        "cssVar": "--on-warning",
+        "daylight": "#1a1300"
+      },
+      "grid-dot": {
+        "role": "neutral",
+        "displayName": "Grid Dot",
+        "canonical": "rgba(230, 237, 243, .07)",
+        "cssVar": "--grid-dot",
+        "daylight": "rgba(17, 21, 27, .11)"
       },
       "benchmark-grey": {
         "role": "neutral",
