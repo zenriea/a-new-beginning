@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  checkinSummary, holdoutLabel, journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=forward-performance";
+  checkinSummary, holdoutLabel, journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=candidate-alignment";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -528,14 +528,14 @@ function renderPipeline(s) {
           <small>${esc(s.venue)} · Forward paper test · ${esc(s.status)}</small></div></li>`).join("")}</ul>`
           : `<p class="muted">No paper probes running.</p>`}
         <h3>Candidates for review</h3>
-        ${review.length ? `<ul class="cands">${review.map((c) => `<li>
+        ${review.length ? `<ul class="cands review-candidates">${review.map((c) => `<li>
           <div class="cand-main"><a href="#" data-exp="${c.id}">#${c.id} ${esc(c.title)}</a>
             <small>${esc(c.venue)} · Sharpe ${num(c.sharpe)} · ${c.trades ?? "–"} trades · gates ${gateCount(c.n_checks, c.failed.length)}${c.passed && !c.allocated ? " · not allocated" : ""}</small></div>
            <div class="cand-result"><span class="cand-ret num ${signCls(c.test_return)}">Historical ${pct(c.test_return, 1)}</span>
             <small>${holdoutLabel(c.holdout_reuse_count, c.deflation_window_days)}</small></div>
-          ${c.failed.length ? `<span class="muted cand-note">Failed: ${c.failed.map((g) => esc(gateLabel(g))).join(", ")}</span>` : ""}
-          ${c.operator_blocker ? `<span class="muted cand-note">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
-            `<button class="btn small ${c.test_return > 0 && !c.probe_blocker ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Automatic probe skipped: " + c.probe_blocker : "Start a manual probe now with a small paper allocation")}">Start manual probe…</button>`}</li>`).join("")}</ul>`
+           ${c.failed.length ? `<span class="muted cand-gates">Failed: ${c.failed.map((g) => esc(gateLabel(g))).join(", ")}</span>` : ""}
+           ${c.operator_blocker ? `<span class="muted cand-action">${esc(c.operator_blocker)}</span>` : !isOperator() ? "" :
+             `<button class="btn small cand-action ${c.test_return > 0 && !c.probe_blocker ? "primary" : ""}" data-probe="${c.id}" title="${esc(c.probe_blocker ? "Automatic probe skipped: " + c.probe_blocker : "Start a manual probe now with a small paper allocation")}">Start manual probe…</button>`}</li>`).join("")}</ul>`
           : `<p class="muted">No recent experiments are available for a new manual probe.</p>`}</div>
       <div><h3>What blocks ideas</h3>
         ${p.gate_failures.length ? `<ul class="bars">${p.gate_failures.slice(0, 6).map((g) => `<li><span>${esc(gateLabel(g.gate))}</span>
