@@ -7,9 +7,9 @@
   <meta name="description" content="Autonomous AI quant research and paper-trading desk">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="/static/app.css?v=20261118-24h">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0b'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400..700&display=swap">
+  <link rel="stylesheet" href="/static/app.css?v=20261119-console">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='%2379c0ff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
   <div id="login-view" class="hidden">
@@ -20,7 +20,7 @@
       <form id="login-form">
         <input type="password" id="login-pw" aria-label="Operator password" placeholder="Password" autocomplete="current-password" required>
         <button class="btn" type="submit">Sign in</button>
-        <div id="login-err" class="down" style="margin-top:10px"></div>
+        <div id="login-err" class="err" style="margin-top:10px"></div>
       </form>
     </div>
   </div>
@@ -54,10 +54,13 @@
         <div class="desk-health" id="desk-health" role="status"><span class="health-indicator"></span><div><b>Connecting to the desk</b><small>Waiting for the first update</small></div></div>
         <div class="spacer"></div>
         <div class="operator-actions">
-          <button class="btn" id="btn-pause">Pause agent</button>
-          <button class="btn danger" id="btn-stop">Emergency stop</button>
           <button class="btn ghost theme-toggle" id="btn-theme" title="Toggle light/dark theme" aria-label="Toggle light/dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
           <button class="btn ghost hidden" id="btn-logout">Sign out</button>
+          <button class="btn" id="btn-pause"><span>Pause<span class="lbl-long"> agent</span></span></button>
+          <div class="kill-cell" role="group" aria-label="Emergency stop">
+            <button class="btn danger" id="btn-stop" aria-label="Emergency stop"><span class="lbl-long">Emergency stop</span><span class="lbl-short">Stop</span></button>
+            <button class="btn hidden" id="btn-clear-stop" aria-label="Clear emergency stop"><span class="lbl-long">Clear emergency stop</span><span class="lbl-short">Clear stop</span></button>
+          </div>
         </div>
       </header>
       <div class="statusbar"><div class="badges" id="badges" aria-label="Environment and service status"></div></div>
@@ -67,6 +70,7 @@
       <main class="layout" id="dashboard">
       <div class="col" id="overview" tabindex="-1">
         <h1 class="sr-only">QuantDesk overview</h1>
+        <section class="checkin" id="checkin" aria-label="Check-in summary"></section>
         <section class="kpis" id="kpis" aria-label="Performance summary"></section>
 
         <section class="card pipeline-card" id="pipeline" tabindex="-1" aria-labelledby="pipeline-heading">
@@ -120,9 +124,9 @@
         <div class="card">
           <div class="card-h"><h2 id="journal-heading">Analyst journal</h2><div class="spacer"></div><span class="badge" id="live-badge"><span class="dot"></span>connecting</span></div>
           <div class="filters" id="filters"></div>
-          <div class="feed" id="feed" aria-live="polite"></div>
+          <div class="feed" id="feed"></div>
           <div class="ask">
-            <label class="ask-label" for="ask-input"><span class="ask-spark" aria-hidden="true">✧</span> Ask the desk</label>
+            <label class="ask-label" for="ask-input">Ask the desk <span class="muted ask-note">answers cite stored records</span></label>
             <form id="ask-form">
               <input id="ask-input" placeholder="What’s behind the latest decision?" maxlength="500">
               <button class="btn ask-submit" type="submit" aria-label="Ask about desk records"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
@@ -138,6 +142,6 @@
 
   <div id="drawer-root"></div>
   <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-  <script type="module" src="/static/app.js?v=20261118-24h"></script>
+  <script type="module" src="/static/app.js?v=20261119-console"></script>
 </body>
 </html>

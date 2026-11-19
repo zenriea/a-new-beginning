@@ -100,10 +100,88 @@ test("trading verdict explains why nothing trades", async () => {
   const base = () => ({ controls: { emergency_stop: false, paused: false }, worker: { alive: true }, positions: [],
     pipeline: { finished: 4, live: { strategies: 0, probes: 0 }, gate_failures: [{ gate: "test_sharpe", n: 4 }],
       candidates: [{ id: 7, test_return: -0.02 }] } });
-  assert.match(tradingVerdict(base()).text, /None of the 4 experiments made money.*test sharpe \(4×\)/);
+  assert.match(tradingVerdict(base()).text, /None of the 4 experiments made money.*Test Sharpe \(4×\)/);
   const s = base(); s.pipeline.candidates[0] = { id: 9, test_return: 0.031, probe_blocker: "3 probe(s) already running (limit 3)" };
   assert.match(tradingVerdict(s).text, /#9 made \+3\.1%.*already running/);
-  s.pipeline.live.probes = 1; assert.equal(tradingVerdict(s).tone, "ok");
-  s.positions = [{}]; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 live sleeve\./);
+  s.pipeline.live.probes = 1; assert.equal(tradingVerdict(s).tone, "probe");  // probes are not evidence: never success green
+  s.pipeline.live.strategies = 1; assert.equal(tradingVerdict(s).tone, "ok"); s.pipeline.live.strategies = 0;
+  s.positions = [{}]; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 probe\./);
   s.controls.emergency_stop = true; assert.equal(tradingVerdict(s).tone, "bad");
+});
+
+test("probe-only positions are labelled as forward tests, not an edge", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const s = { controls: {}, worker: { alive: true }, positions: [{}], pipeline: { live: { strategies: 0, probes: 1 } } };
+  const v = tradingVerdict(s);
+  assert.equal(v.tone, "probe");
+  assert.match(v.text, /not evidence of an edge/);
+});
+
+test("raw gate keys in server text become the same labels the pipeline uses", async () => {
+  const { friendlyGates, gateLabel, gateCount } = await import("../web/ui-model.mjs");
+  assert.equal(friendlyGates("Failed gates: validation_sharpe, test_sharpe_delay_1bar, test_sharpe."),
+    "Failed gates: Validation Sharpe, 1-bar delay, Test Sharpe.");
+  assert.equal(gateLabel("test_trades"), "Min trades");
+  assert.equal(gateLabel("brand_new_gate"), "brand new gate");
+  assert.equal(gateCount(9, 4), "5 of 9 passed");
+  assert.equal(gateCount(9, 0), "9 of 9 passed");
+});
+
+test("limits are shown as percentages and read back as exact fractions", async () => {
+  const { toDisplay, fromDisplay, formatLimit } = await import("../web/ui-model.mjs");
+  assert.equal(toDisplay(0.07, "pct"), "7");
+  assert.equal(toDisplay(0.025, "pct"), "2.5");
+  assert.deepEqual(fromDisplay("7", "pct"), { value: 0.07 });
+  assert.deepEqual(fromDisplay("12.5%", "pct", [0, 1]), { value: 0.125 });
+  assert.match(fromDisplay("150", "pct", [0, 1]).error, /Allowed range is 0% to 100%/);
+  assert.match(fromDisplay("", "pct").error, /Enter a value/);
+  assert.match(fromDisplay("abc", "usd").error, /Enter a number/);
+  assert.match(fromDisplay("2.5", "int").error, /whole number/);
+  assert.equal(formatLimit(20000, "usd"), "$20,000");
+  assert.equal(formatLimit(7, "hour"), "07:00 UTC");
+});
+
+test("loosening is detected in the direction that adds risk", async () => {
+  const { changeDirection, LIMIT_FIELDS } = await import("../web/ui-model.mjs");
+  const f = (k) => LIMIT_FIELDS.find((x) => x.k === k);
+  assert.equal(changeDirection(f("max_drawdown_pct"), 0.1, 0.25), "loosens");
+  assert.equal(changeDirection(f("max_drawdown_pct"), 0.1, 0.05), "tightens");
+  assert.equal(changeDirection(f("min_test_sharpe"), 0.5, 0), "loosens");
+  assert.equal(changeDirection(f("min_test_trades"), 8, 20), "tightens");
+  assert.equal(changeDirection(f("enabled"), false, true), "loosens");
+  assert.equal(changeDirection(f("crypto_research_hours"), 2, 8), "changes");
+  for (const field of LIMIT_FIELDS) assert.ok([-1, 0, 1].includes(field.loosens), field.k);
+});
+
+test("a paused desk never reads as waiting to trade, in any live state", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const mk = (live, positions) => ({ controls: { paused: true }, worker: { alive: true }, positions,
+    pipeline: { finished: 3, live, candidates: [], gate_failures: [] } });
+  for (const [live, positions] of [[{ strategies: 0, probes: 0 }, []], [{ strategies: 0, probes: 1 }, []],
+    [{ strategies: 2, probes: 1 }, []], [{ strategies: 1, probes: 0 }, [{}, {}]]]) {
+    const v = tradingVerdict(mk(live, positions));
+    assert.equal(v.tone, "warn");
+    assert.match(v.text, /^Paused: no research and no new entries\./);
+    assert.doesNotMatch(v.text, /Waiting for entry|Trading:/);
+  }
+  assert.match(tradingVerdict(mk({ strategies: 0, probes: 1 }, [])).text, /1 probe keeps its sleeve/);
+  assert.match(tradingVerdict(mk({ strategies: 1, probes: 0 }, [{}, {}])).text, /2 open positions are held/);
+});
+
+test("each control state outranks the next: stop, worker, halt, pause", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const s = { controls: { emergency_stop: true, paused: true, drawdown_halt: true }, worker: { alive: false }, positions: [{}],
+    pipeline: { live: { strategies: 1, probes: 0 } } };
+  assert.match(tradingVerdict(s).text, /^Emergency stop/);
+  s.controls.emergency_stop = false; assert.match(tradingVerdict(s).text, /worker is offline/);
+  s.worker.alive = true; assert.match(tradingVerdict(s).text, /risk halt/);
+  s.controls.drawdown_halt = false; assert.match(tradingVerdict(s).text, /^Paused/);
+  s.controls.paused = false; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 strategy\./);
+});
+
+test("live labels count strategies and probes separately", async () => {
+  const { liveLabel } = await import("../web/ui-model.mjs");
+  assert.equal(liveLabel(1, 2), "1 strategy and 2 probes");
+  assert.equal(liveLabel(0, 1), "1 probe");
+  assert.equal(liveLabel(3, 0), "3 strategies");
 });

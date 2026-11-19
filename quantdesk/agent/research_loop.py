@@ -299,8 +299,12 @@ def probe_blocker(e: dict, operator: bool = False) -> str | None:
     stale = bar_size_mismatch(e)
     if stale:
         return stale
-    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=?", (e["id"],)):
-        return "this experiment already has a strategy"
+    existing = db.q1("SELECT probe, status FROM strategies WHERE experiment_id=? ORDER BY id DESC", (e["id"],))
+    if existing:
+        kind = "probe" if existing["probe"] else "strategy"
+        if existing["status"] in ("active", "incubating"):
+            return f"already trading as a {kind}"
+        return f"already ran as a {kind} ({existing['status']})"
     if settings.get("agent").get("emergency_stop"):
         return "emergency stop is active"
     if operator:

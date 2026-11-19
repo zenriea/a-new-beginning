@@ -1,0 +1,734 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-19T12:00:00Z",
+  "title": "Design System: QuantDesk",
+  "extensions": {
+    "colorMeta": {
+      "graphite-ground": {
+        "role": "neutral",
+        "displayName": "Graphite Ground",
+        "canonical": "oklch(17.6% 0.014 258.4)",
+        "cssVar": "--bg",
+        "daylight": "#f4f5f7",
+        "tonalRamp": [
+          "#090b0e",
+          "#222529",
+          "#3e4248",
+          "#5d6269",
+          "#7e838a",
+          "#a1a5ac",
+          "#c6c9cf",
+          "#eceff3"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "oklch(21.6% 0.018 259.7)",
+        "cssVar": "--surface-1",
+        "daylight": "#ffffff",
+        "tonalRamp": [
+          "#090b0f",
+          "#22252b",
+          "#3e4249",
+          "#5c626b",
+          "#7d838c",
+          "#a0a5ae",
+          "#c5c9d1",
+          "#ebeff4"
+        ]
+      },
+      "panel-raised": {
+        "role": "neutral",
+        "displayName": "Panel Raised",
+        "canonical": "oklch(24.6% 0.021 260.6)",
+        "cssVar": "--surface-2",
+        "daylight": "#f0f2f5",
+        "tonalRamp": [
+          "#090b10",
+          "#21252c",
+          "#3d424b",
+          "#5b626d",
+          "#7c838e",
+          "#9fa5b0",
+          "#c4c9d2",
+          "#eaeff6"
+        ]
+      },
+      "panel-pressed": {
+        "role": "neutral",
+        "displayName": "Panel Pressed",
+        "canonical": "oklch(28.3% 0.023 259.4)",
+        "cssVar": "--surface-3",
+        "daylight": "#e4e8ed",
+        "tonalRamp": [
+          "#080b10",
+          "#21252c",
+          "#3c424c",
+          "#5a626d",
+          "#7b838f",
+          "#9fa6b0",
+          "#c4cad3",
+          "#eaeff6"
+        ]
+      },
+      "seam": {
+        "role": "neutral",
+        "displayName": "Seam",
+        "canonical": "oklch(29.2% 0.020 260.6)",
+        "cssVar": "--border",
+        "daylight": "#d6dae0",
+        "tonalRamp": [
+          "#090b0f",
+          "#21252b",
+          "#3d424b",
+          "#5b626c",
+          "#7c838e",
+          "#9fa5af",
+          "#c4c9d2",
+          "#ebeff5"
+        ]
+      },
+      "seam-strong": {
+        "role": "neutral",
+        "displayName": "Seam Strong",
+        "canonical": "oklch(35.5% 0.023 261.2)",
+        "cssVar": "--border-strong",
+        "daylight": "#b9bfc8",
+        "tonalRamp": [
+          "#090b10",
+          "#21252c",
+          "#3d424c",
+          "#5a626e",
+          "#7b838f",
+          "#9fa5b1",
+          "#c4c9d3",
+          "#eaeff6"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(94.3% 0.011 243.7)",
+        "cssVar": "--text-primary",
+        "daylight": "#11151b",
+        "tonalRamp": [
+          "#090b0d",
+          "#222528",
+          "#3e4346",
+          "#5c6267",
+          "#7d8388",
+          "#a1a6aa",
+          "#c5cacd",
+          "#ebeff2"
+        ]
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Ink Secondary",
+        "canonical": "oklch(78.5% 0.017 250.9)",
+        "cssVar": "--text-secondary",
+        "daylight": "#3d4552",
+        "tonalRamp": [
+          "#090b0f",
+          "#21262a",
+          "#3d4349",
+          "#5b626a",
+          "#7b838c",
+          "#9fa6ad",
+          "#c4cad0",
+          "#eaeff4"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Ink Muted",
+        "canonical": "oklch(66.2% 0.018 250.9)",
+        "cssVar": "--text-muted",
+        "daylight": "#5c6573",
+        "tonalRamp": [
+          "#080b0f",
+          "#21262b",
+          "#3d4349",
+          "#5a626b",
+          "#7b838c",
+          "#9fa6ae",
+          "#c4cad1",
+          "#eaeff4"
+        ]
+      },
+      "keyword-blue": {
+        "role": "primary",
+        "displayName": "Keyword Blue",
+        "canonical": "oklch(78.6% 0.115 246.7)",
+        "cssVar": "--accent",
+        "daylight": "#1f5fd1",
+        "tonalRamp": [
+          "#000b21",
+          "#002746",
+          "#0d456f",
+          "#23659a",
+          "#4888bf",
+          "#75abdb",
+          "#a3cef7",
+          "#d1f3ff"
+        ]
+      },
+      "keyword-blue-bright": {
+        "role": "primary",
+        "displayName": "Keyword Blue Bright",
+        "canonical": "oklch(85.6% 0.077 244.1)",
+        "cssVar": "--accent-2",
+        "daylight": "#174aa6",
+        "tonalRamp": [
+          "#000c1a",
+          "#0d273b",
+          "#244560",
+          "#3c6687",
+          "#5d87aa",
+          "#85aac9",
+          "#afcde7",
+          "#daf2ff"
+        ]
+      },
+      "live-cyan": {
+        "role": "secondary",
+        "displayName": "Live Cyan",
+        "canonical": "oklch(75.5% 0.116 202.1)",
+        "cssVar": "--live",
+        "daylight": "#0b7a84",
+        "tonalRamp": [
+          "#001115",
+          "#002e34",
+          "#004f56",
+          "#00727b",
+          "#00959e",
+          "#56b6bd",
+          "#8ed8de",
+          "#c3fbff"
+        ]
+      },
+      "number-violet": {
+        "role": "secondary",
+        "displayName": "Number Violet",
+        "canonical": "oklch(69.4% 0.164 318.2)",
+        "cssVar": "--violet",
+        "daylight": "#8250df",
+        "tonalRamp": [
+          "#180020",
+          "#390d45",
+          "#5d256d",
+          "#843f98",
+          "#a761bc",
+          "#c78ad9",
+          "#e6b4f5",
+          "#ffdeff"
+        ]
+      },
+      "string-green": {
+        "role": "tertiary",
+        "displayName": "String Green",
+        "canonical": "oklch(77.2% 0.188 145.5)",
+        "cssVar": "--good",
+        "daylight": "#1a7f37",
+        "tonalRamp": [
+          "#001300",
+          "#003200",
+          "#005400",
+          "#00790a",
+          "#219c37",
+          "#62bd69",
+          "#96de99",
+          "#c8ffc9"
+        ]
+      },
+      "string-green-mark": {
+        "role": "tertiary",
+        "displayName": "String Green Mark",
+        "canonical": "oklch(69.5% 0.181 145.6)",
+        "cssVar": "--good-mark",
+        "daylight": "#1f883d",
+        "tonalRamp": [
+          "#001300",
+          "#003200",
+          "#005400",
+          "#007814",
+          "#299b3c",
+          "#65bc6c",
+          "#98dd9b",
+          "#c9ffcb"
+        ]
+      },
+      "warning-amber": {
+        "role": "tertiary",
+        "displayName": "Warning Amber",
+        "canonical": "oklch(79.0% 0.139 85.2)",
+        "cssVar": "--warning",
+        "daylight": "#8a5a00",
+        "tonalRamp": [
+          "#180700",
+          "#381f00",
+          "#5c3b00",
+          "#825900",
+          "#a57b00",
+          "#c4a04f",
+          "#e3c586",
+          "#ffecbb"
+        ]
+      },
+      "warning-amber-mark": {
+        "role": "tertiary",
+        "displayName": "Warning Amber Mark",
+        "canonical": "oklch(72.0% 0.140 79.9)",
+        "cssVar": "--warning-mark",
+        "daylight": "#bf8700",
+        "tonalRamp": [
+          "#190500",
+          "#3b1d00",
+          "#603800",
+          "#875600",
+          "#ab7800",
+          "#c99d4f",
+          "#e8c386",
+          "#ffeabb"
+        ]
+      },
+      "destructive-red": {
+        "role": "tertiary",
+        "displayName": "Destructive Red",
+        "canonical": "oklch(73.4% 0.163 25.8)",
+        "cssVar": "--critical",
+        "daylight": "#c2302f",
+        "tonalRamp": [
+          "#240000",
+          "#4c0306",
+          "#771b1b",
+          "#a63331",
+          "#cd5851",
+          "#ea847b",
+          "#ffafa6",
+          "#ffdbd3"
+        ]
+      },
+      "destructive-red-mark": {
+        "role": "tertiary",
+        "displayName": "Destructive Red Mark",
+        "canonical": "oklch(66.5% 0.205 27.0)",
+        "cssVar": "--critical-mark",
+        "daylight": "#cf222e",
+        "tonalRamp": [
+          "#290000",
+          "#540000",
+          "#820005",
+          "#b4161a",
+          "#dd453e",
+          "#f9786d",
+          "#ffa79b",
+          "#ffd5ca"
+        ]
+      },
+      "on-danger": {
+        "role": "tertiary",
+        "displayName": "On Danger",
+        "canonical": "oklch(100% 0 0)",
+        "cssVar": "--on-danger",
+        "daylight": "#ffffff",
+        "tonalRamp": [
+          "#1f1f1f",
+          "#3b3b3b",
+          "#5e5e5e",
+          "#848484",
+          "#a8a8a8",
+          "#c6c6c6",
+          "#e2e2e2",
+          "#ffffff"
+        ]
+      },
+      "benchmark-grey": {
+        "role": "neutral",
+        "displayName": "Benchmark Grey",
+        "canonical": "oklch(71.5% 0.023 256.8)",
+        "cssVar": "--series-2",
+        "daylight": "#5c6573",
+        "tonalRamp": [
+          "#080b0f",
+          "#21262b",
+          "#3d4349",
+          "#5a626b",
+          "#7b838c",
+          "#9fa6ae",
+          "#c4cad1",
+          "#eaeff4"
+        ]
+      },
+      "benchmark-grey-dim": {
+        "role": "neutral",
+        "displayName": "Benchmark Grey Dim",
+        "canonical": "oklch(56.2% 0.028 257.7)",
+        "cssVar": "--series-3",
+        "daylight": "#8a929e",
+        "tonalRamp": [
+          "#070b12",
+          "#1f2530",
+          "#3a4350",
+          "#576274",
+          "#788396",
+          "#9ca6b8",
+          "#c1cad9",
+          "#e8effb"
+        ]
+      }
+    },
+    "themes": {
+      "default": "dark",
+      "switch": "data-theme attribute on <html>, preference stored as qd-theme; prefers-color-scheme dark applies when no explicit light choice",
+      "daylight": {
+        "note": "Same token names and roles; values listed per token under colorMeta.<token>.daylight. accent-ink is #ffffff in daylight, graphite ground in dark; on-danger is #ffffff in both."
+      }
+    },
+    "derivedTints": [
+      {
+        "name": "accent-soft",
+        "value": "rgba(121,192,255,.12)",
+        "daylight": "rgba(31,95,209,.09)",
+        "purpose": "Selected filter chips, focus halo, queued-time tags, confidence tags, fresh journal entry flash."
+      },
+      {
+        "name": "live-soft",
+        "value": "rgba(57,197,207,.13)",
+        "daylight": "rgba(11,122,132,.10)",
+        "purpose": "Live funnel cell, live nav count, live account-area fill."
+      },
+      {
+        "name": "good-soft",
+        "value": "rgba(63,185,80,.13)",
+        "daylight": "rgba(31,136,61,.10)",
+        "purpose": "Passed and active status tags, strategy chips, passed gate marks."
+      },
+      {
+        "name": "warning-soft",
+        "value": "rgba(210,153,34,.14)",
+        "daylight": "rgba(191,135,0,.13)",
+        "purpose": "Warning alerts, loosening limit changes, caveats."
+      },
+      {
+        "name": "critical-soft",
+        "value": "rgba(248,81,73,.12)",
+        "daylight": "rgba(207,34,46,.09)",
+        "purpose": "Critical alerts, failed status, gate-fail marks."
+      },
+      {
+        "name": "violet-tint",
+        "value": "color-mix(in srgb, var(--violet) 14%, transparent)",
+        "purpose": "Probe chips and probe nav count."
+      },
+      {
+        "name": "state-band",
+        "value": "color-mix(in srgb, <state> 8%, var(--surface-1))",
+        "purpose": "Check-in verdict band background, with a 30% state seam."
+      }
+    ],
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Verdict",
+        "purpose": "The check-in verdict line; 17px on phones."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Drawer and dialog headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default copy."
+      },
+      "body-dense": {
+        "displayName": "Dense body",
+        "purpose": "Tables, lists and panel prose."
+      },
+      "panel-title": {
+        "displayName": "Panel title",
+        "purpose": "Uppercase tracked panel headers; 12px variant for table headers, drawer section heads and rail group labels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Metadata, hints, tag and status text (tabular numerals) and the 12px text floor."
+      },
+      "figure-lg": {
+        "displayName": "Figure large",
+        "purpose": "Funnel counts and research totals."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Account and summary values (account tiles clamp 19-22px)."
+      },
+      "figure-sm": {
+        "displayName": "Figure small",
+        "purpose": "Inline figures (wrapped in mono at render), timestamps, units, chart axes, the PAPER tag."
+      }
+    },
+    "shadows": [
+      {
+        "name": "none",
+        "value": "none",
+        "purpose": "Every resting surface."
+      },
+      {
+        "name": "overlay",
+        "value": "0 16px 48px rgba(0,0,0,.55)",
+        "daylight": "0 16px 48px rgba(17,21,27,.18)",
+        "purpose": "Drawer, confirmation dialog, toasts only (the sign-in card is flat)."
+      },
+      {
+        "name": "seam-ring",
+        "value": "inset 0 0 0 1px var(--border)",
+        "purpose": "Active nav item and selected segment instead of a lift."
+      },
+      {
+        "name": "focus-halo",
+        "value": "0 0 0 4px var(--accent-soft)",
+        "purpose": "Focused text and unit inputs, with a Keyword Blue border."
+      },
+      {
+        "name": "scrim",
+        "value": "rgba(4,6,10,.62)",
+        "purpose": "Backdrop behind drawer and dialogs."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "150ms ease",
+        "purpose": "Background, border and colour changes on controls."
+      },
+      {
+        "name": "drawer-in",
+        "value": "220ms cubic-bezier(.16,1,.3,1)",
+        "purpose": "Drawer slide from 40px right."
+      },
+      {
+        "name": "toast-in",
+        "value": "280ms cubic-bezier(.2,.8,.2,1)",
+        "purpose": "Toast slide from 24px right."
+      },
+      {
+        "name": "working-pulse",
+        "value": "1.6s ease-out infinite",
+        "purpose": "Agent activity dot while working."
+      },
+      {
+        "name": "halt-blink",
+        "value": "1.2s steps(2) infinite",
+        "purpose": "Desk-health dot when the desk is halted or erroring."
+      },
+      {
+        "name": "fresh-entry",
+        "value": "2.8s ease-out",
+        "purpose": "New journal entry fades from a blue tint."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "none",
+        "purpose": "All pulses, blinks and slides switch off under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "640px"
+      },
+      {
+        "name": "rail-collapse",
+        "value": "900px"
+      },
+      {
+        "name": "single-column",
+        "value": "1260px"
+      },
+      {
+        "name": "narrow-journal",
+        "value": "1480px"
+      },
+      {
+        "name": "container-desk-pair",
+        "value": "760px (container)"
+      },
+      {
+        "name": "container-account-strip",
+        "value": "680px (container)"
+      }
+    ],
+    "fonts": {
+      "source": "Google Fonts, variable weight ranges Hanken Grotesk 400..700 and JetBrains Mono 400..700",
+      "note": "550 and 650 are real weights."
+    },
+    "chart": {
+      "library": "Lightweight Charts (vendored), attributionLogo off, credit link in the legend",
+      "account": "Ink 2.5px with last-value label; Live Cyan with live-soft area only while positions are open",
+      "benchmarks": "benchmark-grey dashed (lineStyle 2) for QQQ, benchmark-grey-dim dotted (lineStyle 1) for BTC-USD, 1.5px, no last-value labels",
+      "axis": "mono 12px, Ink Secondary text, dashed seam horizontal grid, no vertical grid",
+      "ticks": "24-hour times; short date (\"Nov 19\") at day changes; month and year for coarser ticks",
+      "priceMarkers": "buy keyword-blue arrow up, sell benchmark-grey arrow down"
+    }
+  },
+  "components": [
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Neutral seamed button for ordinary actions such as Pause agent.",
+      "html": "<button class=\"ds-btn\">Pause agent</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; gap:7px; font:550 13px/1.2 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); padding:8px 14px; border-radius:5px; border:1px solid var(--border-strong); background:var(--surface-1); color:var(--text-primary); cursor:pointer; transition:background .15s, border-color .15s; } .ds-btn:hover { background:var(--surface-2); border-color:var(--text-muted); } .ds-btn:active { background:var(--surface-3); } .ds-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one forward action in a form or dialog.",
+      "html": "<button class=\"ds-btn-primary\">Save limits</button>",
+      "css": ".ds-btn-primary { font:550 13px/1.2 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); padding:8px 14px; border-radius:5px; border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink); cursor:pointer; transition:background .15s, border-color .15s; } .ds-btn-primary:hover { background:var(--accent-2); border-color:var(--accent-2); } .ds-btn-primary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive control (Emergency stop, Flatten all, Retire): dashed red outline that fills only on deliberate hover or focus.",
+      "html": "<button class=\"ds-btn-danger\">Flatten all positions…</button>",
+      "css": ".ds-btn-danger { font:650 13px/1.2 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); padding:8px 14px; border-radius:5px; border:1px dashed color-mix(in srgb, var(--critical-mark) 75%, transparent); background:transparent; color:var(--critical); cursor:pointer; transition:background .15s, border-color .15s, color .15s; } .ds-btn-danger:hover, .ds-btn-danger:focus-visible { background:var(--critical-mark); border-style:solid; border-color:var(--critical-mark); color:var(--on-danger, #fff); } .ds-btn-danger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }"
+    },
+    {
+      "name": "Kill Cell",
+      "kind": "custom",
+      "refersTo": "button-danger",
+      "description": "The emergency stop standing alone behind a seam at the end of the top bar, after the theme toggle and Pause.",
+      "html": "<div class=\"ds-kill-row\"><button class=\"ds-kill-theme\" aria-label=\"Toggle light/dark theme\"><svg viewBox=\"0 0 24 24\"><path d=\"M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z\"/></svg></button><button class=\"ds-kill-pause\">Pause agent</button><div class=\"ds-kill-cell\" role=\"group\" aria-label=\"Emergency stop\"><button class=\"ds-kill-stop\">Emergency stop</button></div></div>",
+      "css": ".ds-kill-row { display:flex; align-items:center; gap:8px; padding:12px 16px; background:var(--bg); } .ds-kill-pause { font:550 13px/1.2 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); padding:8px 14px; border-radius:5px; border:1px solid var(--border-strong); background:var(--surface-1); color:var(--text-primary); } .ds-kill-cell { display:flex; align-items:center; margin-left:16px; padding-left:16px; border-left:1px solid var(--border-strong); } .ds-kill-stop { font:650 13px/1.2 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); letter-spacing:.01em; padding:8px 14px; border-radius:5px; border:1px dashed color-mix(in srgb, var(--critical-mark) 75%, transparent); background:transparent; color:var(--critical); cursor:pointer; transition:background .15s, color .15s; } .ds-kill-stop:hover, .ds-kill-stop:focus-visible { background:var(--critical-mark); border-style:solid; border-color:var(--critical-mark); color:var(--on-danger, #fff); } .ds-kill-theme { display:inline-grid; place-items:center; padding:8px; margin-right:4px; border:1px solid transparent; border-radius:5px; background:transparent; color:var(--text-primary); cursor:pointer; transition:background .15s; } .ds-kill-theme:hover { background:var(--surface-2); } .ds-kill-theme svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }"
+    },
+    {
+      "name": "Status Tag",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "Mode and state tags: 4px corners, UI-face text with tabular numerals, a state dot; healthy dots are blue, green only for passed; never a pill.",
+      "html": "<span class=\"ds-tag ds-tag-paper\">PAPER · no real money</span> <span class=\"ds-tag ds-tag-ok\"><i></i>Worker running</span> <span class=\"ds-tag ds-tag-warn\"><i></i>SYNTHETIC market data</span> <span class=\"ds-tag ds-tag-pass\"><i></i>passed</span> <span class=\"ds-tag ds-tag-probe\">probe</span>",
+      "css": ".ds-tag { display:inline-flex; align-items:center; gap:7px; font:550 12px/1.5 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); font-variant-numeric:tabular-nums; padding:3px 10px; border-radius:4px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-secondary); white-space:nowrap; } .ds-tag i { width:6px; height:6px; border-radius:50%; background:var(--text-muted); } .ds-tag-paper { background:var(--surface-1); border-color:var(--text-muted); color:var(--text-primary); font-family:var(--mono, 'JetBrains Mono', ui-monospace, monospace); font-weight:600; letter-spacing:.04em; } .ds-tag-ok i { background:var(--accent); } .ds-tag-warn { color:var(--warning); } .ds-tag-warn i { background:var(--warning-mark); } .ds-tag-pass { background:var(--good-soft); border-color:transparent; color:var(--good); } .ds-tag-pass i { background:var(--good-mark); } .ds-tag-probe { color:var(--violet); background:color-mix(in srgb, var(--violet) 14%, transparent); border-color:transparent; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Graphite panel with a seam header and small tracked-capital title.",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-h\"><h2>Trading pipeline</h2><span class=\"ds-panel-note\">last 7 days</span></div><div class=\"ds-panel-b\"><span class=\"ds-fig\">3</span> tested <span class=\"ds-muted\">· net of costs</span></div></section>",
+      "css": ".ds-panel { background:var(--surface-1); border:1px solid var(--border); border-radius:6px; font:400 14px/1.55 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); color:var(--text-primary); } .ds-panel-h { display:flex; align-items:center; gap:12px; min-height:48px; padding:10px 20px; border-bottom:1px solid var(--border); } .ds-panel-h h2 { margin:0; flex:1; font:650 12.5px/1.3 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); text-transform:uppercase; letter-spacing:.09em; color:var(--text-secondary); } .ds-panel-note { font:12px var(--mono, 'JetBrains Mono', ui-monospace, monospace); color:var(--text-secondary); padding:3px 9px; border:1px solid var(--border); border-radius:4px; background:var(--surface-2); } .ds-panel-b { padding:18px 20px 20px; } .ds-fig { font:500 24px/1.1 var(--mono, 'JetBrains Mono', ui-monospace, monospace); letter-spacing:-.03em; font-variant-numeric:tabular-nums; } .ds-muted { color:var(--text-muted); }"
+    },
+    {
+      "name": "Check-in Verdict",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "The first answer on every screen: one verdict line tinted toward its state hue.",
+      "html": "<div class=\"ds-checkin\"><span class=\"ds-checkin-dot\"></span><p>1 probe live. Waiting for entry signals on the next bar close. Forward test only, not evidence of an edge.</p></div>",
+      "css": ".ds-checkin { --v:var(--violet); display:flex; gap:12px; align-items:flex-start; padding:18px 22px; border-radius:6px; border:1px solid color-mix(in srgb, var(--v) 30%, var(--border)); background:color-mix(in srgb, var(--v) 8%, var(--surface-1)); } .ds-checkin-dot { width:9px; height:9px; border-radius:50%; background:var(--v); margin-top:10px; flex:none; } .ds-checkin p { margin:0; font:600 22px/1.35 var(--sans, 'Hanken Grotesk', system-ui, sans-serif); letter-spacing:-.015em; color:var(--text-primary); }"
+    },
+    {
+      "name": "Unit Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Limit field: mono value with a seamed unit cell and blue focus halo.",
+      "html": "<label class=\"ds-field\"><span>Max gross exposure</span><span class=\"ds-unit\"><input value=\"80\"><b>%</b></span></label>",
+      "css": ".ds-field { display:block; font:550 12.5px var(--sans, 'Hanken Grotesk', system-ui, sans-serif); color:var(--text-secondary); } .ds-field > span:first-child { display:block; margin-bottom:5px; } .ds-unit { display:flex; border:1px solid var(--border-strong); border-radius:5px; background:var(--surface-1); transition:border-color .15s, box-shadow .15s; } .ds-unit:focus-within { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); } .ds-unit input { flex:1; min-width:0; border:0; background:transparent; padding:8px 11px; font:13.5px var(--mono, 'JetBrains Mono', ui-monospace, monospace); color:var(--text-primary); outline:none; } .ds-unit b { display:grid; place-items:center; padding:0 10px; font:400 13px var(--mono, 'JetBrains Mono', ui-monospace, monospace); color:var(--text-muted); border-left:1px solid var(--border); }"
+    },
+    {
+      "name": "Rail Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Left rail items with stroked icons and mono counts; live counts in cyan, probes in violet.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item is-active\" href=\"#\"><svg viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/></svg>Overview</a><a class=\"ds-nav-item\" href=\"#\"><svg viewBox=\"0 0 24 24\"><path d=\"M3 5h18l-7 8v6l-4 2v-8L3 5Z\"/></svg>Pipeline<span class=\"ds-nav-count is-live\">1 live</span></a></nav>",
+      "css": ".ds-nav { display:flex; flex-direction:column; gap:2px; width:220px; padding:8px; background:var(--bg); } .ds-nav-item { display:flex; gap:11px; align-items:center; min-height:40px; padding:9px 12px; border-radius:5px; font:500 13.5px var(--sans, 'Hanken Grotesk', system-ui, sans-serif); color:var(--text-secondary); text-decoration:none; transition:background .15s, color .15s; } .ds-nav-item svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; } .ds-nav-item:hover { background:var(--surface-2); color:var(--text-primary); } .ds-nav-item.is-active { color:var(--accent); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border); } .ds-nav-item:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } .ds-nav-count { margin-left:auto; font:12px var(--mono, 'JetBrains Mono', ui-monospace, monospace); padding:1px 7px; border-radius:4px; background:var(--chip); color:var(--text-muted); } .ds-nav-count.is-live { color:var(--live); background:var(--live-soft); }"
+    },
+    {
+      "name": "Funnel",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "Pipeline stages as one seam-divided strip with chevron connectors; the Live cell takes the reserved cyan.",
+      "html": "<ol class=\"ds-funnel\"><li class=\"has\"><b>12</b><span>Ideas</span><small>last 7 days</small></li><li class=\"has\"><b>8</b><span>Tested</span><small>net of costs</small></li><li class=\"has\"><b>3</b><span>Passed</span><small>exploratory gates</small></li><li><b>0</b><span>Incubating</span><small>none</small></li><li class=\"goal\"><b>1</b><span>Live</span><small>1 probe</small></li></ol>",
+      "css": ".ds-funnel { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--surface-1); font-family:var(--sans, 'Hanken Grotesk', system-ui, sans-serif); } .ds-funnel li { position:relative; padding:12px 14px; min-width:0; } .ds-funnel li + li { border-left:1px solid var(--border); } .ds-funnel li:not(:last-child)::after { content:\"\"; position:absolute; right:-4px; top:50%; width:7px; height:7px; border-top:1px solid var(--border-strong); border-right:1px solid var(--border-strong); background:var(--surface-1); transform:translateY(-50%) rotate(45deg); z-index:1; } .ds-funnel b { display:block; font:500 24px/1.1 var(--mono, 'JetBrains Mono', ui-monospace, monospace); letter-spacing:-.03em; font-variant-numeric:tabular-nums; color:var(--text-muted); } .ds-funnel li.has b { color:var(--text-primary); } .ds-funnel li.goal { background:var(--live-soft); } .ds-funnel li.goal b { color:var(--live); } .ds-funnel span { display:block; margin-top:4px; font-size:12.5px; font-weight:600; color:var(--text-secondary); } .ds-funnel small { display:block; font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }"
+    },
+    {
+      "name": "Chart Legend",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "Equity legend: ink account swatch, dashed and dotted grey benchmark swatches, muted credit link.",
+      "html": "<div class=\"ds-legend\"><span><i style=\"--sw:var(--text-primary)\"></i>Account (net of costs)</span><span><i class=\"dashed\" style=\"--sw:var(--series-2)\"></i>QQQ buy &amp; hold</span><span><i class=\"dotted\" style=\"--sw:var(--series-3)\"></i>BTC-USD buy &amp; hold</span><a href=\"#\">Charts: TradingView Lightweight Charts</a></div>",
+      "css": ".ds-legend { display:flex; gap:20px; flex-wrap:wrap; align-items:center; font:12.5px var(--sans, 'Hanken Grotesk', system-ui, sans-serif); color:var(--text-secondary); padding:12px 24px 18px; background:var(--surface-1); } .ds-legend i { display:inline-block; width:16px; height:3px; border-radius:2px; vertical-align:3px; margin-right:7px; background:var(--sw); } .ds-legend i.dashed { background:repeating-linear-gradient(90deg, var(--sw) 0 5px, transparent 5px 8px); } .ds-legend i.dotted { background:repeating-linear-gradient(90deg, var(--sw) 0 2px, transparent 2px 5px); } .ds-legend a { margin-left:auto; font-size:12px; color:var(--text-muted); text-decoration:none; } .ds-legend a:hover { color:var(--accent); } .ds-legend a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night-Shift Console",
+    "overview": "QuantDesk is a working console, not a showcase. Graphite panels sit on a near-black ground, divided by 1px hairline seams; there is almost no decoration, and colour is borrowed from code syntax and spent only on state. The operator reads one verdict line, then the live and probe state, then figures that always carry their costs and limits beside them. Density is high and calm: small tracked-capital panel titles, mono figures in fixed columns, tags rather than pills.\n\nThe system is dark-first (the house theme is dark by default) with a full \"daylight\" variant that keeps the same seams, roles and hierarchy on pale grey ground. Depth comes from tonal steps between ground, panel and raised panel, never from resting shadows. The one theatrical gesture is the kill cell: the emergency stop stands alone behind a seam at the very end of the top bar, set apart by empty space, drawn as a dashed red outline that fills only when deliberately hovered or focused. Every other destructive control (Flatten all, Retire) wears the same dashed outline.\n\nIt rejects the soft SaaS dashboard: glow backgrounds, gradient tiles, pill-shaped everything and shadowed round cards.",
+    "keyCharacteristics": [
+      "Graphite tonal layering with 1px seams instead of shadows.",
+      "Syntax-derived state colour; neutral ink for everything that is not state, gains and losses included.",
+      "Green only for passed evidence; routine \"all is well\" is Keyword Blue.",
+      "One reserved cyan for capital that is live right now.",
+      "Hanken Grotesk for words, JetBrains Mono for figures, even figures inside sentences.",
+      "Tight 4/5/6px corners: tags, controls, panels.",
+      "Destructive controls outlined and dashed until intent is shown."
+    ],
+    "rules": [
+      {
+        "name": "The Reserved Ink Rule",
+        "body": "Live Cyan marks capital that is live right now and nothing else. If no sleeve is live, no cyan appears on the screen.",
+        "section": "colors"
+      },
+      {
+        "name": "The State-Only Colour Rule",
+        "body": "Direction is carried by sign and drawn SVG marks, not colour: positive and negative returns and P&L both render in Ink. Hue is spent on state (passed, probe, warning, failed, live), never on decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Green Is Evidence Rule",
+        "body": "Green means a gate was passed, nothing weaker. Healthy services, recorded decisions and successful saves are Keyword Blue; the PAPER tag is neutral ink.",
+        "section": "colors"
+      },
+      {
+        "name": "The Probe Is Not Proof Rule",
+        "body": "Probes are violet everywhere they appear. They never take green.",
+        "section": "colors"
+      },
+      {
+        "name": "The Every Figure Is Mono Rule",
+        "body": "Every number, money value, percentage, timestamp, count and unit is set in JetBrains Mono with tabular numerals, so columns never move and values change in place. Elements that hold only figures (values, table cells, axes, timestamps, the chart readout) are mono whole; inside prose, a render-time pass wraps each figure in mono and leaves the words in Hanken Grotesk.",
+        "section": "typography"
+      },
+      {
+        "name": "The Names Stay In Words Rule",
+        "body": "Figures that are part of a name stay in the UI face: tokens joined by a slash (\"24/7\") and text inside status and mode tags, which keep Hanken Grotesk with tabular numerals. The PAPER tag is the one mono tag.",
+        "section": "typography"
+      },
+      {
+        "name": "The Seams Not Shadows Rule",
+        "body": "A panel is separated from the page by a 1px seam and one tonal step. If a resting surface needs a shadow to be seen, the tonal step is wrong.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** separate surfaces with a 1px seam and one tonal step (graphite-ground, panel, panel-raised).",
+      "**Do** set every figure, unit, timestamp and count in JetBrains Mono with tabular numerals.",
+      "**Do** keep Live Cyan for capital that is live right now; draw the account line in Ink when nothing is live.",
+      "**Do** colour probes violet everywhere and show costs and limits beside the numbers they qualify.",
+      "**Do** draw destructive controls (Emergency stop, Flatten all, Retire) as dashed red outlines that fill only on hover or focus, isolated from neighbouring controls, and confirm them in a dialog.",
+      "**Do** use Keyword Blue for routine health, recorded decisions and successful actions.",
+      "**Do** draw benchmarks as muted grey lines, dashed for the equity benchmark and dotted for BTC, without last-value labels.",
+      "**Do** keep radii at 4px (tags), 5px (controls) and 6px (panels).",
+      "**Do** keep the PAPER tag visible on every screen in both themes.",
+      "**Do** cancel or strike through retired and stopped items rather than removing them."
+    ],
+    "donts": [
+      "**Don't** use glow backgrounds, gradient tiles, pill shapes or shadowed round cards.",
+      "**Don't** put a resting shadow on a panel; overlays (drawer, dialog, toast) are the only lifted surfaces.",
+      "**Don't** colour gains and losses green and red; sign and drawn marks carry direction.",
+      "**Don't** use green for probes, routine status, journal decisions, success toasts, or anything not affirmed by a passed gate.",
+      "**Don't** wrap figures that are part of a name (\"24/7\") or tag text in the mono face.",
+      "**Don't** set any text below 12px.",
+      "**Don't** use a radius above 6px or a fully rounded shape for anything except indicator dots."
+    ]
+  }
+}

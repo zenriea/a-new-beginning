@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from .. import clock, db, settings, venues
 from ..agent import journal
 from ..agent.llm import budget_status
-from ..config import DEFAULT_SETTINGS, GATE_PRESETS, load_config
+from ..config import DEFAULT_SETTINGS, GATE_PRESETS, SETTING_BOUNDS, load_config
 from ..marketdata import store
 from ..research.sandbox import isolation_report
 from ..trading import ledger, live, oms
@@ -219,7 +219,9 @@ def _state() -> dict:
                    "heartbeat_age": now - hb["heartbeat_at"] if hb else None,
                    "started_at": hb["started_at"] if hb else None},
         "controls": settings.get("agent") | {"drawdown_halt": db.get_meta("drawdown_halt") == "1",
-                                             "system_halt": db.get_meta("system_halt") == "1"},
+                                             "system_halt": db.get_meta("system_halt") == "1",
+                                             "emergency_stop_at": _float_meta("emergency_stop_at"),
+                                             "emergency_cancelled": _float_meta("emergency_cancelled")},
         "account": {"equity": eb["equity"], "cash": eb["cash"], "gross": eb["gross"], "crypto_gross": eb["crypto_gross"],
                     "initial": init, "pnl": eb["equity"] - init, "return": eb["equity"] / init - 1,
                     "fees_paid": fees, "peak": peak, "drawdown": (eb["equity"] - peak) / peak if peak else 0,
@@ -323,7 +325,7 @@ async def experiment(eid: int):
         e["hypothesis"] = db.row_dict(db.q1("SELECT * FROM hypotheses WHERE id=?", (e["hypothesis_id"],)))
         e["decisions"] = _rows("SELECT * FROM decisions WHERE subject_type='experiment' AND subject_id=? ORDER BY id",
                                (eid,), ("details",))
-        e["strategy"] = db.row_dict(db.q1("SELECT id, name, version, status FROM strategies WHERE experiment_id=?", (eid,)))
+        e["strategy"] = db.row_dict(db.q1("SELECT id, name, version, status, probe FROM strategies WHERE experiment_id=? ORDER BY id DESC", (eid,)))
         return e
     return await run_in_threadpool(f)
 
@@ -474,6 +476,7 @@ async def system():
                 "ceilings": {k: getattr(cfg, k) for k in ("ceiling_max_position_pct", "ceiling_max_gross_pct",
                                                           "ceiling_max_strategy_pct", "ceiling_max_order_usd",
                                                           "ceiling_monthly_llm_usd")},
+                "bounds": _setting_bounds(),
                 "jobs": _rows("SELECT * FROM jobs ORDER BY name"), "data_status": store.status_all(),
                 "audit": _rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 50", (), ("detail",)),
                 "risk_events": _rows("SELECT * FROM risk_events ORDER BY id DESC LIMIT 50", (), ("detail",)),
@@ -484,6 +487,23 @@ async def system():
 
 
 # ------------------------------------------------------------------ operator actions
+def _float_meta(key: str):
+    try:
+        value = db.get_meta(key)
+        return float(value) if value is not None else None
+    except ValueError:
+        return None
+
+
+def _setting_bounds() -> dict:
+    """Allowed range per editable number, resolved against the hard ceilings, keyed "group.key"."""
+    out = {}
+    for path, (lo, hi) in SETTING_BOUNDS.items():
+        if len(path) == 2:
+            out[".".join(path)] = [settings._bound(0, lo), settings._bound(0, hi)]
+    return out
+
+
 def _audit(action: str, detail=None):
     db.ex("INSERT INTO audit_log(ts, actor, action, detail) VALUES(?,?,?,?)", (clock.now(), "operator", action, db.dumps(detail)))
 
@@ -499,6 +519,8 @@ async def ask(body: AskBody):
 
 @app.post("/api/control/{action}", dependencies=[Depends(require_write)])
 async def control(action: str):
+    extra: dict = {}
+
     def f():
         if action == "pause":
             settings.operator_update("agent", {"paused": True})
@@ -511,6 +533,9 @@ async def control(action: str):
         elif action == "emergency_stop":
             settings.operator_update("agent", {"emergency_stop": True, "paused": True})
             n = oms.cancel_all("Emergency stop by operator.")
+            db.set_meta("emergency_stop_at", str(clock.now()))
+            db.set_meta("emergency_cancelled", str(n))
+            extra["cancelled"] = n
             journal.write("risk", "EMERGENCY STOP", f"All agent trading halted; {n} open order(s) cancelled. Positions "
                           "are held. Use 'Flatten all' to close them.", author="operator")
         elif action == "clear_emergency":
@@ -560,7 +585,7 @@ async def control(action: str):
         else:
             raise HTTPException(404, "unknown action")
         _audit(f"control.{action}")
-        return {"ok": True, "controls": settings.get("agent")}
+        return {"ok": True, "controls": settings.get("agent"), **extra}
     return await run_in_threadpool(f)
 
 
@@ -587,6 +612,28 @@ async def apply_gate_preset(name: str):
         merged = settings.operator_update("gates", GATE_PRESETS[name])
         journal.write("system", f"Operator selected {name} gate preset",
                       "Applies to future research decisions; existing allocations are unchanged.", author="operator")
+        return merged
+    return await run_in_threadpool(f)
+
+
+@app.post("/api/settings", dependencies=[Depends(require_write)])
+async def update_settings_batch(body: dict):
+    """Save edits to several groups at once: every group is validated and written, or none is."""
+    if not body or not all(isinstance(v, dict) for v in body.values()):
+        raise HTTPException(400, "body must map settings groups to objects")
+    if "agent" in body:
+        raise HTTPException(400, "use /api/control for pause/stop")
+
+    def f():
+        merged = {}
+        try:
+            with db.tx():
+                for group, values in body.items():
+                    merged[group] = settings.operator_update(group, values)
+        except settings.SettingsError as e:
+            raise HTTPException(400, str(e))
+        for group, values in body.items():
+            journal.write("system", f"Operator changed {group} settings", json.dumps(values), author="operator")
         return merged
     return await run_in_threadpool(f)
 
