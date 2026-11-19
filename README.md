@@ -19,7 +19,7 @@ virtual money.
 |---|---|
 | Top bar | PAPER badge, analyst mode (AI model and provider, or **DEMO rules engine**), data mode, worker health, NASDAQ session and countdown, API spend vs. budget, Pause / Emergency stop |
 | KPIs | Equity, P&L **after costs**, exposure and drawdown vs. their limits |
-| Trading pipeline | One sentence on why the desk is or is not trading, the last 7 days as a funnel (tested → profitable on test → passed gates → live → positions), the ideas closest to trading with a **Start probe** button, and which gates block ideas most often |
+| Trading pipeline | One sentence on why the desk is or is not trading (naming a closed market when every live strategy is on it), the last 7 days as a funnel (tested → profitable on test → passed gates → live → positions), the ideas closest to trading with a **Start manual probe** button, and which gates block ideas most often |
 | Positions | Click a row to see why it entered (written *before* the fill), the exact exit rules, and the exit plan; probe sleeves are labelled |
 | Equity chart | Account vs. QQQ and BTC buy-and-hold of the same $100k, plus excess return and fees |
 | Agent activity | Current activity, open orders and scheduled next actions |

@@ -100,6 +100,15 @@ export function liveLabel(strategies, probes) {
   const part = (n, one, many) => n ? `${n} ${n === 1 ? one : many}` : "";
   return [part(strategies, "strategy", "strategies"), part(probes, "probe", "probes")].filter(Boolean).join(" and ") || "nothing";
 }
+// A probe on a closed market is not waiting for the next bar anywhere; name the market instead.
+const MARKET = { NASDAQ: "stock market", CRYPTO: "crypto market" };
+function singleLiveVenue(s) {
+  const venues = new Set((s.strategies || [])
+    .filter((x) => x.status === "active" || x.status === "incubating")
+    .map((x) => x.venue).filter((v) => Object.hasOwn(MARKET, v)));
+  return venues.size === 1 ? [...venues][0] : null;
+}
+
 // One sentence that answers "why is (or isn't) the desk trading right now?".
 // Green is kept for evidence (a strategy that passed every gate); probes get their own tone.
 export function tradingVerdict(s) {
@@ -116,8 +125,17 @@ export function tradingVerdict(s) {
     live ? ` ${liveLabel(strategies, probes)} keep${live === 1 ? "s" : ""} ${live === 1 ? "its" : "their"} allocation; exits still run.` : ""}` };
   if (n) return { tone: liveTone, text: `Trading: ${held} across ${liveLabel(strategies, probes)}.` +
     (strategies ? "" : " Probes are forward paper tests, not evidence of an edge.") };
-  if (live) return { tone: liveTone, text: `${cap(liveLabel(strategies, probes))} live. Waiting for entry signals on the next bar close.` +
-    (strategies ? "" : " Forward test only, not evidence of an edge.") };
+  if (live) {
+    // The check-in pairs this verdict with the next desk event, which may be in another
+    // market. When every live strategy is on one closed venue, say so instead of implying
+    // the next bar close will fill it.
+    const venue = singleLiveVenue(s), session = venue ? s.sessions?.[venue] : null;
+    if (session && session.open === false) return { tone: liveTone, text:
+      `${cap(liveLabel(strategies, probes))} live, but the ${MARKET[venue]} is closed, so entries wait for the next session.` +
+      (strategies ? "" : " Forward test only, not evidence of an edge.") };
+    return { tone: liveTone, text: `${cap(liveLabel(strategies, probes))} live. Waiting for entry signals on the next bar close.` +
+      (strategies ? "" : " Forward test only, not evidence of an edge.") };
+  }
   if (!p.finished) return { tone: "info", text: "No finished experiment in the last 7 days yet. The first research cycle needs market data." };
   const best = (p.candidates || [])[0];
   const top = (p.gate_failures || [])[0];

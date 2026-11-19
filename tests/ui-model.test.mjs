@@ -233,6 +233,24 @@ test("each control state outranks the next: stop, worker, halt, pause", async ()
   s.controls.paused = false; assert.match(tradingVerdict(s).text, /^Trading: 1 open position across 1 strategy\./);
 });
 
+test("a live probe on a closed market is not described as waiting for the next bar", async () => {
+  const { tradingVerdict } = await import("../web/ui-model.mjs");
+  const s = { controls: {}, worker: { alive: true }, positions: [], pipeline: { finished: 2, live: { strategies: 0, probes: 1 },
+    candidates: [], gate_failures: [] }, strategies: [{ venue: "NASDAQ", status: "active", probe: 1 }],
+    sessions: { NASDAQ: { open: false, opens_at: 123 }, CRYPTO: { open: true } } };
+  const closed = tradingVerdict(s);
+  assert.equal(closed.tone, "probe");
+  assert.match(closed.text, /^1 probe live, but the stock market is closed, so entries wait for the next session\./);
+  assert.doesNotMatch(closed.text, /next bar close/);
+  s.sessions.NASDAQ.open = true;
+  assert.match(tradingVerdict(s).text, /Waiting for entry signals on the next bar close/);
+  // Mixed venues keep the desk-wide sentence; no single market explains the wait.
+  s.sessions.NASDAQ.open = false;
+  s.strategies.push({ venue: "CRYPTO", status: "active", probe: 1 });
+  s.pipeline.live.probes = 2;
+  assert.match(tradingVerdict(s).text, /^2 probes live\. Waiting for entry signals on the next bar close/);
+});
+
 test("live labels count strategies and probes separately", async () => {
   const { liveLabel } = await import("../web/ui-model.mjs");
   assert.equal(liveLabel(1, 2), "1 strategy and 2 probes");
