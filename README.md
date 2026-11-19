@@ -204,10 +204,11 @@ A sustained, timestamped forward-paper record is still required.
   baseline. Backtest sells currently liquidate the full holding rather than applying the paper
   exchange's per-order ADV cap, and experiments use the backtest's default participation setting.
   These differences can materially affect results in illiquid symbols.
-* **Strategy reviews.** The recorded `max_live_drawdown_pct` currently compares cumulative
-  sleeve return with the loss threshold, not drawdown from a strategy equity high-water mark.
-  Allocation changes also change the denominator of reported sleeve returns. Do not interpret
-  that review statistic as a cash-flow-adjusted performance series.
+* **Strategy reviews.** `max_live_drawdown_pct` compares current sleeve equity to its
+  high-water mark sampled at account snapshots and reviews. For positive sleeve equity,
+  allocation changes rescale the peak so adding or removing capital alone is not a drawdown.
+  Existing desks start from current allocation and observed equity; earlier peaks are not
+  reconstructed. The separate cumulative sleeve return still uses current allocation.
 * **AI spending is an estimated cap, not a billing guarantee.** Pre-call checks use token
   estimates, configured prices and recorded completed calls. Concurrent worker/API calls do
   not reserve budget against each other; uncertain provider usage, retries and fallback

@@ -97,6 +97,22 @@ def sleeve_equity(strategy_id: int, allocation: float) -> dict:
             "equity": allocation + realized + unreal, "free_cash": allocation + realized - cost}
 
 
+def sleeve_peak(strategy_id: int, allocation: float, equity: float) -> float:
+    stored = db.get_meta(f"sleeve_peak:{strategy_id}")
+    return max(equity, float(stored) if stored is not None else allocation)
+
+
+def mark_sleeve_peak(strategy_id: int, allocation: float, new_allocation: float | None = None) -> None:
+    equity = sleeve_equity(strategy_id, allocation)["equity"]
+    peak = sleeve_peak(strategy_id, allocation, equity)
+    if new_allocation is not None:
+        # Issue/redeem units at the pre-flow value: the flow alone cannot change drawdown.
+        after = equity + (new_allocation - allocation)
+        if equity > 0 and after > 0:
+            peak *= after / equity
+    db.set_meta(f"sleeve_peak:{strategy_id}", str(peak))
+
+
 def apply_fill(order: dict, qty: float, price: float, fee: float, ref: dict) -> int:
     """Book a (partial) fill atomically: fill row, cash, sleeve position, order progress."""
     if not all(math.isfinite(v) for v in (qty, price, fee)) or qty <= 0 or price <= 0 or fee < 0:

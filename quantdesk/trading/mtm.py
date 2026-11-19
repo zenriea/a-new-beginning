@@ -34,4 +34,6 @@ def snapshot() -> dict:
           "peak_equity=excluded.peak_equity, detail=excluded.detail",
           (ts, eb["equity"], eb["cash"], eb["gross"], eb["crypto_gross"], _bench_equity(b["account"]),
            _bench_equity(b["CRYPTO"]), peak, db.dumps(detail)))
+    for sleeve in db.q("SELECT id, allocation FROM strategies WHERE status IN ('active','incubating')"):
+        ledger.mark_sleeve_peak(sleeve["id"], sleeve["allocation"])
     return eb
