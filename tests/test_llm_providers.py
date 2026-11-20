@@ -193,5 +193,16 @@ def test_helper_with_persistent_failure_is_benched(compat, monkeypatch):
     assert sleeps == [] and len(quota.requests) == 1                 # quota errors are not retried
     assert r.call("question", "s", "u", SCHEMA)[0]["answer"] == "paid"
     assert len(quota.requests) == len(gone.requests) == len(big.requests) == 1   # benched, not called again
-    monkeypatch.setattr(clock, "now", lambda: __import__("time").time() + 7 * 3600)
+    t0 = clock.now()
+    reset = (t0 - 8 * 3600) // 86400 * 86400 + 86400 + 8 * 3600   # next midnight Pacific (08:00 UTC)
+    monkeypatch.setattr(clock, "now", lambda: t0 + 7 * 3600)
+    assert [h.benched for h in helpers] == [t0 + 7 * 3600 < reset, False, False]  # quota waits for its daily reset
+    monkeypatch.setattr(clock, "now", lambda: max(reset, t0 + 6 * 3600) + 1)
     assert [h.benched for h in helpers] == [False, False, False]     # back after the cool-down
+
+
+def test_openrouter_helper_is_tried_before_gemini(monkeypatch):
+    from quantdesk.agent import llm
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "o")
+    assert [h.route["name"] for h in llm.free_helpers()][:2] == ["openrouter", "gemini"]
