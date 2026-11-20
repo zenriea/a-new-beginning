@@ -203,8 +203,13 @@ class LLM:
 
     def _bench(self, why: str) -> None:
         if self.route is not None:
-            _benched_until[self._key] = clock.now() + HELPER_BENCH_SEC
-            log.warning("benching helper %s for %dh: %s", self.model, HELPER_BENCH_SEC // 3600, why[:200])
+            now = clock.now()
+            until = now + HELPER_BENCH_SEC
+            if _daily_quota(why):
+                # shortcut: daily free quotas reset at midnight Pacific; 08:00 UTC is that in winter, an hour late in summer
+                until = max(until, (now - 8 * 3600) // 86400 * 86400 + 86400 + 8 * 3600)
+            _benched_until[self._key] = until
+            log.warning("benching helper %s for %.1fh: %s", self.model, (until - now) / 3600, why[:200])
 
     @property
     def model(self) -> str:
@@ -409,9 +414,10 @@ class LLM:
 # ------------------------------------------------------------------ multi-model routing
 # Free-tier helpers switch on when their key is in the environment. Model names can be
 # overridden because free model line-ups change often.
+# Tried in this order. Gemini's free tier allows only ~20 requests a day, so it is the backup.
 FREE_PRESETS = {
-    "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-3.8-flash"),
     "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free"),
+    "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-3.8-flash"),
 }
 # Frequent, long-prompt work goes to free models first; the paid model is the fallback.
 FREE_FIRST = {"hypothesis", "hypothesis_repair", "review", "question"}
