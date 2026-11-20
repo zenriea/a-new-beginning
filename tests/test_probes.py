@@ -296,3 +296,27 @@ def test_manual_probe_does_not_consume_automatic_daily_quota(env):
     assert start_probe(_experiment(venue="NASDAQ"), origin="operator") is not None
     assert auto_probe("NASDAQ", _experiment(venue="NASDAQ")) is not None
     assert auto_probe("NASDAQ", _experiment(venue="NASDAQ")) is None  # automatic daily cap still enforced
+
+
+def test_rejudge_promotes_active_probe_to_full_strategy(env):
+    from quantdesk import db
+    from quantdesk.agent.research_loop import rejudge_experiment, start_probe
+    eid = _experiment(ret=0.06, status="passed", failed=())
+    db.ex("UPDATE experiments SET validation=?, test=?, challenge=? WHERE id=?", (
+        json.dumps({"sharpe": 1.2}),
+        json.dumps({"total_return": 0.06, "sharpe": 1.15, "n_trades": 50, "max_drawdown": -0.05,
+                    "top5_concentration": 0.4, "deflated_psr": 0.8}),
+        json.dumps({"test_cost_x2": {"total_return": 0.03}, "test_delay_1bar": {"sharpe": 0.6},
+                    "neighbor_positive_frac": 0.8, "subperiod_positive_frac": 0.75}),
+        eid,
+    ))
+    probe_id = start_probe(eid, origin="operator")
+    assert probe_id is not None
+    assert db.q1("SELECT status, probe FROM strategies WHERE id=?", (probe_id,))["status"] == "active"
+    out = rejudge_experiment(eid)
+    assert out["status"] == "done" and out["decision"] == "allocate"
+    assert db.q1("SELECT status FROM strategies WHERE id=?", (probe_id,))["status"] == "retired"
+    full = db.q1("SELECT id, probe, status FROM strategies WHERE id=?", (out["strategy_id"],))
+    assert full["probe"] == 0 and full["status"] == "active"
+    # A second re-judge once a regular strategy exists must refuse.
+    assert rejudge_experiment(eid)["status"] == "exists"

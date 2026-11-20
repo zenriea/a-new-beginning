@@ -203,6 +203,7 @@ export const LIMIT_FIELDS = [
   { g: "risk", k: "max_quote_age_sec", label: "Max quote age", unit: "sec", loosens: 1 },
   { g: "risk", k: "max_participation", label: "Max share of daily volume", unit: "pct", hint: "per order, of average daily volume", loosens: 1 },
   { g: "risk", k: "max_spread_bps", label: "Max usable spread", unit: "bp", loosens: 1 },
+  { g: "execution", k: "fractional_shares", label: "Fractional stock shares", unit: "bool", loosens: 0 },
   { g: "probe", k: "enabled", label: "Probes enabled", unit: "bool", loosens: 1 },
   { g: "probe", k: "allocation_pct", label: "Probe size", unit: "pct", hint: "of equity", loosens: 1 },
   { g: "probe", k: "max_active", label: "Max probes at once", unit: "int", loosens: 1 },

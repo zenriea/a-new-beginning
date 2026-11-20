@@ -38,6 +38,11 @@ def venue_of(symbol: str) -> str:
     return "CRYPTO" if "-" in symbol or "/" in symbol else "NASDAQ"
 
 
+def qty_decimals(venue: str, fractional_shares: bool = False) -> int:
+    v = VENUES[venue]
+    return 6 if (fractional_shares and v.asset_class == "equity") else v.qty_decimals
+
+
 @lru_cache(maxsize=1)
 def _xnas():
     import exchange_calendars as xc

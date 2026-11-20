@@ -822,7 +822,7 @@ async function renderMarket(body, version) {
 }
 
 const LIMIT_GROUPS = [
-  ["Risk", "Hard limits the risk engine applies to every order.", ["risk"]],
+  ["Risk", "Hard limits the risk engine applies to every order.", ["risk", "execution"]],
   ["Probes", "Small forward-paper trials of ideas that made money on their sealed test but missed a gate. Not evidence of an edge.", ["probe"]],
   ["Acceptance gates", "Every gate must pass for a full allocation.", ["gates", "research"]],
   ["AI budget & schedule", "Estimated spend is checked before every model call.", ["budget", "schedule"]],
@@ -1217,7 +1217,7 @@ async function openExperiment(id) {
     <div class="section"><h3>Acceptance gates: ${checks.length ? gateCount(checks.length, missed.length) : "not evaluated"}</h3>
       ${missed.length ? '<p class="muted cell-sub">Missed checks</p>' + gateRows(missed) : ""}
       ${passed.length ? `<details class="record-details"><summary>${passed.length} passed ${passed.length === 1 ? "check" : "checks"}</summary>${gateRows(passed)}</details>` : ""}</div>
-    ${e.test && e.status !== "running" && isOperator() && (!e.strategy || (e.strategy.probe && e.strategy.status === "retired")) ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
+    ${e.test && e.status !== "running" && isOperator() && (!e.strategy || e.strategy.probe) ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
       <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>` : ""}
     ${e.test && e.status !== "running" && isOperator() && (e.operator_probe_blocker === undefined ? (!e.strategy || !["active", "incubating"].includes(e.strategy.status)) : !e.operator_probe_blocker) ? `<div class="rejudge-box probe-box"><div><b>Paper-trade it as a manual probe</b>
