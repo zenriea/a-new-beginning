@@ -239,7 +239,8 @@ def research_cycle(venue: str, analyst=None) -> dict:
     try:
         days = rs["deflation_window_days"]
         res = run_experiment(spec, settings.get("costs")[venue], rs, bench, _prior_test_windows(venue, days),
-                             cfg.llm_knowledge_cutoff, on_freeze=on_freeze, llm_authored=(author == "llm"))
+                             cfg.llm_knowledge_cutoff, on_freeze=on_freeze, llm_authored=(author == "llm"),
+                             max_participation=settings.get("risk")["max_participation"])
         res["leakage"]["deflation_window_days"] = days
     except (ExperimentError, Exception) as e:
         log.error("experiment %s failed: %s", eid, traceback.format_exc())

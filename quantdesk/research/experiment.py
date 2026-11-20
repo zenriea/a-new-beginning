@@ -159,7 +159,7 @@ def _slim(m: dict) -> dict:
 def run_experiment(spec: dict, costs_cfg: dict, research_cfg: dict, benchmark: str,
                    prior_test_windows: list[tuple[int, int]], llm_cutoff: str,
                    on_freeze=None, end_ts: int | None = None, sandbox_runner=None,
-                   llm_authored: bool = True) -> dict:
+                   llm_authored: bool = True, max_participation: float = 0.01) -> dict:
     venue = spec["venue"]
     v = VENUES[venue]
     panel = build_panel(venue, spec["universe"], benchmark, end_ts)
@@ -180,7 +180,8 @@ def run_experiment(spec: dict, costs_cfg: dict, research_cfg: dict, benchmark: s
 
     def bt(p, win, cost=costs_cfg, delay=0):
         s, e = W[win] if isinstance(win, str) else win
-        return B.run(spec, panel, sig_for(p), cost, s, e, delay=delay, liquidity=liq)
+        return B.run(spec, panel, sig_for(p), cost, s, e, delay=delay, liquidity=liq,
+                     max_participation=max_participation)
 
     # ---- 1. grid search on TRAIN only
     grid_results = []
@@ -221,7 +222,7 @@ def run_experiment(spec: dict, costs_cfg: dict, research_cfg: dict, benchmark: s
     windows = {k: {"start": _ts(panel, s), "end": _ts(panel, e - 1), "bars": e - s} for k, (s, e) in W.items()}
     # ---- 4. FREEZE before touching the test window
     frozen = {"spec_hash": spec_hash(spec), "chosen_params": chosen, "windows": windows,
-              "data_end": _ts(panel, T - 1)}
+              "data_end": _ts(panel, T - 1), "max_participation": max_participation}
     if on_freeze:
         on_freeze(frozen)
     # ---- 5. sealed TEST (evaluated once)

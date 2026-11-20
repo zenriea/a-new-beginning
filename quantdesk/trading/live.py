@@ -116,62 +116,65 @@ def evaluate_strategy(strat: dict) -> dict:
     for k, s in enumerate(spec["universe"]):
         if st_list[k].in_position and st_list[k].entry_bar == t:
             st_list[k].entry_bar = expected  # store bar timestamp, not panel index
-    _save_states(sid, states, expected)
-    market_col = syms.index(bench) if bench in syms else None
-    sleeve = ledger.sleeve_equity(sid, strat["allocation"])
-    created = []
-    label = _bar_label(venue, expected)
-    for k, reason in res.exit:
-        s = spec["universe"][k]
-        qty = ledger.sleeve_qty(sid, s)
-        if qty <= 0:
-            continue
-        ev = explain(spec.get("exit") or "", panel, params, t, cols[k], v.periods_per_year, market_col) \
-            if reason == "exit rule" else []
-        pos = db.q1("SELECT avg_cost FROM positions WHERE strategy_id=? AND symbol=?", (sid, s))
-        pnl = (close_row[k] / pos["avg_cost"] - 1) if pos and pos["avg_cost"] else None
-        rationale = (f"Exit signal for {s} at the {label} close ({close_row[k]:.6g}): {reason}."
-                     + (f" Position is {pnl:+.1%} vs average cost {pos['avg_cost']:.6g}." if pnl is not None else "")
-                     + ("\nRule values: " + "; ".join(ev) if ev else ""))
-        o = oms.create_order(symbol=s, side="sell", qty=qty, reason=reason, rationale=rationale,
-                             idem_key=f"{sid}:{s}:{expected}:sell", strategy_id=sid,
-                             signal_snapshot={"bar": expected, "close": float(close_row[k]), "rule_values": ev})
-        created.append(o["id"])
-    thesis = strat["thesis"]
-    for k in res.enter:
-        s = spec["universe"][k]
-        col = cols[k]
-        w = entry_weight(spec, sig.vol[t, col])
-        notional = w * sleeve["equity"]
-        px = close_row[k]
-        qty = notional / px
-        qty = math.floor(qty) if v.qty_decimals == 0 else math.floor(qty * 1e8) / 1e8
-        if qty <= 0 or notional < 1:
-            states[s].in_position = False
-            _save_states(sid, {s: states[s]}, expected)
-            journal.write("decision", f"{strat['name']}: entry signal in {s} too small to trade",
-                          f"Target weight {w:.1%} of ${sleeve['equity']:,.0f} sleeve is below one share/unit at {px:.6g}.",
-                          refs={"strategy_id": sid}, author="rules", dedupe_key=f"small:{sid}:{s}:{expected}")
-            continue
-        ev = explain(spec.get("entry") or "", panel, params, t, col, v.periods_per_year, market_col)
-        exits = []
-        if spec.get("exit"):
-            exits.append(f"exit rule `{spec['exit']}` with {params}")
-        if spec.get("stop_loss_pct"):
-            exits.append(f"stop-loss at -{spec['stop_loss_pct']:.0%} from fill (on a bar close)")
-        if spec.get("take_profit_pct"):
-            exits.append(f"take-profit at +{spec['take_profit_pct']:.0%}")
-        if spec.get("max_hold_bars"):
-            exits.append(f"time stop after {spec['max_hold_bars']} bars")
-        rationale = (f"Entry signal for {s} at the {label} close ({px:.6g}). Sizing {w:.1%} of the strategy's "
-                     f"${sleeve['equity']:,.0f} capital (~${notional:,.0f}).\n"
-                     + ("Rule values: " + "; ".join(ev) + "\n" if ev else "")
-                     + f"Thesis (recorded at approval): {thesis}\nWould exit on: " + "; ".join(exits) + ".")
-        o = oms.create_order(symbol=s, side="buy", qty=qty, reason="entry", rationale=rationale,
-                             idem_key=f"{sid}:{s}:{expected}:buy", strategy_id=sid,
-                             signal_snapshot={"bar": expected, "close": float(px), "weight": w, "rule_values": ev})
-        created.append(o["id"])
-    db.ex("UPDATE strategies SET last_signal_bar=? WHERE id=?", (expected, sid))
+    # One transaction: a crash between saving position state and creating its order must not
+    # leave the strategy marked long with no order (the retry would then see nothing to do).
+    with db.tx():
+        _save_states(sid, states, expected)
+        market_col = syms.index(bench) if bench in syms else None
+        sleeve = ledger.sleeve_equity(sid, strat["allocation"])
+        created = []
+        label = _bar_label(venue, expected)
+        for k, reason in res.exit:
+            s = spec["universe"][k]
+            qty = ledger.sleeve_qty(sid, s)
+            if qty <= 0:
+                continue
+            ev = explain(spec.get("exit") or "", panel, params, t, cols[k], v.periods_per_year, market_col) \
+                if reason == "exit rule" else []
+            pos = db.q1("SELECT avg_cost FROM positions WHERE strategy_id=? AND symbol=?", (sid, s))
+            pnl = (close_row[k] / pos["avg_cost"] - 1) if pos and pos["avg_cost"] else None
+            rationale = (f"Exit signal for {s} at the {label} close ({close_row[k]:.6g}): {reason}."
+                         + (f" Position is {pnl:+.1%} vs average cost {pos['avg_cost']:.6g}." if pnl is not None else "")
+                         + ("\nRule values: " + "; ".join(ev) if ev else ""))
+            o = oms.create_order(symbol=s, side="sell", qty=qty, reason=reason, rationale=rationale,
+                                 idem_key=f"{sid}:{s}:{expected}:sell", strategy_id=sid,
+                                 signal_snapshot={"bar": expected, "close": float(close_row[k]), "rule_values": ev})
+            created.append(o["id"])
+        thesis = strat["thesis"]
+        for k in res.enter:
+            s = spec["universe"][k]
+            col = cols[k]
+            w = entry_weight(spec, sig.vol[t, col])
+            notional = w * sleeve["equity"]
+            px = close_row[k]
+            qty = notional / px
+            qty = math.floor(qty) if v.qty_decimals == 0 else math.floor(qty * 1e8) / 1e8
+            if qty <= 0 or notional < 1:
+                states[s].in_position = False
+                _save_states(sid, {s: states[s]}, expected)
+                journal.write("decision", f"{strat['name']}: entry signal in {s} too small to trade",
+                              f"Target weight {w:.1%} of ${sleeve['equity']:,.0f} sleeve is below one share/unit at {px:.6g}.",
+                              refs={"strategy_id": sid}, author="rules", dedupe_key=f"small:{sid}:{s}:{expected}")
+                continue
+            ev = explain(spec.get("entry") or "", panel, params, t, col, v.periods_per_year, market_col)
+            exits = []
+            if spec.get("exit"):
+                exits.append(f"exit rule `{spec['exit']}` with {params}")
+            if spec.get("stop_loss_pct"):
+                exits.append(f"stop-loss at -{spec['stop_loss_pct']:.0%} from fill (on a bar close)")
+            if spec.get("take_profit_pct"):
+                exits.append(f"take-profit at +{spec['take_profit_pct']:.0%}")
+            if spec.get("max_hold_bars"):
+                exits.append(f"time stop after {spec['max_hold_bars']} bars")
+            rationale = (f"Entry signal for {s} at the {label} close ({px:.6g}). Sizing {w:.1%} of the strategy's "
+                         f"${sleeve['equity']:,.0f} capital (~${notional:,.0f}).\n"
+                         + ("Rule values: " + "; ".join(ev) + "\n" if ev else "")
+                         + f"Thesis (recorded at approval): {thesis}\nWould exit on: " + "; ".join(exits) + ".")
+            o = oms.create_order(symbol=s, side="buy", qty=qty, reason="entry", rationale=rationale,
+                                 idem_key=f"{sid}:{s}:{expected}:buy", strategy_id=sid,
+                                 signal_snapshot={"bar": expected, "close": float(px), "weight": w, "rule_values": ev})
+            created.append(o["id"])
+        db.ex("UPDATE strategies SET last_signal_bar=? WHERE id=?", (expected, sid))
     reconcile_sleeve(strat, expected)
     return {"status": "evaluated", "bar": expected, "orders": created,
             "entries": [spec["universe"][k] for k in res.enter], "exits": [spec["universe"][k] for k, _ in res.exit]}
