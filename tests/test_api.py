@@ -62,7 +62,20 @@ def test_refreshed_ui_assets_and_module_are_served(client):
     for path in ("app.css", "app.js", "ui-model.mjs"):
         response = client.get(f"/static/{path}?v={assets['app.js']}")
         assert response.status_code == 200
+        assert response.headers.get("cache-control") == "no-cache"
     assert "javascript" in client.get("/static/ui-model.mjs").headers["content-type"]
+
+
+def test_equity_downsampling_has_strictly_ascending_unique_timestamps(client):
+    from quantdesk import db
+    client.post("/api/login", json={"password": "correct horse"})
+    for i in range(50):
+        db.ex("INSERT INTO equity_snapshots(ts, equity, cash, gross, crypto_gross, peak_equity) VALUES(?,?,?,?,?,?)",
+              (1000 + i * 60, 100000 + i, 100000 + i, 0, 0, 100000 + i))
+    rows = client.get("/api/equity?points=10").json()
+    ts = [r["ts"] for r in rows]
+    assert len(ts) == 10 and ts[0] == 1000 and ts[-1] == 1000 + 49 * 60
+    assert all(a < b for a, b in zip(ts, ts[1:]))
 
 
 def test_gate_presets_require_auth_csrf_and_write_an_audit_record(client):

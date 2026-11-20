@@ -167,6 +167,11 @@ def test_skipped_research_snapshots_cited_trade_checks(env):
     assert entry["body"] == why
     assert entry["refs"]["trade_checks"] == [
         {"experiment_id": eid, "trades": count, "minimum": 8} for eid, count in zip(ids, [19, 9, 3])]
+    # Plural, hash and comma-separated citations used by LLMs are captured too.
+    plural = f"Failed in experiments {ids[0]}, {ids[1]} and experiments:{ids[2]}, :{ids[3]}."
+    _record_no_idea("CRYPTO", {"why": plural}, "llm", None, 1)
+    assert journal.recent(1)[0]["refs"]["trade_checks"] == [
+        {"experiment_id": eid, "trades": count, "minimum": 8} for eid, count in zip(ids, [19, 9, 3])]
 
 
 def test_api_pipeline_and_probe_control(env, monkeypatch):
@@ -245,3 +250,49 @@ def test_worker_retires_live_strategy_from_another_bar_size(env):
     assert retire_stale_bar_size_strategies() == [sid]
     assert db.q1("SELECT status FROM strategies WHERE id=?", (sid,))["status"] == "retired"
     assert retire_stale_bar_size_strategies() == []
+
+
+def test_rerun_retired_probe_does_not_duplicate_experiments_and_allows_rejudge(env):
+    import importlib
+    from fastapi.testclient import TestClient
+    from quantdesk import clock, db
+    from quantdesk.agent.research_loop import ranked_candidates, rejudge_experiment, start_probe
+    from quantdesk.config import load_config
+    load_config(reload=True)
+    import quantdesk.api.app as appmod
+    c = TestClient(importlib.reload(appmod).app)
+    eid = _experiment(ret=0.05, status="passed", failed=())
+    db.ex("UPDATE experiments SET validation=?, test=?, challenge=? WHERE id=?", (
+        json.dumps({"sharpe": 1.0}),
+        json.dumps({"total_return": 0.05, "sharpe": 1.1, "n_trades": 40, "max_drawdown": -0.04,
+                    "top5_concentration": 0.4, "deflated_psr": 0.8}),
+        json.dumps({"test_cost_x2": {"total_return": 0.02}, "test_delay_1bar": {"sharpe": 0.5},
+                    "neighbor_positive_frac": 0.8, "subperiod_positive_frac": 0.75}),
+        eid,
+    ))
+    first = start_probe(eid, origin="operator")
+    db.ex("UPDATE strategies SET status='retired', retired_at=? WHERE id=?", (clock.now(), first))
+    # Detail endpoint exposes that a retired current-bar probe can be re-run, and re-judge is allowed.
+    detail = c.get(f"/api/experiments/{eid}").json()
+    assert detail["operator_probe_blocker"] is None
+    rejudged = rejudge_experiment(eid)
+    assert rejudged["status"] == "done" and rejudged["decision"] == "allocate"
+    assert start_probe(eid, origin="operator") is None  # already has an active regular strategy from re-judge
+
+    eid2 = _experiment(ret=0.05, status="passed", failed=())
+    p1 = start_probe(eid2, origin="operator")
+    db.ex("UPDATE strategies SET status='retired', retired_at=? WHERE id=?", (clock.now(), p1))
+    p2 = start_probe(eid2, origin="operator")
+    assert p2 and p2 != p1
+    rows = [r for r in c.get("/api/experiments").json() if r["id"] == eid2]
+    assert len(rows) == 1 and rows[0]["strategy_id"] == p2 and rows[0]["strategy_status"] == "active"
+    # Running only as a probe does not mark a gate-passing experiment as allocated.
+    cand = next(x for x in ranked_candidates(0) if x["id"] == eid2)
+    assert cand["passed"] is True and cand["allocated"] is False
+
+
+def test_manual_probe_does_not_consume_automatic_daily_quota(env):
+    from quantdesk.agent.research_loop import auto_probe, start_probe
+    assert start_probe(_experiment(venue="NASDAQ"), origin="operator") is not None
+    assert auto_probe("NASDAQ", _experiment(venue="NASDAQ")) is not None
+    assert auto_probe("NASDAQ", _experiment(venue="NASDAQ")) is None  # automatic daily cap still enforced

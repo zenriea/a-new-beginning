@@ -12,10 +12,11 @@ NP_ALLOWED = {
     "zeros", "zeros_like", "inf", "float64", "bool_", "nan_to_num", "empty", "empty_like", "power",
     "floor", "ceil", "round", "isclose",
 }
+MATH_ALLOWED = {"sqrt", "log", "exp", "fabs", "floor", "ceil", "isfinite", "pi", "e"}
 ATTR_ALLOWED = {
     "mean", "std", "sum", "min", "max", "shape", "copy", "astype", "cumsum", "size", "any", "all",
     "argmax", "argmin", "tolist", "reshape", "clip", "ndim", "item", "round", "prod", "cumprod",
-    "var", "nonzero", "argsort", "flatten", "ravel", "fill", "T",
+    "var", "nonzero", "argsort", "flatten", "ravel", "fill", "T", "get", "append", "extend",
 }
 BUILTINS_ALLOWED = {"range", "len", "min", "max", "abs", "float", "int", "bool", "enumerate",
                     "zip", "sum", "round", "list", "tuple", "dict", "True", "False", "None",
@@ -58,6 +59,9 @@ def check_source(src: str) -> None:
             if isinstance(node.value, ast.Name) and node.value.id == "np":
                 if node.attr not in NP_ALLOWED:
                     raise PolicyError(f"np.{node.attr} is not on the allowlist")
+            elif isinstance(node.value, ast.Name) and node.value.id == "math":
+                if node.attr not in MATH_ALLOWED:
+                    raise PolicyError(f"math.{node.attr} is not on the allowlist")
             elif node.attr not in ATTR_ALLOWED:
                 raise PolicyError(f"attribute .{node.attr} is not on the allowlist")
     for node in ast.walk(tree):

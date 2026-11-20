@@ -27,7 +27,8 @@ log = logging.getLogger(__name__)
 def live_stats(strat: dict) -> dict:
     sid = strat["id"]
     se = ledger.sleeve_equity(sid, strat["allocation"])
-    days = (clock.now() - (strat["activated_at"] or strat["created_at"])) / 86400
+    end = strat["retired_at"] if strat.get("status") == "retired" and strat.get("retired_at") else clock.now()
+    days = max(0.0, (end - (strat["activated_at"] or strat["created_at"])) / 86400)
     sells = db.q("SELECT f.* FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.strategy_id=? AND f.side='sell'", (sid,))
     fills = db.q1("SELECT COUNT(*) n, COALESCE(SUM(f.fee),0) fees FROM fills f JOIN orders o ON o.id=f.order_id "
                   "WHERE o.strategy_id=?", (sid,))
