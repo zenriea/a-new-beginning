@@ -124,3 +124,39 @@ def test_provider_outage_backs_off_instead_of_blocking(env):
     ingest.ingest_quotes("CRYPTO", ["BTC-USD"])
     assert Down.calls == 2
     ingest._backoff.clear()
+
+
+def test_interrupted_entry_is_retried_not_lost(env):
+    from unittest.mock import patch
+    from quantdesk import db
+    from quantdesk.trading import live
+    _daily_setup()
+    sid = make_strategy()
+    put_quote("AAPL", 160.0, 160.05)
+    s = dict(db.q1("SELECT * FROM strategies WHERE id=?", (sid,)))
+    with patch.object(live.oms, "create_order", side_effect=RuntimeError("crash")):
+        with pytest.raises(RuntimeError):
+            live.evaluate_strategy(s)
+    assert not db.q1("SELECT in_position FROM strategy_state WHERE strategy_id=?", (sid,)) or \
+        db.q1("SELECT in_position FROM strategy_state WHERE strategy_id=?", (sid,))["in_position"] == 0
+    r = live.evaluate_strategy(s)
+    assert r["entries"] == ["AAPL"] and len(r["orders"]) == 1
+
+
+def test_backup_refuses_missing_source_and_keeps_destination(tmp_path):
+    import sqlite3
+    from quantdesk.backup import backup
+    dest = tmp_path / "backup.db"
+    sqlite3.connect(dest).execute("CREATE TABLE saved(id INTEGER)").connection.close()
+    with pytest.raises(sqlite3.OperationalError):
+        backup(tmp_path / "typo.db", dest)
+    assert not (tmp_path / "typo.db").exists()
+    assert sqlite3.connect(dest).execute("SELECT name FROM sqlite_master").fetchall() == [("saved",)]
+
+
+def test_backup_copies_desk_database(env, tmp_path):
+    import sqlite3
+    from quantdesk.backup import backup
+    dest = tmp_path / "backup.db"
+    backup(env.db_path, dest)
+    assert sqlite3.connect(dest).execute("SELECT 1 FROM sqlite_master WHERE name='meta'").fetchone()

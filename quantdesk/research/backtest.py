@@ -103,6 +103,13 @@ def run(spec: dict, panel: dict, sig: Signals, costs_cfg: dict, start: int, end:
                                    "qty": q, "entry_bar": t}
             elif action == "sell" and qty[col] > 0:
                 q = qty[col]
+                if np.isfinite(adv[t, col]) and q * px_ref > max_participation * adv[t, col]:
+                    # Same cap as the live simulator; live reconciles the remainder on the next bar.
+                    pending.setdefault(t + 1, []).append((col, action, reason, w))
+                    q = max_participation * adv[t, col] / px_ref
+                    q = math.floor(q) if whole else q
+                    if q <= 0:
+                        continue
                 notional = q * px_ref
                 bps = half_spread + C.impact_bps(notional, adv[t, col], sigma[t, col], costs_cfg)
                 px = C.apply_slippage("sell", px_ref, bps)
@@ -111,10 +118,18 @@ def run(spec: dict, panel: dict, sig: Signals, costs_cfg: dict, start: int, end:
                 cash += proceeds
                 fees_paid += fee
                 slip_paid += q * (px_ref - px)
-                info = entry_info.pop(col, {})
-                pnl = proceeds - cost_basis[col]
+                info = entry_info.setdefault(col, {})
+                info["_proceeds"] = info.get("_proceeds", 0.0) + proceeds
+                info.setdefault("_basis", cost_basis[col])
+                cost_basis[col] *= 1 - q / qty[col]
+                qty[col] -= q
+                if qty[col] > 1e-12:
+                    continue
+                info = entry_info.pop(col)
+                basis = info.pop("_basis")
+                pnl = info.pop("_proceeds") - basis
                 trades.append({**info, "exit_ts": int(panel["ts"][t]), "exit_px": px, "reason": reason,
-                               "pnl": float(pnl), "return": float(pnl / cost_basis[col]) if cost_basis[col] else 0.0,
+                               "pnl": float(pnl), "return": float(pnl / basis) if basis else 0.0,
                                "bars": t - info.get("entry_bar", t)})
                 qty[col] = 0
                 cost_basis[col] = 0
@@ -183,7 +198,7 @@ def buy_and_hold(panel: dict, symbols: list[str], start: int, end: int, costs_cf
         px = px * (1 + (costs_cfg["backtest_half_spread_bps"] + costs_cfg["base_slippage_bps"]) / 1e4)
         fee = C.fees(venue, "buy", alloc / px, px, costs_cfg)
         qty[c] = (alloc - fee) / px
-    eq = []
+    eq = [capital]  # start before entry so the benchmark pays its entry costs and first open-to-close move
     last = {c: np.nan for c in cols}
     for t in range(start, end):
         val = capital - alloc * len(qty)

@@ -199,3 +199,12 @@ def test_blinding_excludes_shorter_subset_holdouts_and_respects_custom_splits(en
         panel = build_panel("NASDAQ", universe, "QQQ")
         test_start = split_windows(len(panel["ts"]), 55, train, val)["test"][0]
         assert obs["as_of"] < panel["ts"][test_start]
+
+
+def test_buy_and_hold_pays_entry_costs():
+    import numpy as np
+    from quantdesk.research.backtest import buy_and_hold
+    p = np.full((5, 1), 100.0)
+    costs = dict(backtest_half_spread_bps=0, base_slippage_bps=0, impact_coef=0, taker_fee_bps=25)
+    m = buy_and_hold(dict(symbols=["BTC-USD"], open=p, close=p, ts=np.arange(5)), ["BTC-USD"], 0, 5, costs, "CRYPTO")
+    assert m["total_return"] < -0.002

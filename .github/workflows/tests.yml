@@ -38,3 +38,26 @@ jobs:
         run: node --check web/app.js
       - name: Check UI display-model syntax
         run: node --check web/ui-model.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      QD_MARKET_DATA: synthetic
+      QD_LLM_PROVIDER: none
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install -r requirements-dev.txt playwright==1.65.2
+          python -m playwright install --with-deps chromium
+      # The browser tests skip when Playwright is missing; -rs plus this guard makes a skip fail the job.
+      - name: Run browser tests
+        run: |
+          python -m pytest -q -rs tests/test_browser_*.py | tee browser.log
+          ! grep -q "SKIPPED" browser.log
