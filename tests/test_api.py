@@ -28,7 +28,7 @@ def test_auth_and_csrf(client):
     from quantdesk import db
     text = client.get("/api/system").text + client.get("/api/state").text
     assert "correct horse" not in text                      # password never echoed
-    assert db.get_meta("session_secret") not in text        # signing key never exposed
+    assert db.q1("SELECT token_digest FROM web_sessions")["token_digest"] not in text
 
 
 def test_stale_data_alert_ignores_symbols_dropped_from_universe(client):
@@ -175,12 +175,41 @@ def test_historical_detail_routes_are_authenticated_and_do_not_depend_on_list_wi
     assert client.get("/api/strategies/9999").status_code == 404
 
 
-def test_logout_requires_csrf_and_invalidates_browser_cookie(client):
+def test_logout_requires_csrf_and_revokes_session(client):
     assert client.post("/api/logout", headers={"X-QD": "1"}).status_code == 401
     client.post("/api/login", json={"password": "correct horse"})
+    token = client.cookies.get("qd_session")
     assert client.post("/api/logout").status_code == 403
     assert client.post("/api/logout", headers={"X-QD": "1"}).status_code == 200
     assert client.get("/api/state").status_code == 401
+    client.cookies.set("qd_session", token)
+    assert client.get("/api/session").json()["authenticated"] is False
+
+
+def test_public_bind_requires_admin_password(env, monkeypatch):
+    from quantdesk.config import load_config
+    monkeypatch.setenv("QD_BIND_HOST", "0.0.0.0")
+    with pytest.raises(ValueError, match="QD_ADMIN_PASSWORD"):
+        load_config(reload=True).check_api_bind()
+
+
+@pytest.mark.parametrize("proxies", ["*", "127.0.0.1,*", "0.0.0.0/0", "::/0"])
+def test_proxy_allowlist_rejects_wildcard(env, monkeypatch, proxies):
+    from quantdesk.config import load_config
+    monkeypatch.setenv("QD_TRUSTED_PROXIES", proxies)
+    with pytest.raises(ValueError, match="QD_TRUSTED_PROXIES"):
+        load_config(reload=True)
+
+
+def test_configured_public_https_origin(client, monkeypatch):
+    import dataclasses
+    import quantdesk.api.app as appmod
+    monkeypatch.setattr(appmod, "cfg", dataclasses.replace(appmod.cfg, public_origin="https://desk.example"))
+    assert client.post("/api/login", json={"password": "correct horse"},
+                       headers={"Origin": "https://elsewhere.example"}).status_code == 403
+    assert client.post("/api/login", json={"password": "correct horse"},
+                       headers={"Origin": "https://desk.example"}).status_code == 200
+    assert client.post("/api/control/pause", headers={"X-QD": "1", "Origin": "https://desk.example"}).status_code == 200
 
 
 @pytest.mark.parametrize("pw", ["change-me-to-a-long-passphrase", "short"])
@@ -272,22 +301,14 @@ def test_operator_session_unchanged_when_viewer_password_is_set(viewer_client):
     assert c.post("/api/control/pause", headers={"X-QD": "1"}).status_code == 200
 
 
-def test_viewer_cookie_cannot_be_promoted(viewer_client):
-    import quantdesk.api.app as appmod
+def test_viewer_session_role_is_stored_server_side(viewer_client):
+    from quantdesk import db
     c = viewer_client
     c.post("/api/login", json={"password": "just looking around"})
     token = c.cookies.get("qd_session")
-    payload, mac = token.split(".", 1)
-    exp = payload.split("-")[0]
-    for forged in (f"{exp}.{mac}", f"{exp}-operator.{mac}", f"{exp}-admin.{mac}"):
-        c.cookies.clear()
-        c.cookies.set("qd_session", forged)
-        assert c.get("/api/state").status_code == 401, forged
-        assert c.get("/api/system").status_code == 401, forged
-    c.cookies.clear()
-    c.cookies.set("qd_session", token)
+    row = db.q1("SELECT role, token_digest FROM web_sessions")
+    assert row["role"] == "viewer" and row["token_digest"] != token
     assert c.get("/api/state").status_code == 200 and c.get("/api/system").status_code == 403
-    assert appmod._role(appmod._sign(int(exp))) == "operator"
 
 
 @pytest.mark.parametrize("admin,viewer", [("correct horse", "correct horse"), ("correct horse", "short"), ("", "just looking around")])

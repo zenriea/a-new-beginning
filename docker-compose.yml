@@ -15,7 +15,8 @@ services:
       QD_BIND_HOST: 0.0.0.0
       QD_SANDBOX_MODE: spool
       QD_SANDBOX_SPOOL: /spool
-      QD_TRUSTED_PROXIES: "*"
+      QD_TRUSTED_PROXIES: ${QD_CADDY_IP:-172.30.84.2}
+    networks: [default, proxy]
     volumes:
       - qd-data:/data
       - qd-spool:/spool
@@ -60,7 +61,7 @@ services:
     cap_drop: [ALL]
 
   caddy:
-    image: caddy:2.8
+    image: caddy:2.11.9
     profiles: ["tls"]
     restart: unless-stopped
     ports: ["80:80", "443:443"]
@@ -70,6 +71,15 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     depends_on: [api]
+    networks:
+      proxy:
+        ipv4_address: ${QD_CADDY_IP:-172.30.84.2}
+
+networks:
+  proxy:
+    ipam:
+      config:
+        - subnet: ${QD_PROXY_SUBNET:-172.30.84.0/24}
 
 volumes:
   qd-data:

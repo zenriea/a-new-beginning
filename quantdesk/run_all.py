@@ -41,10 +41,10 @@ def main() -> None:
     os.environ.setdefault("QD_BIND_HOST", "0.0.0.0")
     if os.environ.get("PORT"):
         os.environ["QD_PORT"] = os.environ["PORT"]
-    _check_data_dir()
     from .config import load_config
-    if not load_config(reload=True).admin_password:
-        log.warning("QD_ADMIN_PASSWORD is not set: the UI will refuse all non-local visitors")
+    cfg = load_config(reload=True)
+    cfg.check_api_bind()
+    _check_data_dir()
 
     stopping = threading.Event()
     child: dict = {"p": None}
@@ -83,10 +83,9 @@ def main() -> None:
     signal.signal(signal.SIGINT, shutdown)
 
     import uvicorn
-    cfg = load_config()
     server = uvicorn.Server(uvicorn.Config("quantdesk.api.app:app", host=cfg.bind_host, port=cfg.bind_port,
-                                           proxy_headers=True,
-                                           forwarded_allow_ips=os.environ.get("QD_TRUSTED_PROXIES", "*")))
+                                           proxy_headers=bool(cfg.admin_password and cfg.trusted_proxies),
+                                           forwarded_allow_ips=cfg.trusted_proxies))
     server.install_signal_handlers = lambda: None  # we handle signals ourselves
     try:
         server.run()

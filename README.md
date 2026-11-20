@@ -139,16 +139,16 @@ caps and broad unleveraged ETFs, plus crypto majors; saved operator settings are
   Dividend-sized changes only refresh history; unexplained jumps are flagged and leave positions alone.
 * **Stale data stops dependent actions**: missing or old bars mean no signal evaluation for that
   strategy, and stale quotes mean no fill. Both are journaled once per transition.
-* **Sandbox for model-written code**: AST allowlist (no imports, files, dunders or arbitrary numpy
-  attributes), a separate process with a cleared environment (no secrets), CPU, memory, file-size
-  and process limits, a network namespace when supported, and a drop to `nobody` when started
-  as root. Its **sampled causality check** reruns at three truncated histories and rejects code
-  whose past signals change there. This is a heuristic, not proof that arbitrary Python is
+* **Sandbox for model-written code**: AST allowlist, a separate process with a cleared environment,
+  and CPU, memory, file-size and process limits. Local execution requires both a private Linux
+  network namespace and a drop to `nobody`. Its **sampled causality check** reruns at three truncated
+  histories and rejects code whose past signals change there. This is a heuristic, not proof that arbitrary Python is
   causal. Strict gates require the restricted causal DSL instead. In Docker it runs in its own
   container with `network_mode: none`, a read-only filesystem, no secrets and dropped capabilities.
-* **Remote access**: a password login sets an HMAC-signed, expiring, HttpOnly SameSite=Strict
-  cookie; writes require an `X-QD` header (CSRF protection); login is rate-limited; strict CSP.
-  Without a password only localhost is served. Secrets stay server-side.
+* **Remote access**: a password login sets an expiring, HttpOnly SameSite=Strict cookie. Logout
+  revokes the server-side session. Writes require an `X-QD` header and a matching browser origin
+  when supplied. Login is rate-limited, and the API requires a password to listen beyond loopback.
+  Users with cookies issued by an earlier version must sign in again after upgrading.
 * **Read-only view**: set `QD_VIEWER_PASSWORD` (12+ characters, different from the operator
   password) to give people you show results to their own login. They see the desk, journal and
   records, but no controls, limits, audit log or model prompts; the server refuses every write.
@@ -295,7 +295,7 @@ On any Linux VPS with Docker (2 vCPU / 2–4 GB is enough):
 ```bash
 git clone https://github.com/zenriea/quant-desk && cd quant-desk && cp .env.example .env
 ```
-Edit `.env`: set `QD_ADMIN_PASSWORD` (at least 12 characters), `QD_SESSION_SECRET`, the Alpaca
+Edit `.env`: set `QD_ADMIN_PASSWORD` (at least 12 characters), the Alpaca
 keys, and one AI provider block (or leave them all out to run the $0 demo analyst). Then:
 ```bash
 docker compose up -d --build
@@ -313,7 +313,9 @@ This starts `api` (bound to `127.0.0.1:8000`), `worker` and `sandbox`, all with
   ```bash
   docker compose --profile tls up -d
   ```
-  Caddy obtains the certificate automatically.
+  Caddy obtains the certificate automatically. Compose trusts forwarding headers from Caddy's
+  address on its dedicated network. If the subnet overlaps an existing Docker network, set
+  `QD_PROXY_SUBNET` and `QD_CADDY_IP` together to an unused subnet and an address within it.
 
 **Operate**:
 ```bash
@@ -326,16 +328,16 @@ docker compose exec worker python -m quantdesk.backup /data/backup.db
 git pull && docker compose up -d --build
 ```
 
-Without Docker, use the systemd units in `deploy/` (`Restart=always`). In that setup the sandbox
-runs in `local` mode: subprocess isolation with a network namespace.
+Without Docker, the systemd units in `deploy/` run the desk as an unprivileged user and research
+strategies in the DSL. Use the dedicated Compose sandbox for model-written Python.
 
 ### 3b. Railway (no server to manage)
 
 The repo includes `railway.json`, which builds the Dockerfile and starts `python -m quantdesk.run_all`:
 web UI and worker in **one** container, with the worker restarted automatically if it crashes. It uses
-about 200 MB of memory, so the 1 GB trial or Hobby plan is plenty. In this mode the sandbox for
-AI-written code runs as a restricted subprocess (cleared environment, allowlist, resource limits,
-unprivileged user) but without its own network namespace.
+about 200 MB of memory, so the 1 GB trial or Hobby plan is plenty. The single-container image
+defaults to DSL strategies because it lacks a dedicated sandbox. Existing Python strategies need a
+dedicated sandbox to continue evaluating signals.
 
 1. **New Project → Deploy from GitHub repo**, authorize GitHub, pick `zenriea/quant-desk` (`main`).
 2. Open the service → **Variables** and add:
@@ -343,7 +345,6 @@ unprivileged user) but without its own network namespace.
    QD_ADMIN_PASSWORD=<your own password for the dashboard, at least 12 characters>
    QD_SESSION_SECRET=<random string; e.g. from python3 -c "import secrets;print(secrets.token_hex(32))">
    QD_COOKIE_SECURE=1
-   QD_TRUSTED_PROXIES=*
    RAILWAY_RUN_UID=0
    ALPACA_API_KEY_ID=<your Alpaca key ID>
    ALPACA_API_SECRET_KEY=<your Alpaca secret>
@@ -357,7 +358,10 @@ unprivileged user) but without its own network namespace.
    `RAILWAY_RUN_UID=0` lets the app write to the volume.
 3. **Add a volume** to the service (right-click the service, or the command palette → *Add Volume*)
    with mount path **`/data`**. Without it, all history is lost on every redeploy.
-4. Service → **Settings → Networking → Generate Domain**. Open the link and sign in with your password.
+4. Service → **Settings → Networking → Generate Domain**. Set `QD_PUBLIC_ORIGIN` to the full HTTPS
+   origin of that domain, then open it and sign in. Replace any old `QD_TRUSTED_PROXIES=*` setting.
+   Leave the allowlist empty unless you have verified source IPs or CIDRs for the ingress. With an
+   empty allowlist, login attempts from clients sharing an ingress address share its rate limit.
 5. Check **Deployments → Logs** for `worker ... started`. Redeploys happen automatically when `main`
    changes; state survives because it lives on the volume.
 

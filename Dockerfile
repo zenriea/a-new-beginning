@@ -1,5 +1,5 @@
 FROM python:3.13-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 QD_DATA_DIR=/data
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 QD_DATA_DIR=/data QD_SANDBOX_MODE=disabled
 RUN apt-get update && apt-get install -y --no-install-recommends util-linux && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt requirements-lock.txt ./

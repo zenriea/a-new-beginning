@@ -1,9 +1,9 @@
 """Run model-generated strategy code in isolation.
 
 Modes (QD_SANDBOX_MODE):
-  local - subprocess with cleared env, rlimits (CPU, memory, file size, procs), no stdin
-          secrets, ``unshare -rn`` network namespace when the kernel allows it, and
-          setuid(nobody) when started as root.
+  disabled - skip Python strategies and use the DSL.
+  local - subprocess with cleared env, resource limits, a private network namespace and
+          a separate unprivileged UID. Refuse to run if either boundary is unavailable.
   spool - hand the job to the separate ``sandbox`` container (docker-compose: no network,
           no secrets, read-only fs) through a shared spool directory.
 """
@@ -75,23 +75,41 @@ def _netns_prefix() -> tuple[str, ...]:
 
 def isolation_report() -> dict:
     cfg = load_config()
-    return {"mode": cfg.sandbox_mode, "network_namespace": bool(_netns_prefix()),
-            "local_supported": sys.platform == "linux",
+    local_supported = cfg.sandbox_mode == "local" and local_available()
+    return {"mode": cfg.sandbox_mode, "network_namespace": local_supported,
+            "local_supported": local_supported,
             "drops_to_nobody": hasattr(os, "geteuid") and os.geteuid() == 0, "cpu_seconds": CPU_SECONDS,
             "memory_mb": MEMORY_BYTES // (1024 * 1024), "env": "cleared (no secrets)"}
+
+
+def local_available() -> bool:
+    return sys.platform == "linux" and os.geteuid() == 0 and bool(_netns_prefix())
+
+
+def python_strategies_allowed() -> bool:
+    mode = load_config().sandbox_mode
+    return mode == "spool" or (mode == "local" and local_available())
 
 
 def run_local(job: dict) -> dict:
     if sys.platform != "linux":
         raise SandboxError("local Python sandbox requires Linux; use Docker or Linux/WSL")
+    if not local_available():
+        raise SandboxError("local Python sandbox requires a separate UID and network namespace; use the sandbox container")
+    return _run_child(job, _netns_prefix())
+
+
+def _run_child(job: dict, prefix: tuple[str, ...] = ()) -> dict:
     child = str(Path(__file__).with_name("sandbox_child.py"))
-    cmd = list(_netns_prefix()) + [sys.executable, "-I", child]
+    cmd = [*prefix, sys.executable, "-I", child]
     try:
         p = subprocess.run(cmd, input=json.dumps(job), capture_output=True, text=True,
                            timeout=WALL_TIMEOUT, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
                            cwd=str(PKG_ROOT), preexec_fn=_limits, close_fds=True)
     except subprocess.TimeoutExpired:
         raise SandboxError(f"strategy code exceeded the {WALL_TIMEOUT}s wall-clock limit")
+    except (OSError, subprocess.SubprocessError):
+        raise SandboxError("could not start the isolated strategy process") from None
     if p.returncode != 0 and not p.stdout:
         raise SandboxError(f"sandbox exited with code {p.returncode}: {p.stderr[-300:]}")
     try:
@@ -121,7 +139,11 @@ def run_spool(job: dict, timeout: float = WALL_TIMEOUT + 30) -> dict:
 
 def run_job(job: dict) -> dict:
     mode = load_config().sandbox_mode
-    return run_spool(job) if mode == "spool" else run_local(job)
+    if mode == "spool":
+        return run_spool(job)
+    if mode == "local":
+        return run_local(job)
+    raise SandboxError("Python strategies are disabled; use a DSL strategy or configure the sandbox container")
 
 
 def run_code_signals(code: str, panel: dict, params: dict, runner=None):

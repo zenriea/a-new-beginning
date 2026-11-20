@@ -201,15 +201,15 @@ class LLM:
     def benched(self) -> bool:
         return self.route is not None and _benched_until.get(self._key, 0) > clock.now()
 
-    def _bench(self, why: str) -> None:
+    def _bench(self, status: int, daily_quota: bool) -> None:
         if self.route is not None:
             now = clock.now()
             until = now + HELPER_BENCH_SEC
-            if _daily_quota(why):
+            if daily_quota:
                 # shortcut: daily free quotas reset at midnight Pacific; 08:00 UTC is that in winter, an hour late in summer
                 until = max(until, (now - 8 * 3600) // 86400 * 86400 + 86400 + 8 * 3600)
             _benched_until[self._key] = until
-            log.warning("benching helper %s for %.1fh: %s", self.model, (until - now) / 3600, why[:200])
+            log.warning("benching helper %s for %.1fh after HTTP %s", self.model, (until - now) / 3600, status)
 
     @property
     def model(self) -> str:
@@ -279,30 +279,36 @@ class LLM:
             try:
                 r = post(f"{base}/chat/completions", headers=headers, json=body, timeout=300)
             except Exception as e:
-                self._record_end(cid, "error", f"{type(e).__name__}: {e}"[:1000], None, {"input_tokens": 0, "output_tokens": 0}, "")
-                raise LLMError(f"{purpose}: request failed: {type(e).__name__}: {e}") from e
-            persistent = ((r.status_code == 429 and _daily_quota(r.text)) or r.status_code == 404
-                          or r.status_code == 413)
+                error = f"Provider request failed ({type(e).__name__})"
+                self._record_end(cid, "error", error, None, {"input_tokens": 0, "output_tokens": 0}, "")
+                raise LLMError(f"{purpose}: {error}") from None
+            daily_quota = r.status_code == 429 and _daily_quota(r.text)
+            persistent = daily_quota or r.status_code in (404, 413)
             if r.status_code in (429, 500, 502, 503, 504) and transient < 2 and not persistent:
                 # overloaded / rate-limited / gateway timeout: brief backoff, then retry
                 transient += 1
-                self._record_end(cid, "retry", f"HTTP {r.status_code}, retrying: {r.text[:200]}", None,
-                                 {"input_tokens": 0, "output_tokens": 0}, r.text)
+                self._record_end(cid, "retry", f"HTTP {r.status_code}, retrying", None,
+                                 {"input_tokens": 0, "output_tokens": 0}, "")
                 self._sleep(4 * transient)
                 continue
             if r.status_code in (400, 422) and self._adapt(quirks, r.text):
-                self._record_end(cid, "retry", f"{r.status_code}, adapting request: {r.text[:300]}", None,
-                                 {"input_tokens": 0, "output_tokens": 0}, r.text)
+                self._record_end(cid, "retry", f"HTTP {r.status_code}, adapting request", None,
+                                 {"input_tokens": 0, "output_tokens": 0}, "")
                 continue
             if r.status_code >= 400:
-                self._record_end(cid, "error", f"HTTP {r.status_code}: {r.text[:500]}", None,
-                                 {"input_tokens": 0, "output_tokens": 0}, r.text)
+                error = f"Provider returned HTTP {r.status_code}"
+                self._record_end(cid, "error", error, None, {"input_tokens": 0, "output_tokens": 0}, "")
                 if r.status_code == 413 and self.route is not None:
                     _too_large[self._key] = min(_too_large.get(self._key, size), size)
                 elif persistent:
-                    self._bench(f"HTTP {r.status_code}: {r.text}")
-                raise LLMError(f"{purpose}: HTTP {r.status_code} from {base}: {r.text[:300]}")
-            data = r.json()
+                    self._bench(r.status_code, daily_quota)
+                raise LLMError(f"{purpose}: {error}")
+            try:
+                data = r.json()
+            except ValueError:
+                error = "Provider returned an invalid JSON response"
+                self._record_end(cid, "error", error, None, {"input_tokens": 0, "output_tokens": 0}, "")
+                raise LLMError(f"{purpose}: {error}") from None
             choice = (data.get("choices") or [{}])[0]
             msg = choice.get("message") or {}
             text = msg.get("content") or ""
@@ -379,13 +385,16 @@ class LLM:
                     resp = self.client.messages.create(**kwargs)
             except anthropic.BadRequestError as e:
                 if self.cfg.llm_fallbacks and "fallback" in str(e).lower():
-                    log.warning("fallbacks rejected (%s); retrying without", e)
+                    log.warning("Anthropic rejected fallbacks; retrying without them")
                     resp = self.client.messages.create(**kwargs)
                 else:
                     raise
         except Exception as e:
-            db.ex("UPDATE llm_calls SET status='error', error=? WHERE id=?", (f"{type(e).__name__}: {e}"[:1000], cid))
-            raise LLMError(f"{purpose}: API call failed: {type(e).__name__}: {e}") from e
+            status_code = getattr(e, "status_code", None)
+            error = (f"Provider returned HTTP {status_code}" if isinstance(status_code, int)
+                     else f"Provider request failed ({type(e).__name__})")
+            db.ex("UPDATE llm_calls SET status='error', error=? WHERE id=?", (error, cid))
+            raise LLMError(f"{purpose}: {error}") from None
         u = getattr(resp, "usage", None)
         usage = {"input_tokens": getattr(u, "input_tokens", 0) or 0, "output_tokens": getattr(u, "output_tokens", 0) or 0,
                  "cache_write_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,

@@ -103,13 +103,15 @@ def test_split_is_chronological_and_freeze_precedes_test(env, monkeypatch):
 def test_sandbox_blocks_and_detects_lookahead():
     from quantdesk.research import sandbox
     from quantdesk.research.sandbox_policy import PolicyError, check_source
+    if not sandbox.local_available():
+        pytest.skip("requires a separate UID and an available Linux network namespace")
     p = _panel(T=200)
     good = "def signals(o, h, l, c, v, p):\n    m = np.full_like(c, np.nan)\n    for i in range(9, len(c)):\n        m[i] = np.mean(c[i-9:i+1])\n    return c > m, c < m\n"
-    e, x = sandbox.run_code_signals(good, p, {})
+    e, x = sandbox.run_code_signals(good, p, {}, runner=sandbox.run_local)
     assert e.shape == (200, 3)
     peek = good.replace("c > m", "np.roll(c, -1) > c")
     with pytest.raises(sandbox.SandboxError, match="look-ahead"):
-        sandbox.run_code_signals(peek, p, {})
+        sandbox.run_code_signals(peek, p, {}, runner=sandbox.run_local)
     for evil in ["import os", "def signals(o,h,l,c,v,p):\n    return open('/etc/passwd'), c",
                  "def signals(o,h,l,c,v,p):\n    return c.__class__, c", "def signals(o,h,l,c,v,p):\n    return np.load('x'), c",
                  "def signals(o,h,l,c,v,p):\n    return c.tofile('x'), c"]:
@@ -120,20 +122,21 @@ def test_sandbox_blocks_and_detects_lookahead():
 @pytest.mark.skipif(sys.platform != "linux", reason="requires Linux sandbox resource/namespace isolation")
 def test_sandbox_has_no_secrets_or_network(monkeypatch):
     from quantdesk.research import sandbox
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret-should-not-leak")
-    # bypass the static policy to probe the process isolation itself
+    if not sandbox.local_available():
+        pytest.skip("requires a separate UID and an available Linux network namespace")
+    monkeypatch.setenv("QD_TEST_ISOLATION_SENTINEL", "parent-only")
     import json
     import subprocess
     import sys
-    probe = ("import os, socket\nr={'env': dict(os.environ)}\ntry:\n s=socket.create_connection(('1.1.1.1',443),2); r['net']=True\n"
-             "except Exception as e:\n r['net']=False\nprint(json.dumps(r))")
+    probe = ("import json, os, socket\n"
+             "print(json.dumps({'has_sentinel': 'QD_TEST_ISOLATION_SENTINEL' in os.environ, "
+             "'interfaces': [name for _, name in socket.if_nameindex()]}))")
     cmd = list(sandbox._netns_prefix()) + [sys.executable, "-I", "-c", "import json\n" + probe]
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env={"PATH": "/usr/bin:/bin"},
                        preexec_fn=sandbox._limits)
     out = json.loads(p.stdout)
-    assert "ANTHROPIC_API_KEY" not in out["env"]
-    if sandbox._netns_prefix():
-        assert out["net"] is False
+    assert not out["has_sentinel"]
+    assert out["interfaces"] == ["lo"]
 
 
 def _spec(**kw):
@@ -154,6 +157,32 @@ def test_local_sandbox_fails_closed_on_unsupported_platform(env, monkeypatch):
     with pytest.raises(sandbox.SandboxError, match="requires Linux"):
         sandbox.run_local({})
     assert sandbox.isolation_report()["local_supported"] is False
+
+
+@pytest.mark.parametrize(("uid", "prefix"), [(1000, ("unshare",)), (0, ())])
+def test_local_sandbox_requires_both_isolation_boundaries(monkeypatch, uid, prefix):
+    from quantdesk.research import sandbox
+    monkeypatch.setattr(sandbox.sys, "platform", "linux")
+    monkeypatch.setattr(sandbox.os, "geteuid", lambda: uid, raising=False)
+    monkeypatch.setattr(sandbox, "_netns_prefix", lambda: prefix)
+
+    def unexpected_child(*args):
+        pytest.fail("local mode started a process without both isolation boundaries")
+
+    monkeypatch.setattr(sandbox, "_run_child", unexpected_child)
+    with pytest.raises(sandbox.SandboxError, match="separate UID and network namespace"):
+        sandbox.run_local({})
+
+
+def test_spool_service_refuses_a_network_interface(monkeypatch):
+    from quantdesk.research import sandbox_service
+    monkeypatch.setattr(sandbox_service.sys, "platform", "linux")
+    monkeypatch.setattr(sandbox_service.os, "geteuid", lambda: 10001, raising=False)
+    monkeypatch.setattr(sandbox_service.socket, "if_nameindex", lambda: [(1, "lo"), (2, "eth0")])
+    with pytest.raises(SystemExit, match="network_mode: none"):
+        sandbox_service._check_isolation()
+    monkeypatch.setattr(sandbox_service.socket, "if_nameindex", lambda: [(1, "lo")])
+    sandbox_service._check_isolation()
 
 
 def test_every_grid_value_is_checked_and_dsl_errors_are_spec_errors():

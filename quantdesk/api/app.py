@@ -1,7 +1,7 @@
-"""HTTP API + static UI. Run: uvicorn quantdesk.api.app:app (or python -m quantdesk.api.app)
+"""HTTP API + static UI. Run with python -m quantdesk.api.app.
 
 Security
-  * Password login -> HMAC-signed, expiring session cookie (HttpOnly, SameSite=Strict,
+  * Password login -> opaque, revocable session cookie (HttpOnly, SameSite=Strict,
     Secure when QD_COOKIE_SECURE=1). Without QD_ADMIN_PASSWORD only loopback clients are
     served.
   * State-changing requests must carry header ``X-QD: 1`` (blocks cross-site forms).
@@ -16,7 +16,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import secrets
 import time
 from collections import defaultdict
@@ -41,12 +40,8 @@ log = logging.getLogger(__name__)
 WEB = Path(__file__).resolve().parents[2] / "web"
 SESSION_TTL = 12 * 3600
 cfg = load_config()
+cfg.check_api_bind()
 db.init(cfg.db_path)
-_secret = (cfg.session_secret or db.get_meta("session_secret") or "").encode()
-if not _secret:
-    s = secrets.token_hex(32)
-    db.set_meta("session_secret", s)
-    _secret = s.encode()
 
 app = FastAPI(title="QuantDesk", docs_url=None, redoc_url=None, openapi_url=None)
 _attempts: dict[str, list[float]] = defaultdict(list)
@@ -56,26 +51,31 @@ _attempts: dict[str, list[float]] = defaultdict(list)
 OPERATOR, VIEWER = "operator", "viewer"
 
 
-def _sign(exp: int, role: str = OPERATOR) -> str:
-    payload = str(exp) if role == OPERATOR else f"{exp}-{role}"
-    mac = hmac.new(_secret, payload.encode(), hashlib.sha256).hexdigest()
-    return f"{payload}.{mac}"
+def _session_digest(token: str | None) -> str | None:
+    if not token or len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
+        return None
+    return hmac.new(cfg.session_secret.encode(), token.encode("ascii"), hashlib.sha256).hexdigest()
 
 
 def _role(token: str | None) -> str | None:
-    """The signed role of a session cookie, or None when it is missing, forged or expired."""
-    if not token or len(token) > 160 or "." not in token:
+    digest = _session_digest(token)
+    if digest is None:
         return None
-    payload = token.split(".", 1)[0]
-    exp, _, role = payload.partition("-")
-    role = role or OPERATOR
-    if role not in (OPERATOR, VIEWER) or not exp.isdigit() or int(exp) < time.time():
-        return None
-    return role if hmac.compare_digest(_sign(int(exp), role), token) else None
+    row = db.q1("SELECT role FROM web_sessions WHERE token_digest=? AND expires_at>?", (digest, time.time()))
+    return row["role"] if row else None
 
 
-def _valid(token: str | None) -> bool:
-    return _role(token) is not None
+def _start_session(role: str, ip: str, previous: str | None) -> str:
+    token = secrets.token_hex(32)
+    now = time.time()
+    with db.tx() as conn:
+        conn.execute("DELETE FROM web_sessions WHERE expires_at<=?", (now,))
+        conn.execute("DELETE FROM web_sessions WHERE token_digest=?", (_session_digest(previous),))
+        conn.execute("INSERT INTO web_sessions(token_digest, role, expires_at) VALUES(?,?,?)",
+                     (_session_digest(token), role, now + SESSION_TTL))
+        conn.execute("INSERT INTO audit_log(ts, actor, action, detail) VALUES(?,?,?,?)",
+                     (clock.now(), role, "login", db.dumps({"ip": ip})))
+    return token
 
 
 def _client_ip(request: Request) -> str:
@@ -84,7 +84,8 @@ def _client_ip(request: Request) -> str:
 
 def require_auth(request: Request) -> str:
     if not cfg.admin_password:
-        if (_client_ip(request) not in ("127.0.0.1", "::1", "testclient")
+        if (not cfg.loopback_bind or _client_ip(request) not in ("127.0.0.1", "::1", "testclient")
+                or "x-forwarded-for" in request.headers or "forwarded" in request.headers
                 or request.url.hostname not in ("127.0.0.1", "::1", "localhost", "testserver")):
             raise HTTPException(403, "QD_ADMIN_PASSWORD is not set: remote access disabled")
         return OPERATOR
@@ -113,7 +114,8 @@ def require_write(request: Request):
 
 def _require_same_origin(request: Request):
     origin = request.headers.get("origin")
-    if origin and origin != str(request.base_url).rstrip("/"):
+    expected = cfg.public_origin or str(request.base_url).rstrip("/")
+    if origin and origin != expected:
         raise HTTPException(403, "cross-origin writes are not allowed")
 
 
@@ -161,21 +163,22 @@ async def login(body: LoginBody, request: Request, response: Response):
         await asyncio.sleep(1.0)
         raise HTTPException(401, "wrong password")
     role = OPERATOR if is_operator else VIEWER
-    response.set_cookie("qd_session", _sign(int(now + SESSION_TTL), role), max_age=SESSION_TTL, httponly=True,
+    token = await run_in_threadpool(_start_session, role, ip, request.cookies.get("qd_session"))
+    response.set_cookie("qd_session", token, max_age=SESSION_TTL, httponly=True,
                         samesite="strict", secure=cfg.cookie_secure, path="/")
-    db.ex("INSERT INTO audit_log(ts, actor, action, detail) VALUES(?,?,?,?)",
-          (clock.now(), role, "login", db.dumps({"ip": ip})))
     return {"ok": True, "role": role}
 
 
 @app.post("/api/logout", dependencies=[Depends(require_auth), Depends(_require_csrf)])
-async def logout(response: Response):
-    response.delete_cookie("qd_session", path="/")
+def logout(request: Request, response: Response):
+    if cfg.admin_password:
+        db.ex("DELETE FROM web_sessions WHERE token_digest=?", (_session_digest(request.cookies.get("qd_session")),))
+    response.delete_cookie("qd_session", path="/", httponly=True, samesite="strict", secure=cfg.cookie_secure)
     return {"ok": True}
 
 
 @app.get("/api/session")
-async def session(request: Request):
+def session(request: Request):
     try:
         role = require_auth(request)
         return {"authenticated": True, "password_required": bool(cfg.admin_password), "role": role}
@@ -320,7 +323,7 @@ async def stream(request: Request, after_id: int = Query(0, ge=0)):
         while True:
             if await request.is_disconnected():
                 break
-            if cfg.admin_password and not _valid(request.cookies.get("qd_session")):
+            if cfg.admin_password and not await run_in_threadpool(_role, request.cookies.get("qd_session")):
                 break
             rows = await run_in_threadpool(journal.since, last, 50)
             for r in rows:
@@ -750,8 +753,9 @@ async def index():
 
 def main():
     import uvicorn
-    uvicorn.run("quantdesk.api.app:app", host=cfg.bind_host, port=cfg.bind_port, proxy_headers=True,
-                forwarded_allow_ips=os.environ.get("QD_TRUSTED_PROXIES", "127.0.0.1"))
+    uvicorn.run(app, host=cfg.bind_host, port=cfg.bind_port,
+                proxy_headers=bool(cfg.admin_password and cfg.trusted_proxies),
+                forwarded_allow_ips=cfg.trusted_proxies)
 
 
 if __name__ == "__main__":

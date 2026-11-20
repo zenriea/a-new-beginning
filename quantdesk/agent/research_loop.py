@@ -17,6 +17,7 @@ from ..config import load_config
 from ..research import gates as G
 from ..research.experiment import ExperimentError, run_experiment, validate_research_spec
 from ..research.observe import observe
+from ..research.sandbox import python_strategies_allowed
 from ..research.strategy import SpecError, describe_rules, spec_hash
 from ..trading import ledger
 from . import journal
@@ -178,6 +179,7 @@ def research_cycle(venue: str, analyst=None) -> dict:
         "research_memory": memory(venue),
         "active_strategies": portfolio_summary()["active_strategies"],
         "limits": {"max_param_combos": rs["max_param_combos"]},
+        "python_strategies_allowed": python_strategies_allowed(),
         "now": clock.now(),
     }
     journal.set_status("researching", f"{venue}: forming a hypothesis")
@@ -197,6 +199,8 @@ def research_cycle(venue: str, analyst=None) -> dict:
     for attempt in range(2):
         try:
             validate_research_spec(spec, allowed, rs["max_param_combos"])
+            if spec.get("kind") == "code" and not ctx["python_strategies_allowed"]:
+                raise SpecError("Python strategy execution is unavailable. Use kind='dsl'.")
             if author == "llm":
                 validate_trade_economics(prop, spec, venue, round_trip)
             break

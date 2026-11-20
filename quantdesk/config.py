@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from ipaddress import ip_network
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _load_dotenv(path: Path) -> None:
@@ -78,8 +80,10 @@ class Config:
     bind_host: str
     bind_port: int
     cookie_secure: bool
+    trusted_proxies: str
+    public_origin: str
     # --- sandbox ---
-    sandbox_mode: str  # "local" or "spool"
+    sandbox_mode: str  # "disabled", "local" or "spool"
     sandbox_spool_dir: Path
     # --- hard ceilings (cannot be exceeded by operator settings either) ---
     ceiling_max_position_pct: float = 0.35
@@ -89,6 +93,14 @@ class Config:
     ceiling_monthly_llm_usd: float = 500.0
     initial_capital: float = 100_000.0
     extra: dict = field(default_factory=dict)
+
+    @property
+    def loopback_bind(self) -> bool:
+        return self.bind_host in ("127.0.0.1", "::1", "localhost")
+
+    def check_api_bind(self) -> None:
+        if not self.admin_password and not self.loopback_bind:
+            raise ValueError("QD_ADMIN_PASSWORD is required when the API listens beyond loopback")
 
     @property
     def demo_llm(self) -> bool:
@@ -164,6 +176,35 @@ def _check_viewer_password(pw: str, admin: str) -> str:
     return pw
 
 
+def _trusted_proxies() -> str:
+    proxies = _env("QD_TRUSTED_PROXIES")
+    for proxy in proxies.split(",") if proxies else ():
+        try:
+            network = ip_network(proxy.strip())
+            if network.prefixlen == 0:
+                raise ValueError
+        except ValueError:
+            raise ValueError("QD_TRUSTED_PROXIES must list specific proxy IPs or CIDRs") from None
+    return proxies
+
+
+def _public_origin() -> str:
+    origin = _env("QD_PUBLIC_ORIGIN").rstrip("/")
+    if not origin:
+        return ""
+    try:
+        url = urlsplit(origin)
+        port = url.port
+        if (url.scheme != "https" or not url.hostname or url.username is not None
+                or url.path or "?" in origin or "#" in origin or port == 0
+                or any(c.isspace() for c in origin)):
+            raise ValueError
+    except ValueError:
+        raise ValueError("QD_PUBLIC_ORIGIN must be an HTTPS origin without credentials or a path") from None
+    host = f"[{url.hostname}]" if ":" in url.hostname else url.hostname
+    return f"https://{host}:{port}" if port and port != 443 else f"https://{host}"
+
+
 def load_config(reload: bool = False, **overrides) -> Config:
     global _CONFIG
     if _CONFIG is not None and not reload and not overrides:
@@ -195,6 +236,8 @@ def load_config(reload: bool = False, **overrides) -> Config:
         bind_host=_env("QD_BIND_HOST", "127.0.0.1"),
         bind_port=_env_int("QD_PORT", 8000),
         cookie_secure=_env_bool("QD_COOKIE_SECURE", False),
+        trusted_proxies=_trusted_proxies(),
+        public_origin=_public_origin(),
         sandbox_mode=_env("QD_SANDBOX_MODE", "local"),
         sandbox_spool_dir=Path(_env("QD_SANDBOX_SPOOL", str(data_dir / "sandbox-spool"))),
         initial_capital=_env_float("QD_INITIAL_CAPITAL", 100_000.0),

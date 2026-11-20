@@ -18,6 +18,10 @@ SCHEMA_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS web_sessions (
+  token_digest TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('operator', 'viewer')),
+  expires_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS web_sessions_expires ON web_sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL, updated_by TEXT);

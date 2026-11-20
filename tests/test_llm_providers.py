@@ -50,6 +50,23 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["answer"
           "properties": {"answer": {"type": "string"}, "n": {"type": "integer"}}}
 
 
+def test_provider_errors_keep_status_without_raw_upstream_text(compat, monkeypatch):
+    from quantdesk import db
+    from quantdesk.agent.llm import LLM, LLMError
+
+    monkeypatch.setattr(LLM, "_sleep", staticmethod(lambda seconds: None))
+    upstream_text = f"Provider echoed credential: {compat.llm_api_key}"
+    provider = FakeServer([Resp(503, text=upstream_text), Resp(401, text=upstream_text)])
+    with pytest.raises(LLMError, match="Provider returned HTTP 401") as error:
+        LLM(http_post=provider).call("question", "sys", "user", SCHEMA)
+    assert compat.llm_api_key not in str(error.value)
+    rows = db.q("SELECT status, error, response FROM llm_calls ORDER BY id")
+    assert [tuple(row) for row in rows] == [
+        ("retry", "HTTP 503, retrying", ""),
+        ("error", "Provider returned HTTP 401", ""),
+    ]
+
+
 def test_config_and_label(compat):
     assert compat.llm_provider == "openai_compatible" and not compat.demo_llm
     assert compat.llm_label == "test-model (llm.example.com)"
