@@ -501,7 +501,7 @@ def rejudge_experiment(eid: int, analyst=None) -> dict:
         journal.write("system", f"Experiment {eid} cannot be re-judged", "Only finished experiments with stored test "
                       "results can be re-judged.", author="system")
         return {"status": "not_found"}
-    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND (probe=0 OR status IN ('active','incubating'))", (eid,)):
+    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND probe=0", (eid,)):
         journal.write("system", f"Experiment {eid} already has a strategy", "Nothing to re-judge.", author="system")
         return {"status": "exists"}
     h = dict(db.q1("SELECT * FROM hypotheses WHERE id=?", (e["hypothesis_id"],)))
@@ -517,6 +517,9 @@ def rejudge_experiment(eid: int, analyst=None) -> dict:
                   refs={"experiment_id": eid, "hypothesis_id": h["id"]}, author="rules")
     if not gres["passed"]:
         return {"status": "done", "experiment_id": eid, "decision": "reject"}
+    from ..trading.live import retire_strategy
+    for p in db.q("SELECT * FROM strategies WHERE experiment_id=? AND probe=1 AND status IN ('active','incubating')", (eid,)):
+        retire_strategy(dict(p), f"Promoted experiment {eid} from probe to full strategy.", origin="operator")
     prop = {k: h[k] for k in ("title", "rationale", "prediction", "falsification")}
     obs = record_observation(venue)
     return _decide(venue, eid, h["id"], prop, spec, res, gres, obs, settings.get("benchmarks")[venue],

@@ -266,3 +266,35 @@ def test_one_failing_fill_does_not_roll_back_the_other_orders(env, monkeypatch):
     row = db.q1("SELECT status, status_note FROM orders WHERE id=?", (bad["id"],))
     assert row["status"] == "cancelled" and "booking failed" in row["status_note"]
     assert db.q1("SELECT status FROM orders WHERE id=?", (good["id"],))["status"] == "filled"
+
+
+def test_fractional_shares_allows_small_probe_to_buy_high_priced_stock(env):
+    from quantdesk import clock, db, settings
+    from quantdesk.marketdata import freshness
+    from quantdesk.trading import execution, live
+    exp = freshness.expected_last_bar("NASDAQ", clock.now())
+    put_bars("COST", [900.0] * 40, start=exp - 39 * 900)
+    put_bars("QQQ", [500.0] * 40, start=exp - 39 * 900)
+    put_quote("COST", 900.0, 900.10)
+    # $3,000 probe x 0.25 weight = $750 notional (< 1 whole share of $900 COST).
+    spec = {"name": "probe_frac", "venue": "NASDAQ", "universe": ["COST"], "kind": "dsl",
+            "entry": "close > 0", "exit": "close < 0",
+            "sizing": {"method": "fixed", "weight": 0.25, "max_weight": 0.25}, "params": {}, "fixed_params": {}}
+    sid = make_strategy(spec, allocation=3000.0, venue="NASDAQ")
+    db.ex("UPDATE strategies SET last_signal_bar=0 WHERE id=?", (sid,))
+    strat = dict(db.q1("SELECT * FROM strategies WHERE id=?", (sid,)))
+    # Whole shares (default): skipped because floor(750/900) == 0.
+    res_whole = live.evaluate_strategy(strat)
+    assert res_whole["orders"] == []
+    # Fractional shares enabled: buys 0.833333 shares and fills cleanly.
+    settings.operator_update("execution", {"fractional_shares": True})
+    db.ex("UPDATE strategies SET last_signal_bar=0 WHERE id=?", (sid,))
+    strat = dict(db.q1("SELECT * FROM strategies WHERE id=?", (sid,)))
+    res_frac = live.evaluate_strategy(strat)
+    assert len(res_frac["orders"]) == 1
+    order = db.q1("SELECT status, qty FROM orders WHERE id=?", (res_frac["orders"][0],))
+    assert order["status"] == "submitted" and order["qty"] == pytest.approx(0.833333, rel=1e-5)
+    clock.advance(3)
+    put_quote("COST", 900.0, 900.10)
+    fills = execution.process_orders()
+    assert len(fills) == 1 and fills[0]["qty"] == pytest.approx(0.833333, rel=1e-5)

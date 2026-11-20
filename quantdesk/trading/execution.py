@@ -18,7 +18,7 @@ import math
 from .. import clock, db, settings, venues
 from ..agent import journal
 from ..marketdata import store
-from ..venues import VENUES
+from ..venues import VENUES, qty_decimals
 from . import costs as C
 from . import ledger, oms, risk
 from .liquidity import estimates, lookback_bars
@@ -131,6 +131,7 @@ def _process_order(o: dict, now: float, agent: dict, lim: dict, costs_all: dict)
             oms.close_order(o, "cancelled", "New risk blocked at fill time (paused, drawdown halt or daily loss limit).")
             return None
     cost_cfg = costs_all[venue]
+    frac = bool(settings.get("execution").get("fractional_shares"))
     q = store.get_quote(o["symbol"])
     ref_px, ref = _price_basis(o, q, now, lim, cost_cfg)
     if ref_px is None:
@@ -142,7 +143,7 @@ def _process_order(o: dict, now: float, agent: dict, lim: dict, costs_all: dict)
         max_notional = lim["max_participation"] * adv
         if remaining * ref_px > max_notional:
             capped = max_notional / ref_px
-            dec = VENUES[venue].qty_decimals
+            dec = qty_decimals(venue, frac)
             capped = math.floor(capped * 10 ** dec) / 10 ** dec
             cap_note = (f"Liquidity cap: order {remaining:g} > {lim['max_participation']:.2%} of ADV "
                         f"(${adv:,.0f}); filled {capped:g}, remainder cancelled.")
@@ -166,7 +167,7 @@ def _process_order(o: dict, now: float, agent: dict, lim: dict, costs_all: dict)
         snap = risk.snapshot_for(req, exclude_order_id=o["id"])
         # _price_basis already validated this exact quote/last-trade fallback.
         snap.quote_ok, snap.quote_age = True, now - ref["ts"]
-        decision = risk.evaluate(req, snap, lim, check_order_rate=False)
+        decision = risk.evaluate(req, snap, lim, check_order_rate=False, fractional_shares=frac)
         db.ex("INSERT INTO risk_events(ts, kind, detail, order_id) VALUES(?,?,?,?)",
               (now, "fill_risk_check", db.dumps(decision.as_dict()), o["id"]))
         if not decision.approved:

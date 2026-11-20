@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from .. import clock, db, settings, venues
 from ..marketdata import store
-from ..venues import VENUES, venue_of
+from ..venues import qty_decimals, venue_of
 from . import ledger
 
 
@@ -67,10 +67,11 @@ class Decision:
                 "reason": self.reason, "resized": self.resized}
 
 
-def evaluate(req: OrderRequest, s: Snapshot, lim: dict, *, check_order_rate: bool = True) -> Decision:
+def evaluate(req: OrderRequest, s: Snapshot, lim: dict, *, check_order_rate: bool = True,
+             fractional_shares: bool = False) -> Decision:
     checks = []
     venue = venue_of(req.symbol)
-    decimals = VENUES[venue].qty_decimals
+    decimals = qty_decimals(venue, fractional_shares)
 
     def note(name, ok, detail):
         checks.append({"check": name, "pass": bool(ok), "detail": detail})
@@ -248,7 +249,7 @@ def check(req: OrderRequest, bars_ok: bool = True, at_submission_time: bool = Fa
         snap.market_open = True
         snap.quote_ok = True
         snap.quote_age = 0.0
-    return evaluate(req, snap, lim)
+    return evaluate(req, snap, lim, fractional_shares=bool(settings.get("execution").get("fractional_shares")))
 
 
 def monitor() -> list[dict]:

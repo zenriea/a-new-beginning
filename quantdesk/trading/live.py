@@ -14,7 +14,7 @@ from ..research import dsl
 from ..research.backtest import StepView
 from ..research.experiment import build_panel
 from ..research.strategy import PosState, compute_signals, entry_weight, step
-from ..venues import VENUES
+from ..venues import VENUES, qty_decimals
 from . import ledger, oms
 
 
@@ -150,7 +150,8 @@ def evaluate_strategy(strat: dict) -> dict:
             notional = w * sleeve["equity"]
             px = close_row[k]
             qty = notional / px
-            qty = math.floor(qty) if v.qty_decimals == 0 else math.floor(qty * 1e8) / 1e8
+            dec = qty_decimals(venue, bool(settings.get("execution").get("fractional_shares")))
+            qty = math.floor(qty) if dec == 0 else math.floor(qty * 10 ** dec) / 10 ** dec
             if qty <= 0 or notional < 1:
                 states[s].in_position = False
                 _save_states(sid, {s: states[s]}, expected)
