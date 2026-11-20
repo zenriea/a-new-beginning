@@ -86,7 +86,7 @@ def main() -> None:
     cfg = load_config()
     server = uvicorn.Server(uvicorn.Config("quantdesk.api.app:app", host=cfg.bind_host, port=cfg.bind_port,
                                            proxy_headers=True,
-                                           forwarded_allow_ips=os.environ.get("QD_TRUSTED_PROXIES", "127.0.0.1")))
+                                           forwarded_allow_ips=os.environ.get("QD_TRUSTED_PROXIES", "*")))
     server.install_signal_handlers = lambda: None  # we handle signals ourselves
     try:
         server.run()

@@ -123,6 +123,7 @@ def evaluate_strategy(strat: dict) -> dict:
         market_col = syms.index(bench) if bench in syms else None
         sleeve = ledger.sleeve_equity(sid, strat["allocation"])
         created = []
+        exited_syms: set[str] = set()
         label = _bar_label(venue, expected)
         for k, reason in res.exit:
             s = spec["universe"][k]
@@ -140,6 +141,7 @@ def evaluate_strategy(strat: dict) -> dict:
                                  idem_key=f"{sid}:{s}:{expected}:sell", strategy_id=sid,
                                  signal_snapshot={"bar": expected, "close": float(close_row[k]), "rule_values": ev})
             created.append(o["id"])
+            exited_syms.add(s)
         thesis = strat["thesis"]
         for k in res.enter:
             s = spec["universe"][k]
@@ -175,7 +177,7 @@ def evaluate_strategy(strat: dict) -> dict:
                                  signal_snapshot={"bar": expected, "close": float(px), "weight": w, "rule_values": ev})
             created.append(o["id"])
         db.ex("UPDATE strategies SET last_signal_bar=? WHERE id=?", (expected, sid))
-    reconcile_sleeve(strat, expected)
+    reconcile_sleeve(strat, expected, skip_symbols=exited_syms)
     return {"status": "evaluated", "bar": expected, "orders": created,
             "entries": [spec["universe"][k] for k in res.enter], "exits": [spec["universe"][k] for k, _ in res.exit]}
 
@@ -207,13 +209,15 @@ def activate_waiting() -> list[int]:
     return out
 
 
-def reconcile_sleeve(strat: dict, bar: int) -> None:
+def reconcile_sleeve(strat: dict, bar: int, skip_symbols: set[str] | tuple[str, ...] = ()) -> None:
     """Keep state machine and holdings consistent (e.g. after rejected/expired orders)."""
     sid = strat["id"]
     states = {r["symbol"]: r for r in db.q("SELECT * FROM strategy_state WHERE strategy_id=?", (sid,))}
     open_syms = {(r["symbol"], r["side"]) for r in db.q(
         "SELECT symbol, side FROM orders WHERE strategy_id=? AND status IN ('intent','submitted','partially_filled')", (sid,))}
     for p in ledger.sleeve_positions(sid):
+        if p["symbol"] in skip_symbols:
+            continue
         st = states.get(p["symbol"])
         if (st is None or not st["in_position"]) and (p["symbol"], "sell") not in open_syms:
             oms.create_order(symbol=p["symbol"], side="sell", qty=p["qty"], reason="reconcile",

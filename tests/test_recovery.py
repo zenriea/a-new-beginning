@@ -27,10 +27,20 @@ def test_recover_reports_downtime_and_cleans_up(env):
           (clock.now(),))
     db.ex("INSERT INTO experiments(hypothesis_id, created_at, venue, kind, spec, spec_hash, status) VALUES(1, ?, 'NASDAQ', 'dsl', '{}', 'h', 'running')",
           (clock.now(),))
+    db.ex("INSERT INTO llm_calls(ts, purpose, model, status) VALUES(?, 'hypothesis', 'm', 'pending')", (clock.now(),))
+    db.ex("INSERT INTO llm_calls(ts, purpose, model, status) VALUES(?, 'question', 'm', 'pending')", (clock.now(),))
+    db.ex("INSERT INTO jobs(name, last_started_at, last_finished_at, last_status, run_count) VALUES('research:CRYPTO', ?, ?, 'running', 5)",
+          (clock.now() - 10, clock.now() - 7200))
+    db.ex("INSERT INTO data_status(key, ok, last_error, changed_at) VALUES('bars:ROKU', 0, 'old', ?)", (clock.now(),))
     info = recover(clock.now() - 3 * 3600)
     assert info["downtime"] == pytest.approx(3 * 3600)
     assert db.q1("SELECT status FROM orders WHERE client_order_id='stuck'")["status"] == "cancelled"
     assert db.q1("SELECT status FROM experiments")["status"] == "interrupted"
+    assert db.q1("SELECT status FROM llm_calls WHERE purpose='hypothesis'")["status"] == "interrupted"
+    assert db.q1("SELECT status FROM llm_calls WHERE purpose='question'")["status"] == "pending"
+    job = db.q1("SELECT * FROM jobs WHERE name='research:CRYPTO'")
+    assert job["last_status"] == "interrupted" and job["last_started_at"] == pytest.approx(clock.now() - 7200)
+    assert db.q1("SELECT 1 FROM data_status WHERE key='bars:ROKU'") is None
     titles = [r["title"] for r in db.q("SELECT title FROM journal")]
     assert any("Back online" in t for t in titles)
     assert info["integrity"]["ok"]
@@ -101,6 +111,31 @@ def test_rejected_entry_resets_state_and_reconcile_closes_orphans(env):
     live.evaluate_strategy(s)
     assert db.q1("SELECT status FROM orders")["status"] == "rejected"
     assert db.q1("SELECT in_position FROM strategy_state WHERE strategy_id=?", (sid,))["in_position"] == 0
+
+
+def test_rejected_exit_does_not_immediately_duplicate_reconcile_order(env):
+    from quantdesk import db
+    from quantdesk.trading import live
+    _daily_setup()
+    sid = make_strategy({"entry": "close < 0", "exit": "close > 0"})
+    db.ex("INSERT INTO positions(strategy_id, symbol, venue, qty, avg_cost) VALUES(?, 'AAPL', 'NASDAQ', 10, 100.0)", (sid,))
+    db.ex("INSERT INTO strategy_state(strategy_id, symbol, in_position, entry_price) VALUES(?, 'AAPL', 1, 100.0)", (sid,))
+    # No fresh quote -> exit sell is rejected by risk engine; reconcile_sleeve must not fire a second sell on the same tick.
+    s = dict(db.q1("SELECT * FROM strategies WHERE id=?", (sid,)))
+    live.evaluate_strategy(s)
+    orders = db.q("SELECT reason, status FROM orders WHERE strategy_id=?", (sid,))
+    assert len(orders) == 1 and orders[0]["reason"] == "exit rule" and orders[0]["status"] == "rejected"
+
+
+def test_retired_strategy_freezes_days_live(env):
+    from quantdesk import clock, db
+    from quantdesk.agent.review import live_stats
+    sid = make_strategy()
+    clock.advance(2 * 86400)
+    db.ex("UPDATE strategies SET status='retired', retired_at=? WHERE id=?", (clock.now(), sid))
+    clock.advance(5 * 86400)
+    st = live_stats(dict(db.q1("SELECT * FROM strategies WHERE id=?", (sid,))))
+    assert st["days_live"] == pytest.approx(2.0, abs=0.01)
 
 
 def test_provider_outage_backs_off_instead_of_blocking(env):

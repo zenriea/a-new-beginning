@@ -6,6 +6,7 @@ decisions, journal, llm_calls) is append-mostly so the history stays auditable.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -238,8 +239,18 @@ def ex(sql: str, params: Iterable[Any] = ()) -> int:
     return cur.lastrowid
 
 
+def _sanitize(obj: Any) -> Any:
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize(v) for v in obj]
+    return obj
+
+
 def dumps(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, default=_json_default, separators=(",", ":"))
+    return json.dumps(_sanitize(obj), sort_keys=True, default=_json_default, separators=(",", ":"), allow_nan=False)
 
 
 def loads(s: str | None, default: Any = None) -> Any:
@@ -256,7 +267,7 @@ def _json_default(o: Any):
         if isinstance(o, np.floating):
             return None if not np.isfinite(o) else float(o)
         if isinstance(o, np.ndarray):
-            return o.tolist()
+            return _sanitize(o.tolist())
         if isinstance(o, np.bool_):
             return bool(o)
     except ImportError:  # pragma: no cover

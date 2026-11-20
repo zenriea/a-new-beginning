@@ -1,6 +1,6 @@
 // QuantDesk UI. Vanilla JS; every server string is escaped before it touches the DOM.
 import { changeDirection, deskHealth, displayedActivity, equityComparison, equityInRange, formatLimit, friendlyGates, fromDisplay, gateCount, gateLabel,
-  checkinSummary, holdoutLabel, journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=candidate-alignment";
+  checkinSummary, holdoutLabel, journalMatches, journalPresentation, limitUsage, LIMIT_FIELDS, parseSymbols, sameValue, symbolDiff, showAnnualizedReturn, toDisplay, tradingVerdict, UNIT_SUFFIX } from "./ui-model.mjs?v=audit-fixes";
 
 const $ = (s, el = document) => el.querySelector(s);
 // Viewers (read-only share) see results, never controls, prompts or limits.
@@ -449,7 +449,16 @@ function renderEquity() {
   const decimals = spread < 20 ? 2 : spread < 200 ? 1 : 0;
   if (decimals !== state.equityDecimals) { state.equityDecimals = decimals; state.charts.equity?.chart.applyOptions(themedChartOptions()); }
   const c = ensureEquityChart();
-  const ser = (f) => rows.filter((r) => r[f] != null).map((r) => ({ time: Math.floor(r.ts), value: r[f] }));
+  const ser = (f) => {
+    const out = [];
+    for (const r of rows) {
+      if (r[f] == null) continue;
+      const t = Math.floor(r.ts);
+      if (out.length && out.at(-1).time === t) out.at(-1).value = r[f];
+      else out.push({ time: t, value: r[f] });
+    }
+    return out;
+  };
   c.acct.setData(ser("equity")); c.bench.setData(ser("benchmark_equity")); c.btc.setData(ser("crypto_benchmark_equity"));
   $("#equity-tip").textContent = "";
   const note = $("#equity-range-note");
@@ -720,7 +729,7 @@ function drawResearch(body = $("#tab-body")) {
     <div class="tbl-scroll"><table class="tbl research-tbl"><thead><tr>${th("id", "#")}${th("title", "Hypothesis")}${th("status", "Status")}${th("ret", "Historical return", "r")}
     ${th("sharpe", "Sharpe", "r")}${th("trades", "Trades", "r")}${th("gates", "Gates")}</tr></thead><tbody>
     ${sortedResearch(ex).map((e) => `<tr class="clickable" data-exp="${e.id}"><td class="num id-cell">#${e.id}</td><td class="hyp"><a href="#" data-exp="${e.id}">${esc(e.title)}</a><div class="muted cell-sub">${esc(e.venue)} · ${authorLabel(e.author)} · ${ago(e.created_at)}</div></td>
-      <td data-label="Status">${expStatus(e.status)}${e.strategy_id ? `<div class="cell-sub"><span class="${e.strategy_probe ? "probe-chip" : "strategy-chip"}">${e.strategy_probe ? `probe #${e.strategy_id} · forward test` : `strategy #${e.strategy_id}`}</span></div>` : ""}</td>
+      <td data-label="Status">${expStatus(e.status)}${e.strategy_id ? `<div class="cell-sub"><span class="${e.strategy_probe ? "probe-chip" : "strategy-chip"}">${e.strategy_probe ? `probe #${e.strategy_id} · ${!e.strategy_status || e.strategy_status === "active" ? "forward test" : esc(e.strategy_status)}` : `strategy #${e.strategy_id}${e.strategy_status && e.strategy_status !== "active" ? ` · ${esc(e.strategy_status)}` : ""}`}</span></div>` : ""}</td>
       <td class="r" data-label="Historical return"><span class="num ${signCls(e.test?.total_return)}">${pct(e.test?.total_return)}</span>${e.test ? `<div class="muted cell-sub">${holdoutLabel(e.leakage?.holdout_reuse_count, e.leakage?.deflation_window_days)}</div>` : ""}</td><td class="r num" data-label="Sharpe">${num(e.test?.sharpe)}</td>
       <td class="r num" data-label="Trades">${e.test?.n_trades ?? "–"}</td><td class="gates" data-label="Gates">${gatesCell(e)}</td></tr>`).join("")}</tbody></table></div>
     <div class="research-note">Open an experiment to see its hypothesis, sealed test and gates${isOperator() ? ", or to start it as a probe" : ""}.</div>`;
@@ -1208,10 +1217,10 @@ async function openExperiment(id) {
     <div class="section"><h3>Acceptance gates: ${checks.length ? gateCount(checks.length, missed.length) : "not evaluated"}</h3>
       ${missed.length ? '<p class="muted cell-sub">Missed checks</p>' + gateRows(missed) : ""}
       ${passed.length ? `<details class="record-details"><summary>${passed.length} passed ${passed.length === 1 ? "check" : "checks"}</summary>${gateRows(passed)}</details>` : ""}</div>
-    ${e.test && !e.strategy && e.status !== "running" && isOperator() ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
+    ${e.test && e.status !== "running" && isOperator() && (!e.strategy || (e.strategy.probe && e.strategy.status === "retired")) ? `<div class="rejudge-box"><div><b>Re-judge under current gates</b>
       <p>Re-checks the stored results against today's thresholds. No new backtest and no new look at the sealed test window. If every gate passes, the analyst makes a fresh decision.</p></div>
-      <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>
-    <div class="rejudge-box probe-box"><div><b>Paper-trade it as a manual probe</b>
+      <button class="btn" data-rejudge="${e.id}">Re-judge #${e.id}</button></div>` : ""}
+    ${e.test && e.status !== "running" && isOperator() && (e.operator_probe_blocker === undefined ? (!e.strategy || !["active", "incubating"].includes(e.strategy.status)) : !e.operator_probe_blocker) ? `<div class="rejudge-box probe-box"><div><b>Paper-trade it as a manual probe</b>
       <p>Starts a small, clearly-labelled forward test with ${pct(state.s?.pipeline?.probe.allocation_pct ?? 0.03, 0, false)} of equity for ${state.s?.pipeline?.probe.lifetime_days ?? 14} days.
       Uses the frozen rules and the normal risk checks. ${(e.test.total_return ?? 0) > 0 ? "It made money on its sealed test." : "<b>It lost money on its sealed test</b>, so expect the same unless conditions changed."}</p></div>
       <button class="btn ${(e.test.total_return ?? 0) > 0 ? "primary" : ""}" data-probe="${e.id}" data-lost="${(e.test.total_return ?? 0) > 0 ? 0 : 1}">Start manual probe…</button></div>` : ""}
@@ -1395,15 +1404,16 @@ function entryHTML(j, fresh) {
   const next = decision?.outcome === "allocate" ? "Admitted to regular paper trading, subject to allocation limits." :
     decision?.outcome === "revise" ? "Revision recorded. No regular allocation for these rules." :
     decision?.outcome === "reject" ? "No regular allocation. Any paper probe is a separate decision." : null;
-  const grounded = Array.isArray(checks) || !!next;
+  const hasChecks = Array.isArray(checks) && checks.length > 0;
+  const grounded = hasChecks || !!next;
   const long = !grounded && (j.body || "").length > 420;
   const evidence = next ? `<b>Recorded test result</b>
     <p>Historical return after costs: ${pct(decision.test_return)} · Trades: ${esc(decision.test_trades ?? "–")}.
     ${decision.gates_passed ? "All gates passed." : `Missed gates: ${decision.failed_gates.map((g) => esc(gateLabel(g))).join(", ")}.`}</p>
     <p><b>Next:</b> ${next}</p>` :
-    checks?.length ? `<b>Recorded trade counts</b><ul>${checks.map((c) =>
+    hasChecks ? `<b>Recorded trade counts</b><ul>${checks.map((c) =>
     `<li><a href="#" data-exp="${esc(c.experiment_id)}">Experiment #${esc(c.experiment_id)}</a>: ${esc(c.trades)} trades; ${c.trades >= c.minimum ? "met" : "below"} the minimum of ${esc(c.minimum)}.</li>`).join("")}</ul>` :
-    "No cited trade-count check available.";
+    "";
   return `<div class="entry k-${esc(kind)} ${fresh ? "fresh" : ""}" data-jid="${j.id}">
     <time class="entry-time" datetime="${esc(new Date(j.ts * 1000).toISOString())}" title="${esc(dt(j.ts))}">${esc(clock24(j.ts))}</time>
     <span class="kind ${esc(kind)}">${esc(cap(kind || "entry"))}</span>

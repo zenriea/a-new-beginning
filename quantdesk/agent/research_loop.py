@@ -125,8 +125,10 @@ def record_unexpected_failure(venue: str, exc: BaseException) -> None:
 
 def _record_no_idea(venue: str, prop: dict, author: str, call_id, observation_id: int) -> dict:
     # Snapshot cited checks so later gate changes cannot rewrite the journal.
-    ids = list(dict.fromkeys(int(n) for n in re.findall(
-        r"\b(?:exp|experiment):(\d{1,18})\b", prop["why"], re.I)))[:32]
+    ids: list[int] = []
+    for m in re.finditer(r"\b(?:exps?|experiments?)(?:[:#]|\s+#?)(\d{1,18}(?:\s*,\s*(?:[:#]\s*)?\d{1,18})*)", prop["why"], re.I):
+        ids.extend(int(n) for n in re.findall(r"\d{1,18}", m.group(1)))
+    ids = list(dict.fromkeys(ids))[:32]
     evidence = []
     for eid in ids:
         row = db.q1("SELECT gates FROM experiments WHERE id=? AND venue=? AND status IN ('passed','failed')",
@@ -392,8 +394,12 @@ def probe_blocker(e: dict, operator: bool = False) -> str | None:
     active = db.q1("SELECT COUNT(*) n FROM strategies WHERE probe=1 AND status IN ('active','incubating')")["n"]
     if active >= p["max_active"]:
         return f"{active} probe(s) already running (limit {p['max_active']})"
-    today = db.q1("SELECT COUNT(*) n FROM strategies WHERE probe=1 AND venue=? AND created_at>=?",
-                  (e["venue"], clock.now() - 86400))["n"]
+    today = db.q1(
+        "SELECT COUNT(*) n FROM strategies s WHERE s.probe=1 AND s.venue=? AND s.created_at>=? "
+        "AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.subject_type='experiment' "
+        "AND d.subject_id=s.experiment_id AND d.kind='probe' AND d.author='operator' "
+        "AND json_extract(d.details, '$.strategy_id')=s.id)",
+        (e["venue"], clock.now() - 86400))["n"]
     if today >= p["per_venue_per_day"]:
         return f"{e['venue']} already started {today} probe(s) in the last 24 hours"
     return None
@@ -411,7 +417,7 @@ def ranked_candidates(since: float) -> list[dict]:
         if t.get("total_return") is None:
             continue
         g = db.loads(e["gates"], {}) or {}
-        live = db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND status IN ('active','incubating')", (e["id"],))
+        live = db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND probe=0 AND status IN ('active','incubating')", (e["id"],))
         leakage = db.loads(e["leakage"], {}) or {}
         out.append({"id": e["id"], "title": e["title"], "venue": e["venue"], "status": e["status"],
                     "test_return": t["total_return"], "sharpe": t.get("sharpe"), "trades": t.get("n_trades"),
@@ -495,7 +501,7 @@ def rejudge_experiment(eid: int, analyst=None) -> dict:
         journal.write("system", f"Experiment {eid} cannot be re-judged", "Only finished experiments with stored test "
                       "results can be re-judged.", author="system")
         return {"status": "not_found"}
-    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=?", (eid,)):
+    if db.q1("SELECT 1 FROM strategies WHERE experiment_id=? AND (probe=0 OR status IN ('active','incubating'))", (eid,)):
         journal.write("system", f"Experiment {eid} already has a strategy", "Nothing to re-judge.", author="system")
         return {"status": "exists"}
     h = dict(db.q1("SELECT * FROM hypotheses WHERE id=?", (e["hypothesis_id"],)))

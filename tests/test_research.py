@@ -208,3 +208,30 @@ def test_buy_and_hold_pays_entry_costs():
     costs = dict(backtest_half_spread_bps=0, base_slippage_bps=0, impact_coef=0, taker_fee_bps=25)
     m = buy_and_hold(dict(symbols=["BTC-USD"], open=p, close=p, ts=np.arange(5)), ["BTC-USD"], 0, 5, costs, "CRYPTO")
     assert m["total_return"] < -0.002
+
+
+def test_sandbox_policy_allows_math_and_safe_container_methods():
+    from quantdesk.research.sandbox_policy import PolicyError, check_source
+    ok = (
+        "def signals(o, h, l, c, v, p):\n"
+        "    n = int(p.get('n', 10))\n"
+        "    scale = math.sqrt(n) + math.log(math.e)\n"
+        "    vals = []\n"
+        "    vals.append(scale)\n"
+        "    return c > np.mean(c), c < np.mean(c)\n"
+    )
+    check_source(ok)
+    with pytest.raises(PolicyError):
+        check_source("def signals(o, h, l, c, v, p):\n    return math.system('x'), c\n")
+
+
+def test_bh_curve_and_db_dumps_never_emit_nonfinite_json():
+    import json
+    from quantdesk import db
+    from quantdesk.research.experiment import _bh_curve
+    panel = {"symbols": ["QQQ"], "ts": np.arange(5) * 900, "close": np.array([[100.0], [np.nan], [102.0], [np.nan], [104.0]])}
+    curve = _bh_curve(panel, ["QQQ"], 0, 5)
+    assert all(np.isfinite(v) for v in curve["v"]) and len(curve["v"]) == 3
+    raw = db.dumps({"a": float("nan"), "b": [float("inf"), 1.5], "c": np.array([1.0, np.nan])})
+    assert "NaN" not in raw and "Infinity" not in raw
+    assert json.loads(raw) == {"a": None, "b": [None, 1.5], "c": [1.0, None]}

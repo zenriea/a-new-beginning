@@ -125,7 +125,7 @@ async def security_headers(request: Request, call_next):
     resp.headers["Referrer-Policy"] = "no-referrer"
     if request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
-    elif request.url.path in ("/", "/static/app.js", "/static/app.css"):
+    elif request.url.path in ("/", "/static/app.js", "/static/app.css", "/static/ui-model.mjs"):
         resp.headers["Cache-Control"] = "no-cache"
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
@@ -294,8 +294,9 @@ async def equity(points: int = Query(600, ge=2, le=3000)):
     def f():
         rows = db.q("SELECT ts, equity, benchmark_equity, crypto_benchmark_equity, gross, cash FROM equity_snapshots ORDER BY ts")
         if len(rows) > points:
-            step = len(rows) / points
-            rows = [rows[int(i * step)] for i in range(points)] + [rows[-1]]
+            step = (len(rows) - 1) / (points - 1)
+            idx = sorted({int(round(i * step)) for i in range(points)})
+            rows = [rows[i] for i in idx]
         return [dict(r) for r in rows]
     return await run_in_threadpool(f)
 
@@ -343,8 +344,9 @@ def _rows(sql, params=(), json_fields=()):
 async def experiments(limit: int = Query(100, ge=1, le=500)):
     return await run_in_threadpool(_rows, "SELECT e.id, e.hypothesis_id, e.created_at, e.completed_at, e.venue, e.kind, e.status, "
                                    "e.chosen_params, e.test, e.gates, e.leakage, e.error, h.title, h.author, "
-                                   "s.id AS strategy_id, s.probe AS strategy_probe FROM experiments e "
-                                   "JOIN hypotheses h ON h.id=e.hypothesis_id LEFT JOIN strategies s ON s.experiment_id=e.id "
+                                   "s.id AS strategy_id, s.probe AS strategy_probe, s.status AS strategy_status FROM experiments e "
+                                   "JOIN hypotheses h ON h.id=e.hypothesis_id "
+                                   "LEFT JOIN strategies s ON s.id = (SELECT id FROM strategies WHERE experiment_id=e.id ORDER BY id DESC LIMIT 1) "
                                    "ORDER BY e.id DESC LIMIT ?", (limit,),
                                    ("chosen_params", "test", "gates", "leakage"))
 
@@ -352,7 +354,9 @@ async def experiments(limit: int = Query(100, ge=1, le=500)):
 @app.get("/api/experiments/{eid}", dependencies=[Depends(require_auth)])
 async def experiment(eid: int):
     def f():
-        e = db.row_dict(db.q1("SELECT * FROM experiments WHERE id=?", (eid,)),
+        from ..agent.research_loop import probe_blocker
+        raw = db.q1("SELECT * FROM experiments WHERE id=?", (eid,))
+        e = db.row_dict(raw,
                         ["spec", "windows", "chosen_params", "grid_results", "train", "validation", "test", "challenge",
                          "gates", "leakage", "equity_curve"])
         if not e:
@@ -361,6 +365,7 @@ async def experiment(eid: int):
         e["decisions"] = _rows("SELECT * FROM decisions WHERE subject_type='experiment' AND subject_id=? ORDER BY id",
                                (eid,), ("details",))
         e["strategy"] = db.row_dict(db.q1("SELECT id, name, version, status, probe FROM strategies WHERE experiment_id=? ORDER BY id DESC", (eid,)))
+        e["operator_probe_blocker"] = probe_blocker(dict(raw), operator=True)
         return e
     return await run_in_threadpool(f)
 

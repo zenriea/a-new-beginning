@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import numpy as np
 
-from quantdesk.research.sandbox_policy import BUILTINS_ALLOWED, NP_ALLOWED, check_source
+from quantdesk.research.sandbox_policy import BUILTINS_ALLOWED, MATH_ALLOWED, NP_ALLOWED, check_source
 
 
 def _safe_np():
@@ -51,7 +51,7 @@ def main():
     try:
         check_source(job["code"])
         g = {"__builtins__": _builtins(), "np": _safe_np(), "math": types.SimpleNamespace(
-            **{k: getattr(math, k) for k in ("sqrt", "log", "exp", "fabs", "floor", "ceil", "isfinite", "pi", "e")})}
+            **{k: getattr(math, k) for k in MATH_ALLOWED})}
         exec(compile(job["code"], "<strategy>", "exec"), g)
         fn = g["signals"]
         cols = job["series"]

@@ -56,8 +56,8 @@ def job_due(name: str, every: float) -> bool:
 
 def run_job(name: str, fn, *args):
     now = clock.now()
-    db.ex("INSERT INTO jobs(name, last_started_at, run_count) VALUES(?,?,1) ON CONFLICT(name) DO UPDATE SET "
-          "last_started_at=excluded.last_started_at, run_count=jobs.run_count+1", (name, now))
+    db.ex("INSERT INTO jobs(name, last_started_at, last_status, run_count) VALUES(?,?,'running',1) ON CONFLICT(name) DO UPDATE SET "
+          "last_started_at=excluded.last_started_at, last_status='running', run_count=jobs.run_count+1", (name, now))
     try:
         out = fn(*args)
         db.ex("UPDATE jobs SET last_finished_at=?, last_status='ok', last_error=NULL WHERE name=?", (clock.now(), name))
@@ -94,6 +94,19 @@ def recover(prev_heartbeat: float | None) -> dict:
                       "It was not completed and will not be resumed half-way (that could mix data snapshots). "
                       "The idea can be re-tested as a new experiment.", refs={"experiment_id": e["id"]}, author="system",
                       dedupe_key=f"interrupted:{e['id']}")
+    # Close worker-owned LLM calls and jobs killed mid-flight; leave API-owned 'question' calls untouched.
+    db.ex("UPDATE llm_calls SET status='interrupted', error='worker restarted during the call' "
+          "WHERE status='pending' AND purpose!='question'")
+    for j in db.q("SELECT name, last_finished_at FROM jobs "
+                  "WHERE last_started_at IS NOT NULL AND (last_finished_at IS NULL OR last_started_at > last_finished_at)"):
+        db.ex("UPDATE jobs SET last_started_at=?, last_finished_at=?, last_status='interrupted', "
+              "last_error='worker restarted while job was running' WHERE name=?",
+              (j["last_finished_at"], now, j["name"]))
+    # Prune orphaned data_status rows for symbols no longer tracked by the desk.
+    tracked = {s for syms in market_symbols().values() for s in syms}
+    for r in db.q("SELECT key FROM data_status"):
+        if r["key"].split(":", 1)[-1] not in tracked:
+            db.ex("DELETE FROM data_status WHERE key=?", (r["key"],))
     db.ex("DELETE FROM jobs WHERE name='research'")  # pre-0.2 shared research clock, replaced by research:<venue>
     info["retired_for_bar_size"] = retire_on_timeframe_change() + retire_stale_bar_size_strategies()
     chk = ledger.integrity_check()

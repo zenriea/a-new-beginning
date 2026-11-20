@@ -71,22 +71,28 @@ def _ts(panel, i):
 
 def _curve(res: B.BTResult, max_points: int = 300) -> dict:
     eq = res.equity
-    if eq.size == 0:
+    if eq.size == 0 or not np.isfinite(eq[0]) or eq[0] <= 0:
         return {"ts": [], "v": []}
     idx = np.linspace(0, eq.size - 1, min(max_points, eq.size)).astype(int)
-    return {"ts": [int(res.ts[i]) for i in idx], "v": [round(float(eq[i] / eq[0]), 5) for i in idx]}
+    pts = [(int(res.ts[i]), round(float(eq[i] / eq[0]), 5)) for i in idx if np.isfinite(eq[i])]
+    return {"ts": [p[0] for p in pts], "v": [p[1] for p in pts]}
 
 
 def _bh_curve(panel, symbols, start, end, max_points=300) -> dict:
     cols = [panel["symbols"].index(s) for s in symbols if s in panel["symbols"]]
-    if not cols:
+    if not cols or end <= start:
         return {"ts": [], "v": []}
     c = panel["close"][start:end, cols]
     first = np.array([c[np.isfinite(c[:, k]), k][0] if np.isfinite(c[:, k]).any() else np.nan
                       for k in range(len(cols))])
-    rel = np.nanmean(c / first, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ratio = c / first
+        valid = np.isfinite(ratio)
+        count = valid.sum(axis=1)
+        rel = np.where(count > 0, np.where(valid, ratio, 0.0).sum(axis=1) / count, np.nan)
     idx = np.linspace(0, rel.size - 1, min(max_points, rel.size)).astype(int)
-    return {"ts": [int(panel["ts"][start + i]) for i in idx], "v": [round(float(rel[i]), 5) for i in idx]}
+    pts = [(int(panel["ts"][start + i]), round(float(rel[i]), 5)) for i in idx if np.isfinite(rel[i])]
+    return {"ts": [p[0] for p in pts], "v": [p[1] for p in pts]}
 
 
 def _perturb(params: dict) -> list[dict]:
