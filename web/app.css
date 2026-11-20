@@ -1,4 +1,4 @@
-/* QuantDesk — dark-first trading console: near-black panels, hairline seams, amber accent, green/red P&L.
+/* QuantDesk — dark-first working console: graphite panels, hairline seams, syntax-derived state colour.
    Every colour comes from these tokens; --live is reserved for capital that is live right now. */
 :root {
   color-scheme: light;
@@ -26,38 +26,38 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0a0b0d;
-    --surface-1: #111316; --surface-2: #16191d; --surface-3: #1d2126;
-    --border: #23272d; --border-strong: #30353d;
-    --text-primary: #e8e6e3; --text-secondary: #a9adb3; --text-muted: #868c94;
-    --series-1: #ffab00; --series-2: #9aa0a8; --series-3: #5f656d;
-    --accent: #ffab00; --accent-2: #ffc44d; --accent-ink: #0a0b0d; --accent-soft: rgba(255, 171, 0, .12);
-    --live: #2bd4e6; --live-soft: rgba(43, 212, 230, .13);
-    --good: #22c97a; --good-mark: #1db56c; --good-soft: rgba(34, 201, 122, .13);
-    --warning: #ff7a1a; --warning-mark: #f06a0a; --warning-soft: rgba(255, 122, 26, .14);
-    --critical: #ff5466; --critical-mark: #f23645; --critical-soft: rgba(242, 54, 69, .13);
-    --violet: #b48cff; --chip: #16191d;
+    --bg: #0d1117;
+    --surface-1: #151a22; --surface-2: #1b212b; --surface-3: #232a35;
+    --border: #262c36; --border-strong: #353c48;
+    --text-primary: #e6edf3; --text-secondary: #b1bac4; --text-muted: #8b949e;
+    --series-1: #79c0ff; --series-2: #9aa4b2; --series-3: #6b7686;
+    --accent: #79c0ff; --accent-2: #a5d6ff; --accent-ink: #0d1117; --accent-soft: rgba(121, 192, 255, .12);
+    --live: #39c5cf; --live-soft: rgba(57, 197, 207, .13);
+    --good: #56d364; --good-mark: #3fb950; --good-soft: rgba(63, 185, 80, .13);
+    --warning: #e3b341; --warning-mark: #d29922; --warning-soft: rgba(210, 153, 34, .14);
+    --critical: #ff7b72; --critical-mark: #f85149; --critical-soft: rgba(248, 81, 73, .12);
+    --violet: #c678dd; --chip: #1b212b;
     --shadow: none;
     --shadow-lg: 0 16px 48px rgba(0, 0, 0, .55);
-    --on-warning: #1a1300; --grid-dot: rgba(232, 230, 227, .06);
+    --on-warning: #1a1300; --grid-dot: rgba(230, 237, 243, .07);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0a0b0d;
-  --surface-1: #111316; --surface-2: #16191d; --surface-3: #1d2126;
-  --border: #23272d; --border-strong: #30353d;
-  --text-primary: #e8e6e3; --text-secondary: #a9adb3; --text-muted: #868c94;
-  --series-1: #ffab00; --series-2: #9aa0a8; --series-3: #5f656d;
-  --accent: #ffab00; --accent-2: #ffc44d; --accent-ink: #0a0b0d; --accent-soft: rgba(255, 171, 0, .12);
-  --live: #2bd4e6; --live-soft: rgba(43, 212, 230, .13);
-  --good: #22c97a; --good-mark: #1db56c; --good-soft: rgba(34, 201, 122, .13);
-  --warning: #ff7a1a; --warning-mark: #f06a0a; --warning-soft: rgba(255, 122, 26, .14);
-  --critical: #ff5466; --critical-mark: #f23645; --critical-soft: rgba(242, 54, 69, .13);
-  --violet: #b48cff; --chip: #16191d;
+  --bg: #0d1117;
+  --surface-1: #151a22; --surface-2: #1b212b; --surface-3: #232a35;
+  --border: #262c36; --border-strong: #353c48;
+  --text-primary: #e6edf3; --text-secondary: #b1bac4; --text-muted: #8b949e;
+  --series-1: #79c0ff; --series-2: #9aa4b2; --series-3: #6b7686;
+  --accent: #79c0ff; --accent-2: #a5d6ff; --accent-ink: #0d1117; --accent-soft: rgba(121, 192, 255, .12);
+  --live: #39c5cf; --live-soft: rgba(57, 197, 207, .13);
+  --good: #56d364; --good-mark: #3fb950; --good-soft: rgba(63, 185, 80, .13);
+  --warning: #e3b341; --warning-mark: #d29922; --warning-soft: rgba(210, 153, 34, .14);
+  --critical: #ff7b72; --critical-mark: #f85149; --critical-soft: rgba(248, 81, 73, .12);
+  --violet: #c678dd; --chip: #1b212b;
   --shadow: none;
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, .55);
-  --on-warning: #1a1300; --grid-dot: rgba(232, 230, 227, .06);
+  --on-warning: #1a1300; --grid-dot: rgba(230, 237, 243, .07);
 }
 
 /* ------------------------------------------------------------------ base */
