@@ -12,6 +12,7 @@ set "ANTHROPIC_API_KEY="
 set "QD_LLM_API_KEY="
 set "GEMINI_API_KEY="
 set "OPENROUTER_API_KEY="
+set "NVIDIA_API_KEY="
 set "ALPACA_API_KEY_ID="
 set "ALPACA_API_SECRET_KEY="
 title QuantDesk - Automated Tests
