@@ -376,7 +376,8 @@ def probe_blocker(e: dict, operator: bool = False) -> str | None:
         kind = "probe" if existing["probe"] else "strategy"
         if existing["status"] in ("active", "incubating"):
             return f"already trading as a {kind}"
-        return f"already ran as a {kind} ({existing['status']})"
+        if not operator:  # only the operator may re-run a retired idea; the desk never re-probes on its own
+            return f"already ran as a {kind} ({existing['status']})"
     if settings.get("agent").get("emergency_stop"):
         return "emergency stop is active"
     if operator:
