@@ -975,7 +975,9 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 6px; font: 600 12px v
   color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; }
 .keys-hint:hover { color: var(--text-primary); }
 .keys-hint kbd { min-width: 20px; padding: 0 5px; }
-@media (hover: none) { .keys-hint { display: none; } }
+.about-hint { display: flex; }
+.about-hint svg { width: 16px; height: 16px; }
+@media (hover: none) { #btn-keys { display: none; } }
 
 /* read-only view: people you show results to see the desk, never its controls */
 :root[data-role="viewer"] .operator-only { display: none !important; }

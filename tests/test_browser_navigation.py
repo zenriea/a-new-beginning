@@ -56,4 +56,11 @@ def test_workspace_navigation(env, monkeypatch):
         pw.expect(research).to_have_attribute("aria-current", "location")
         pw.expect(page.locator("#records")).to_be_focused()
         assert page.evaluate("document.documentElement.scrollWidth") == 1440
+
+        page.get_by_role("button", name="About QuantDesk").click()
+        about = page.get_by_role("dialog", name="About QuantDesk")
+        pw.expect(about).to_be_visible()
+        pw.expect(about.get_by_role("button", name="Close")).to_be_focused()
+        page.keyboard.press("Escape")
+        pw.expect(about).to_be_hidden()
         browser.close()

@@ -1670,6 +1670,20 @@ function showShortcuts() {
   document.body.appendChild(d); d.showModal(); d.querySelector("button").focus();
 }
 $("#btn-keys").addEventListener("click", showShortcuts);
+function showAbout() {
+  if ($(".confirm-dialog.about")) return;
+  const d = document.createElement("dialog");
+  d.className = "confirm-dialog about";
+  d.setAttribute("aria-labelledby", "about-title");
+  d.innerHTML = `<form method="dialog"><h2 id="about-title">About QuantDesk</h2>
+    <p>QuantDesk is a paper-trading desk run by an AI analyst. The analyst proposes strategy ideas, and fixed statistical gates backtest them on data the idea never saw. Only ideas that pass get a small paper probe.</p>
+    <p>Every trade is simulated. No real money is involved, and nothing here is investment advice.</p>
+    <p><a href="https://github.com/zenriea/quant-desk" target="_blank" rel="noopener noreferrer">Source code on GitHub</a></p>
+    <div class="confirm-actions"><button class="btn" value="cancel">Close</button></div></form>`;
+  d.addEventListener("close", () => d.remove());
+  document.body.appendChild(d); d.showModal(); d.querySelector("button").focus();
+}
+$("#btn-about").addEventListener("click", showAbout);
 document.addEventListener("keydown", (e) => {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || $("#app").classList.contains("hidden")) return;
   const t = e.target;
