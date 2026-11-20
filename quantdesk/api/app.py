@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from .. import clock, db, settings, venues
 from ..agent import journal
-from ..agent.llm import budget_status
+from ..agent.llm import budget_status, llm_status
 from ..config import DEFAULT_SETTINGS, GATE_PRESETS, SETTING_BOUNDS, load_config
 from ..marketdata import store
 from ..research.sandbox import isolation_report
@@ -244,9 +244,10 @@ def _state() -> dict:
     if cfg.market_data_mode != "synthetic" and not cfg.alpaca_configured:
         nasdaq = set(uni["NASDAQ"])   # already covered by the "not configured" alert
         bad = [d for d in bad if d["key"].split(":", 1)[-1] not in nasdaq]
+    llm_info = llm_status(cfg)
     return {
         "now": now,
-        "mode": {"paper": True, "llm": cfg.llm_label,
+        "mode": {"paper": True, "llm": llm_info["label"],
                  "market_data": cfg.market_data_mode, "alpaca_configured": cfg.alpaca_configured,
                  "alpaca_feed": cfg.alpaca_feed},
         "worker": {"alive": bool(hb and now - hb["heartbeat_at"] < 60),
@@ -523,8 +524,8 @@ async def system():
                 "audit": _rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 50", (), ("detail",)),
                 "risk_events": _rows("SELECT * FROM risk_events ORDER BY id DESC LIMIT 50", (), ("detail",)),
                 "integrity": ledger.integrity_check(), "sandbox": isolation_report(),
-                "llm": {"model": cfg.llm_label, "provider": cfg.llm_provider, "effort": cfg.llm_effort,
-                        "knowledge_cutoff": cfg.llm_knowledge_cutoff, "demo": cfg.demo_llm}}
+                "llm": {"model": (li := llm_status(cfg))["label"], "provider": li["provider"], "effort": cfg.llm_effort,
+                        "knowledge_cutoff": cfg.llm_knowledge_cutoff, "demo": li["demo"], "helpers": li["helpers"]}}
     return await run_in_threadpool(f)
 
 

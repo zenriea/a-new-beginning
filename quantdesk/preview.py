@@ -41,7 +41,7 @@ def preview_environment(data_dir: Path, port: int, parent: dict | None = None) -
     env = dict(os.environ if parent is None else parent)
     for key in list(env):
         if key.upper().startswith(("QD_", "ALPACA_", "APCA_")) or key.upper() in {
-                "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
+                "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY",
                 "GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "TOGETHER_API_KEY", "PORT"}:
             del env[key]
     env.update({
@@ -49,7 +49,7 @@ def preview_environment(data_dir: Path, port: int, parent: dict | None = None) -
         "QD_DATA_DIR": str(data_dir), "QD_DB_PATH": str(data_dir / "quantdesk.db"),
         "QD_MARKET_DATA": "synthetic", "QD_LLM_PROVIDER": "none",
         "ANTHROPIC_API_KEY": "", "QD_LLM_API_KEY": "",
-        "GEMINI_API_KEY": "", "OPENROUTER_API_KEY": "",
+        "GEMINI_API_KEY": "", "OPENROUTER_API_KEY": "", "NVIDIA_API_KEY": "",
         "ALPACA_API_KEY_ID": "", "ALPACA_API_SECRET_KEY": "",
         "QD_BIND_HOST": "127.0.0.1", "QD_PORT": str(port),
         "QD_ADMIN_PASSWORD": "", "QD_VIEWER_PASSWORD": "", "QD_COOKIE_SECURE": "0",

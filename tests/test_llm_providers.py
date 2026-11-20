@@ -205,4 +205,82 @@ def test_openrouter_helper_is_tried_before_gemini(monkeypatch):
     from quantdesk.agent import llm
     monkeypatch.setenv("GEMINI_API_KEY", "g")
     monkeypatch.setenv("OPENROUTER_API_KEY", "o")
+    monkeypatch.setenv("NVIDIA_API_KEY", "")
     assert [h.route["name"] for h in llm.free_helpers()][:2] == ["openrouter", "gemini"]
+
+
+def test_nvidia_preset_and_comma_separated_free_models(env, monkeypatch):
+    from quantdesk.agent import llm
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-k")
+    monkeypatch.setenv("QD_OPENROUTER_MODEL", "model-a:free, model-b:free, model-a:free")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-k")
+    monkeypatch.setenv("QD_NVIDIA_MODEL", "qwen/qwen3-coder, meta/llama-3.3-70b-instruct")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-k")
+    helpers = llm.free_helpers()
+    assert [(h.route["name"], h.model) for h in helpers] == [
+        ("openrouter", "model-a:free"),
+        ("openrouter", "model-b:free"),
+        ("nvidia", "qwen/qwen3-coder"),
+        ("nvidia", "meta/llama-3.3-70b-instruct"),
+        ("gemini", "gemini-3.8-flash"),
+    ]
+    assert helpers[2].route["base_url"] == "https://integrate.api.nvidia.com/v1"
+
+
+def test_free_only_mode_reports_real_ai_in_status_and_api(env, monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+    from quantdesk.agent.llm import llm_status
+    from quantdesk.config import load_config
+    monkeypatch.setenv("QD_ADMIN_PASSWORD", "correct horse")
+    monkeypatch.setenv("QD_LLM_PROVIDER", "none")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-k")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-k")
+    cfg = load_config(reload=True)
+    assert cfg.demo_llm is True
+    info = llm_status(cfg)
+    assert info["demo"] is False
+    assert "openrouter" in info["label"] and "nvidia" in info["label"]
+    import quantdesk.api.app as appmod
+    appmod = importlib.reload(appmod)
+    c = TestClient(appmod.app)
+    c.post("/api/login", json={"password": "correct horse"})
+    st = c.get("/api/state").json()
+    sy = c.get("/api/system").json()
+    assert st["mode"]["llm"] != "demo" and "nvidia" in st["mode"]["llm"]
+    assert sy["llm"]["demo"] is False and len(sy["llm"]["helpers"]) == 2
+
+
+def test_free_helper_records_zero_cost_even_when_served_model_differs(compat):
+    from quantdesk import db
+    from quantdesk.agent.llm import LLM
+    route = {"name": "openrouter", "base_url": "https://openrouter.example/v1", "api_key": "k", "model": "foo:free"}
+    # Provider echoes back an un-suffixed served model name that is not in FREE_MODELS.
+    srv = FakeServer([ok('{"answer": "ok", "n": 1}', model="foo-2026-11")])
+    _, cid = LLM(http_post=srv, route=route).call("question", "s", "u", SCHEMA)
+    row = db.q1("SELECT cost_usd, served_model FROM llm_calls WHERE id=?", (cid,))
+    assert row["served_model"] == "foo-2026-11" and row["cost_usd"] == 0.0
+
+
+def test_extract_json_strips_think_blocks():
+    from quantdesk.agent.llm import extract_json
+    raw = '<think>Consider {"draft": true} before answering.</think>\n{"answer": "final", "n": 4}'
+    assert extract_json(raw) == {"answer": "final", "n": 4}
+
+
+def test_second_opinion_prefers_different_provider(compat):
+    from quantdesk.agent.llm import LLM, Router
+    r1 = {"name": "openrouter", "base_url": "https://or.example/v1", "api_key": "k", "model": "or-1"}
+    r2 = {"name": "openrouter", "base_url": "https://or.example/v1", "api_key": "k", "model": "or-2"}
+    r3 = {"name": "nvidia", "base_url": "https://nv.example/v1", "api_key": "k", "model": "nv-1"}
+    s1 = FakeServer([ok('{"answer": "or1", "n": 1}')])
+    s2 = FakeServer([ok('{"answer": "or2", "n": 2}')])
+    s3 = FakeServer([ok('{"answer": "nv1", "n": 3}')])
+    router = Router(LLM(http_post=FakeServer([])), [LLM(http_post=s1, route=r1), LLM(http_post=s2, route=r2),
+                                                    LLM(http_post=s3, route=r3)])
+    # Primary fails or unused: call free-first so last is or-1, then second_opinion should pick nvidia first
+    router.primary = None
+    assert router.call("decision", "s", "u", SCHEMA)[0]["answer"] == "or1"
+    second = router.second_opinion("decision_check", "s", "u", SCHEMA)
+    assert second is not None and second[0]["answer"] == "nv1"
+    assert s2.requests == [] and len(s3.requests) == 1

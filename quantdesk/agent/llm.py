@@ -137,8 +137,8 @@ def _coerce_ints(obj, schema):
 
 
 def extract_json(text: str):
-    """Parse a JSON object from model output, tolerating ```json fences or surrounding prose."""
-    t = text.strip()
+    """Parse a JSON object from model output, tolerating <think> blocks, ```json fences or prose."""
+    t = re.sub(r"<think>.*?</think>", "", text, flags=re.S | re.I).strip()
     m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", t, re.S)
     if m:
         t = m.group(1)
@@ -231,10 +231,11 @@ class LLM:
                      (clock.now(), purpose, self.model, "pending", json.dumps(request)))
 
     def _record_end(self, cid, status, err, served, usage, text) -> None:
+        cost = 0.0 if self.route is not None else cost_of(served or self.model, usage)
         db.ex("UPDATE llm_calls SET status=?, error=?, served_model=?, input_tokens=?, output_tokens=?, "
               "cache_write_tokens=?, cache_read_tokens=?, cost_usd=?, response=? WHERE id=?",
               (status, err, served, usage["input_tokens"], usage["output_tokens"], usage.get("cache_write_tokens", 0),
-               usage.get("cache_read_tokens", 0), cost_of(served or self.model, usage), (text or "")[:200000], cid))
+               usage.get("cache_read_tokens", 0), cost, (text or "")[:200000], cid))
 
     def call(self, purpose: str, system: str, user: str, schema: dict, max_tokens: int = 16000) -> tuple[dict, int]:
         if self.provider == "openai_compatible":
@@ -249,7 +250,7 @@ class LLM:
         post = self._post or requests.post
         base = self.route["base_url"] if self.route else self.cfg.llm_base_url
         api_key = self.route["api_key"] if self.route else self.cfg.llm_api_key
-        quirks = _compat_quirks.setdefault(base, {"format": "json_schema", "tok": "max_tokens"})
+        quirks = _compat_quirks.setdefault((base, self.model), {"format": "json_schema", "tok": "max_tokens"})
         instruction = ("\n\nRespond with ONE JSON object and nothing else. It must match this JSON Schema "
                        "(all listed fields required; use null where allowed):\n" + json.dumps(schema))
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user + instruction}]
@@ -289,8 +290,8 @@ class LLM:
                                  {"input_tokens": 0, "output_tokens": 0}, r.text)
                 self._sleep(4 * transient)
                 continue
-            if r.status_code == 400 and self._adapt(quirks, r.text):
-                self._record_end(cid, "retry", f"400, adapting request: {r.text[:300]}", None,
+            if r.status_code in (400, 422) and self._adapt(quirks, r.text):
+                self._record_end(cid, "retry", f"{r.status_code}, adapting request: {r.text[:300]}", None,
                                  {"input_tokens": 0, "output_tokens": 0}, r.text)
                 continue
             if r.status_code >= 400:
@@ -412,15 +413,20 @@ class LLM:
 
 
 # ------------------------------------------------------------------ multi-model routing
-# Free-tier helpers switch on when their key is in the environment. Model names can be
-# overridden because free model line-ups change often.
+# Free-tier helpers switch on when their key is in the environment. Model env vars accept a
+# single model or a comma-separated fallback list (because free model line-ups change often).
 # Tried in this order. Gemini's free tier allows only ~20 requests a day, so it is the backup.
 FREE_PRESETS = {
     "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", "QD_OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free"),
+    "nvidia": ("NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1", "QD_NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
     "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "QD_GEMINI_MODEL", "gemini-3.8-flash"),
 }
 # Frequent, long-prompt work goes to free models first; the paid model is the fallback.
 FREE_FIRST = {"hypothesis", "hypothesis_repair", "review", "question"}
+
+
+def _split_models(spec: str) -> list[str]:
+    return list(dict.fromkeys(m.strip() for m in spec.split(",") if m.strip()))
 
 
 def free_helpers() -> list[LLM]:
@@ -428,11 +434,34 @@ def free_helpers() -> list[LLM]:
     cfg = load_config()
     primary_base = cfg.llm_base_url if cfg.llm_provider == "openai_compatible" else None
     out = []
-    for name, (key_env, base, model_env, model) in FREE_PRESETS.items():
+    for name, (key_env, base, model_env, default_model) in FREE_PRESETS.items():
         key = _env(key_env)
-        if key and base != primary_base:
-            out.append(LLM(route={"name": name, "base_url": base, "api_key": key, "model": _env(model_env, model)}))
+        if not key:
+            continue
+        models = _split_models(_env(model_env, default_model)) or _split_models(default_model)
+        for model in models:
+            if base == primary_base and model == cfg.llm_model:
+                continue
+            out.append(LLM(route={"name": name, "base_url": base, "api_key": key, "model": model}))
     return out
+
+
+def llm_status(cfg=None) -> dict:
+    """User-facing LLM mode summary, accounting for free-only setups with no paid primary key."""
+    cfg = cfg or load_config()
+    helpers = free_helpers()
+    helper_labels = [f"{h.model} ({h.route['name']})" for h in helpers]
+    if not cfg.demo_llm:
+        return {"label": cfg.llm_label, "provider": cfg.llm_provider, "demo": False, "helpers": helper_labels}
+    if helpers:
+        first = helpers[0]
+        providers = list(dict.fromkeys(h.route["name"] for h in helpers))
+        if len(helpers) == 1:
+            label = f"{first.model} ({first.route['name']}, free)"
+        else:
+            label = f"{first.model} (+{len(helpers) - 1} free: {', '.join(providers)})"
+        return {"label": label, "provider": first.route["name"], "demo": False, "helpers": helper_labels}
+    return {"label": "demo", "provider": cfg.llm_provider, "demo": True, "helpers": []}
 
 
 class Router:
@@ -477,10 +506,14 @@ class Router:
         raise err
 
     def second_opinion(self, purpose, system, user, schema, max_tokens=16000):
-        """A different model's answer, or None when no other model is configured or reachable."""
+        """A different model's answer, preferring an independent provider when available."""
         others = [h for h in self.helpers if h is not self.last]
         if not others:
             return None
+        last_provider = self.last.route["name"] if self.last and self.last.route else None
+        if last_provider:
+            others = ([h for h in others if h.route["name"] != last_provider]
+                      + [h for h in others if h.route["name"] == last_provider])
         try:
             return self.call(purpose, system, user, schema, max_tokens, chain=others)
         except (LLMError, BudgetExceeded):

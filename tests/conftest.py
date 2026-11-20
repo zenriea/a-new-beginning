@@ -15,6 +15,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("QD_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("QD_MARKET_DATA", "synthetic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("QD_LLM_API_KEY", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("NVIDIA_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("QD_ADMIN_PASSWORD", "")
     monkeypatch.setenv("QD_ENV_FILE", str(tmp_path / "none.env"))
     from quantdesk import clock, db

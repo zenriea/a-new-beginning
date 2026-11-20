@@ -23,12 +23,13 @@ def test_preview_environment_overrides_live_settings_and_credentials(tmp_path, m
               "QD_MARKET_DATA": "live", "QD_LLM_PROVIDER": "gemini", "QD_LLM_API_KEY": "secret",
               "QD_LLM_BASE_URL": "https://provider.invalid", "QD_SESSION_SECRET": "live-secret",
               "ALPACA_API_KEY_ID": "live-key", "ANTHROPIC_API_KEY": "secret",
-              "GEMINI_API_KEY": "secret-gemini", "OPENROUTER_API_KEY": "secret-or", "PORT": "9999"}
+              "GEMINI_API_KEY": "secret-gemini", "OPENROUTER_API_KEY": "secret-or",
+              "NVIDIA_API_KEY": "secret-nv", "PORT": "9999"}
     env = preview.preview_environment(tmp_path, 8127, parent)
     assert parent["QD_DB_PATH"] == "production.db"  # input isn't mutated
     assert env["PATH"] == "keep" and "PORT" not in env
     assert "secret" not in str(env) and "live-key" not in str(env)
-    assert env["OPENROUTER_API_KEY"] == "" and env["GEMINI_API_KEY"] == ""
+    assert env["OPENROUTER_API_KEY"] == "" and env["GEMINI_API_KEY"] == "" and env["NVIDIA_API_KEY"] == ""
     monkeypatch.setattr(os, "environ", env)
     from quantdesk.config import load_config
     cfg = load_config(reload=True)
@@ -130,4 +131,4 @@ def test_windows_launchers_use_quoted_project_relative_python():
         assert '".venv\\Scripts\\python.exe"' in text and "PYTHONUTF8=1" in text
     tests = (root / "Run Tests.cmd").read_text()
     assert "QD_DB_PATH=" in tests and "QD_LLM_PROVIDER=none" in tests
-    assert 'set "GEMINI_API_KEY="' in tests and 'set "OPENROUTER_API_KEY="' in tests
+    assert 'set "GEMINI_API_KEY="' in tests and 'set "OPENROUTER_API_KEY="' in tests and 'set "NVIDIA_API_KEY="' in tests
