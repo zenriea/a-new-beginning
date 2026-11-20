@@ -101,6 +101,18 @@ def test_operator_probe_overrides_return_rule_but_not_duplicates(env):
     assert db.q1("SELECT 1 FROM journal WHERE title LIKE '%probe not started'")
 
 
+def test_operator_can_rerun_a_retired_probe_but_the_desk_cannot(env):
+    from quantdesk import db
+    from quantdesk.agent.research_loop import probe_blocker, start_probe
+    eid = _experiment()
+    sid = start_probe(eid, origin="operator")
+    db.ex("UPDATE strategies SET status='retired' WHERE id=?", (sid,))
+    e = dict(db.q1("SELECT * FROM experiments WHERE id=?", (eid,)))
+    assert probe_blocker(e) == "already ran as a probe (retired)"
+    again = start_probe(eid, origin="operator")
+    assert again and db.q1("SELECT version FROM strategies WHERE id=?", (again,))["version"] == 2
+
+
 def test_probes_expire(env):
     from quantdesk import clock, db
     from quantdesk.agent.research_loop import expire_probes, start_probe
